@@ -22,6 +22,8 @@ import (
 	"github.com/bytebase/bytebase/plugin/db"
 	"github.com/bytebase/bytebase/plugin/db/util"
 	"github.com/bytebase/bytebase/plugin/vcs"
+	"github.com/bytebase/bytebase/server/component/activity"
+	"github.com/bytebase/bytebase/server/utils"
 )
 
 func (s *Server) registerIssueRoutes(g *echo.Group) {
@@ -196,12 +198,12 @@ func (s *Server) registerIssueRoutes(g *echo.Group) {
 			if *issuePatch.AssigneeID == issue.AssigneeID {
 				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Cannot set assignee with user id %d because it's already the case", *issuePatch.AssigneeID))
 			}
-			stage := getActiveStage(issue.Pipeline.StageList)
+			stage := utils.GetActiveStage(issue.Pipeline)
 			if stage == nil {
 				// all stages have finished, use the last stage
 				stage = issue.Pipeline.StageList[len(issue.Pipeline.StageList)-1]
 			}
-			ok, err := s.TaskScheduler.canPrincipalBeAssignee(ctx, *issuePatch.AssigneeID, stage.EnvironmentID, issue.ProjectID, issue.Type)
+			ok, err := s.TaskScheduler.CanPrincipalBeAssignee(ctx, *issuePatch.AssigneeID, stage.EnvironmentID, issue.ProjectID, issue.Type)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check if the assignee can be changed").SetInternal(err)
 			}
@@ -223,7 +225,7 @@ func (s *Server) registerIssueRoutes(g *echo.Group) {
 
 		// cancel external approval on assignee change
 		if issuePatch.AssigneeID != nil {
-			if err := s.ApplicationRunner.CancelExternalApproval(ctx, issue.ID, externalApprovalCancelReasonReassigned); err != nil {
+			if err := s.ApplicationRunner.CancelExternalApproval(ctx, issue.ID, api.ExternalApprovalCancelReasonReassigned); err != nil {
 				log.Error("failed to cancel external approval on assignee change", zap.Int("issue_id", issue.ID), zap.Error(err))
 			}
 		}
@@ -274,10 +276,9 @@ func (s *Server) registerIssueRoutes(g *echo.Group) {
 				Level:       api.ActivityInfo,
 				Payload:     string(payload),
 			}
-			_, err := s.ActivityManager.CreateActivity(ctx, activityCreate, &ActivityMeta{
-				issue: updatedIssue,
-			})
-			if err != nil {
+			if _, err := s.ActivityManager.CreateActivity(ctx, activityCreate, &activity.Metadata{
+				Issue: updatedIssue,
+			}); err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to create activity after updating issue: %v", updatedIssue.Name)).SetInternal(err)
 			}
 		}
@@ -312,7 +313,7 @@ func (s *Server) registerIssueRoutes(g *echo.Group) {
 			return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("Issue ID not found: %d", id))
 		}
 
-		updatedIssue, err := s.TaskScheduler.changeIssueStatus(ctx, issue, issueStatusPatch.Status, issueStatusPatch.UpdaterID, issueStatusPatch.Comment)
+		updatedIssue, err := s.TaskScheduler.ChangeIssueStatus(ctx, issue, issueStatusPatch.Status, issueStatusPatch.UpdaterID, issueStatusPatch.Comment)
 		if err != nil {
 			if common.ErrorCode(err) == common.NotFound {
 				return echo.NewHTTPError(http.StatusNotFound).SetInternal(err)
@@ -349,13 +350,13 @@ func (s *Server) createIssue(ctx context.Context, issueCreate *api.IssueCreate) 
 	}
 	// Try to find a more appropriate assignee if the current assignee is the system bot, indicating that the caller might not be sure about who should be the assignee.
 	if issueCreate.AssigneeID == api.SystemBotID {
-		assigneeID, err := s.TaskScheduler.getDefaultAssigneeID(ctx, firstEnvironmentID, issueCreate.ProjectID, issueCreate.Type)
+		assigneeID, err := s.TaskScheduler.GetDefaultAssigneeID(ctx, firstEnvironmentID, issueCreate.ProjectID, issueCreate.Type)
 		if err != nil {
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to find a default assignee").SetInternal(err)
 		}
 		issueCreate.AssigneeID = assigneeID
 	}
-	ok, err := s.TaskScheduler.canPrincipalBeAssignee(ctx, issueCreate.AssigneeID, firstEnvironmentID, issueCreate.ProjectID, issueCreate.Type)
+	ok, err := s.TaskScheduler.CanPrincipalBeAssignee(ctx, issueCreate.AssigneeID, firstEnvironmentID, issueCreate.ProjectID, issueCreate.Type)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to check if the assignee can be set for the new issue").SetInternal(err)
 	}
@@ -363,42 +364,37 @@ func (s *Server) createIssue(ctx context.Context, issueCreate *api.IssueCreate) 
 		return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Cannot set assignee with user id %d", issueCreate.AssigneeID))
 	}
 
-	pipeline, err := s.createPipeline(ctx, issueCreate, pipelineCreate)
-	if err != nil {
-		return nil, err
-	}
-
 	if issueCreate.ValidateOnly {
-		issue, err := s.store.CreateIssueValidateOnly(ctx, pipeline, issueCreate)
+		issue, err := s.store.CreateIssueValidateOnly(ctx, pipelineCreate, issueCreate)
 		if err != nil {
 			return nil, err
 		}
 		return issue, nil
 	}
 
+	pipeline, err := s.createPipeline(ctx, issueCreate, pipelineCreate)
+	if err != nil {
+		return nil, err
+	}
 	issueCreate.PipelineID = pipeline.ID
 	issue, err := s.store.CreateIssue(ctx, issueCreate)
 	if err != nil {
 		return nil, err
 	}
 	// Create issue subscribers.
+	// TODO(p0ny): create subscriber in batch.
 	for _, subscriberID := range issueCreate.SubscriberIDList {
 		subscriberCreate := &api.IssueSubscriberCreate{
 			IssueID:      issue.ID,
 			SubscriberID: subscriberID,
 		}
-		_, err := s.store.CreateIssueSubscriber(ctx, subscriberCreate)
-		if err != nil {
+		if _, err := s.store.CreateIssueSubscriber(ctx, subscriberCreate); err != nil {
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to add subscriber %d after creating issue %d", subscriberID, issue.ID)).SetInternal(err)
 		}
 	}
 
-	if err := s.schedulePipelineTaskCheck(ctx, issue.Pipeline); err != nil {
+	if err := s.TaskCheckScheduler.SchedulePipelineTaskCheck(ctx, issue.Pipeline); err != nil {
 		return nil, errors.Wrapf(err, "failed to schedule task check after creating the issue: %v", issue.Name)
-	}
-
-	if err := s.TaskScheduler.ScheduleActiveStage(ctx, issue.Pipeline); err != nil {
-		return nil, errors.Wrapf(err, "failed to schedule task after creating the issue: %v", issue.Name)
 	}
 
 	createActivityPayload := api.ActivityIssueCreatePayload{
@@ -416,36 +412,15 @@ func (s *Server) createIssue(ctx context.Context, issueCreate *api.IssueCreate) 
 		Level:       api.ActivityInfo,
 		Payload:     string(bytes),
 	}
-	_, err = s.ActivityManager.CreateActivity(ctx, activityCreate, &ActivityMeta{
-		issue: issue,
-	})
-	if err != nil {
+	if _, err := s.ActivityManager.CreateActivity(ctx, activityCreate, &activity.Metadata{
+		Issue: issue,
+	}); err != nil {
 		return nil, errors.Wrapf(err, "failed to create activity after creating the issue: %v", issue.Name)
 	}
 	return issue, nil
 }
 
 func (s *Server) createPipeline(ctx context.Context, issueCreate *api.IssueCreate, pipelineCreate *api.PipelineCreate) (*api.Pipeline, error) {
-	// Return an error if the issue has no task to be executed
-	hasTask := false
-	for _, stage := range pipelineCreate.StageList {
-		if len(stage.TaskList) > 0 {
-			hasTask = true
-			break
-		}
-	}
-	if !hasTask {
-		err := errors.Errorf("issue has no task to be executed")
-		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error()).SetInternal(err)
-	}
-
-	pipelineCreate.CreatorID = issueCreate.CreatorID
-
-	// Create the pipeline, stages, and tasks.
-	if issueCreate.ValidateOnly {
-		return s.store.CreatePipelineValidateOnly(ctx, pipelineCreate)
-	}
-
 	pipelineCreated, err := s.store.CreatePipeline(ctx, pipelineCreate)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create pipeline for issue")
@@ -660,7 +635,8 @@ func (s *Server) getPipelineCreateForDatabaseCreate(ctx context.Context, issueCr
 		})
 
 		return &api.PipelineCreate{
-			Name: fmt.Sprintf("Pipeline - Create database %v from backup %v", c.DatabaseName, backup.Name),
+			Name:      fmt.Sprintf("Pipeline - Create database %v from backup %v", c.DatabaseName, backup.Name),
+			CreatorID: issueCreate.CreatorID,
 			StageList: []api.StageCreate{
 				{
 					Name:          instance.Environment.Name,
@@ -679,7 +655,8 @@ func (s *Server) getPipelineCreateForDatabaseCreate(ctx context.Context, issueCr
 	}
 
 	return &api.PipelineCreate{
-		Name: fmt.Sprintf("Pipeline - Create database %s", c.DatabaseName),
+		Name:      fmt.Sprintf("Pipeline - Create database %s", c.DatabaseName),
+		CreatorID: issueCreate.CreatorID,
 		StageList: []api.StageCreate{
 			{
 				Name:          instance.Environment.Name,
@@ -716,7 +693,8 @@ func (s *Server) getPipelineCreateForDatabasePITR(ctx context.Context, issueCrea
 	}
 
 	return &api.PipelineCreate{
-		Name: "Database Point-in-time Recovery pipeline",
+		Name:      "Database Point-in-time Recovery pipeline",
+		CreatorID: issueCreate.CreatorID,
 		StageList: []api.StageCreate{
 			{
 				Name:             database.Instance.Environment.Name,
@@ -741,7 +719,8 @@ func (s *Server) getPipelineCreateForDatabaseSchemaAndDataUpdate(ctx context.Con
 		}
 	}
 	create := &api.PipelineCreate{
-		Name: "Change database pipeline",
+		Name:      "Change database pipeline",
+		CreatorID: issueCreate.CreatorID,
 	}
 
 	project, err := s.store.GetProjectByID(ctx, issueCreate.ProjectID)
@@ -795,17 +774,17 @@ func (s *Server) getPipelineCreateForDatabaseSchemaAndDataUpdate(ctx context.Con
 	aggregatedMatrix := make([][]*api.Database, len(deploySchedule.Deployments))
 	databaseToMigrationList := make(map[int][]*api.MigrationDetail)
 
+	dbList, err := s.store.FindDatabase(ctx, &api.DatabaseFind{
+		ProjectID: &issueCreate.ProjectID,
+	})
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to fetch databases in project ID: %v", issueCreate.ProjectID)).SetInternal(err)
+	}
 	if databaseIDCount == 0 {
 		// Deploy to all tenant databases.
-		dbList, err := s.store.FindDatabase(ctx, &api.DatabaseFind{
-			ProjectID: &issueCreate.ProjectID,
-		})
-		if err != nil {
-			return nil, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to fetch databases in project ID: %v", issueCreate.ProjectID)).SetInternal(err)
-		}
 		migrationDetail := c.DetailList[0]
 		baseDatabaseName := migrationDetail.DatabaseName
-		matrix, err := getDatabaseMatrixFromDeploymentSchedule(deploySchedule, baseDatabaseName, project.DBNameTemplate, dbList)
+		matrix, err := utils.GetDatabaseMatrixFromDeploymentSchedule(deploySchedule, baseDatabaseName, project.DBNameTemplate, dbList)
 		if err != nil {
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to build deployment pipeline").SetInternal(err)
 		}
@@ -817,15 +796,16 @@ func (s *Server) getPipelineCreateForDatabaseSchemaAndDataUpdate(ctx context.Con
 			}
 		}
 	} else {
+		databaseMap := make(map[int]*api.Database)
+		for _, db := range dbList {
+			databaseMap[db.ID] = db
+		}
 		for _, d := range c.DetailList {
-			database, err := s.store.GetDatabase(ctx, &api.DatabaseFind{ID: &d.DatabaseID})
-			if err != nil {
-				return nil, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to fetch database ID: %v", d.DatabaseID)).SetInternal(err)
+			database, ok := databaseMap[d.DatabaseID]
+			if !ok {
+				return nil, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("Database ID %d not found in project %d", d.DatabaseID, issueCreate.ProjectID))
 			}
-			if database == nil {
-				return nil, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("Database ID not found: %d", d.DatabaseID))
-			}
-			matrix, err := getDatabaseMatrixFromDeploymentSchedule(deploySchedule, "" /* baseDatabaseName */, "" /* databaseNameTemplate */, []*api.Database{database})
+			matrix, err := utils.GetDatabaseMatrixFromDeploymentSchedule(deploySchedule, "" /* baseDatabaseName */, "" /* databaseNameTemplate */, []*api.Database{database})
 			if err != nil {
 				return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to build deployment pipeline").SetInternal(err)
 			}
@@ -900,8 +880,10 @@ func (s *Server) getPipelineCreateForDatabaseSchemaUpdateGhost(ctx context.Conte
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "not implemented yet")
 	}
 
-	create := &api.PipelineCreate{}
-	create.Name = "Update database schema (gh-ost) pipeline"
+	create := &api.PipelineCreate{
+		Name:      "Update database schema (gh-ost) pipeline",
+		CreatorID: issueCreate.CreatorID,
+	}
 	schemaVersion := common.DefaultMigrationVersion()
 	for _, detail := range c.DetailList {
 		if detail.Statement == "" {
@@ -1026,7 +1008,7 @@ func (s *Server) createDatabaseCreateTaskList(ctx context.Context, c api.CreateD
 	}
 	// Validate the labels. Labels are set upon task completion.
 	if c.Labels != "" {
-		if err := s.setDatabaseLabels(ctx, c.Labels, &api.Database{Name: c.DatabaseName, Instance: &instance} /* dummy database */, &project, 0 /* dummy updaterID */, true /* validateOnly */); err != nil {
+		if err := utils.SetDatabaseLabels(ctx, s.store, c.Labels, &api.Database{Name: c.DatabaseName, Instance: &instance} /* dummy database */, 0 /* dummy updaterID */, true /* validateOnly */); err != nil {
 			return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid database label %q, error %v", c.Labels, err))
 		}
 	}
@@ -1162,6 +1144,47 @@ func (s *Server) createPITRTaskList(ctx context.Context, originDatabase *api.Dat
 	return taskCreateList, taskIndexDAGList, nil
 }
 
+func getCreateDatabaseStatement(dbType db.Type, createDatabaseContext api.CreateDatabaseContext, databaseName, adminDatasourceUser string) (string, error) {
+	var stmt string
+	switch dbType {
+	case db.MySQL, db.TiDB:
+		return fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s COLLATE %s;", databaseName, createDatabaseContext.CharacterSet, createDatabaseContext.Collation), nil
+	case db.Postgres:
+		// On Cloud RDS, the data source role isn't the actual superuser with sudo privilege.
+		// We need to grant the database owner role to the data source admin so that Bytebase can have permission for the database using the data source admin.
+		if adminDatasourceUser != "" && createDatabaseContext.Owner != adminDatasourceUser {
+			stmt = fmt.Sprintf("GRANT \"%s\" TO \"%s\";\n", createDatabaseContext.Owner, adminDatasourceUser)
+		}
+		if createDatabaseContext.Collation == "" {
+			stmt = fmt.Sprintf("%sCREATE DATABASE \"%s\" ENCODING %q;", stmt, databaseName, createDatabaseContext.CharacterSet)
+		} else {
+			stmt = fmt.Sprintf("%sCREATE DATABASE \"%s\" ENCODING %q LC_COLLATE %q;", stmt, databaseName, createDatabaseContext.CharacterSet, createDatabaseContext.Collation)
+		}
+		// Set the database owner.
+		// We didn't use CREATE DATABASE WITH OWNER because RDS requires the current role to be a member of the database owner.
+		// However, people can still use ALTER DATABASE to change the owner afterwards.
+		// Error string below:
+		// query: CREATE DATABASE h1 WITH OWNER hello;
+		// ERROR:  must be member of role "hello"
+		//
+		// For tenant project, the schema for the newly created database will belong to the same owner.
+		// TODO(d): alter schema "public" owner to the database owner.
+		return fmt.Sprintf("%s\nALTER DATABASE \"%s\" OWNER TO %s;", stmt, databaseName, createDatabaseContext.Owner), nil
+	case db.ClickHouse:
+		clusterPart := ""
+		if createDatabaseContext.Cluster != "" {
+			clusterPart = fmt.Sprintf(" ON CLUSTER `%s`", createDatabaseContext.Cluster)
+		}
+		return fmt.Sprintf("CREATE DATABASE `%s`%s;", databaseName, clusterPart), nil
+	case db.Snowflake:
+		return fmt.Sprintf("CREATE DATABASE %s;", databaseName), nil
+	case db.SQLite:
+		// This is a fake CREATE DATABASE and USE statement since a single SQLite file represents a database. Engine driver will recognize it and establish a connection to create the sqlite file representing the database.
+		return fmt.Sprintf("CREATE DATABASE '%s';", databaseName), nil
+	}
+	return "", errors.Errorf("unsupported database type %s", dbType)
+}
+
 // creates gh-ost TaskCreate list and dependency.
 func createGhostTaskList(database *api.Database, vcsPushEvent *vcs.PushEvent, detail *api.UpdateSchemaGhostDetail, schemaVersion string) ([]api.TaskCreate, []api.TaskIndexDAG, error) {
 	var taskCreateList []api.TaskCreate
@@ -1255,7 +1278,7 @@ func (s *Server) setTaskProgressForIssue(issue *api.Issue) {
 	}
 	for _, stage := range issue.Pipeline.StageList {
 		for _, task := range stage.TaskList {
-			if progress, ok := s.TaskScheduler.taskProgress.Load(task.ID); ok {
+			if progress, ok := s.stateCfg.TaskProgress.Load(task.ID); ok {
 				task.Progress = progress.(api.Progress)
 			}
 		}

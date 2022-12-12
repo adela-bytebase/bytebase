@@ -335,6 +335,108 @@ func convert(node *pgquery.Node, statement parser.SingleSQL) (res ast.Node, err 
 				dropSequence.SequenceNameList = append(dropSequence.SequenceNameList, sequenceDef)
 			}
 			return dropSequence, nil
+		case pgquery.ObjectType_OBJECT_EXTENSION:
+			dropExtension := &ast.DropExtensionStmt{
+				IfExists: in.DropStmt.MissingOk,
+				Behavior: convertDropBehavior(in.DropStmt.Behavior),
+			}
+			for _, extension := range in.DropStmt.Objects {
+				extensionName, ok := extension.Node.(*pgquery.Node_String_)
+				if !ok {
+					return nil, parser.NewConvertErrorf("expected String but found %t", extension.Node)
+				}
+				dropExtension.NameList = append(dropExtension.NameList, extensionName.String_.Str)
+			}
+			return dropExtension, nil
+		case pgquery.ObjectType_OBJECT_FUNCTION:
+			dropFunctionStmt := &ast.DropFunctionStmt{
+				IfExists: in.DropStmt.MissingOk,
+				Behavior: convertDropBehavior(in.DropStmt.Behavior),
+			}
+			for _, function := range in.DropStmt.Objects {
+				functionNode, ok := function.Node.(*pgquery.Node_ObjectWithArgs)
+				if !ok {
+					return nil, parser.NewConvertErrorf("expected ObjectWithArgs but found %t", function.Node)
+				}
+				functionDef := &ast.FunctionDef{}
+				var err error
+				functionDef.Schema, functionDef.Name, err = convertObjectName(functionNode.ObjectWithArgs.Objname)
+				if err != nil {
+					return nil, err
+				}
+				functionDef.ParameterList, err = convertFunctionParameterList(functionNode.ObjectWithArgs.Objargs)
+				if err != nil {
+					return nil, err
+				}
+
+				dropFunctionStmt.FunctionList = append(dropFunctionStmt.FunctionList, functionDef)
+			}
+
+			return dropFunctionStmt, nil
+		case pgquery.ObjectType_OBJECT_TRIGGER:
+			dropTriggerStmt := &ast.DropTriggerStmt{
+				IfExists: in.DropStmt.MissingOk,
+				Behavior: convertDropBehavior(in.DropStmt.Behavior),
+			}
+
+			if len(in.DropStmt.Objects) != 1 {
+				return nil, parser.NewConvertErrorf("expected one trigger but found %d", len(in.DropStmt.Objects))
+			}
+			listNode, ok := in.DropStmt.Objects[0].Node.(*pgquery.Node_List)
+			if !ok {
+				return nil, parser.NewConvertErrorf("expected List but found %d", in.DropStmt.Objects[0].Node)
+			}
+
+			list, err := convertListToStringList(listNode)
+			if err != nil {
+				return nil, err
+			}
+			switch len(list) {
+			case 3:
+				dropTriggerStmt.Trigger = &ast.TriggerDef{
+					Name: list[2],
+					Table: &ast.TableDef{
+						Type:   ast.TableTypeUnknown,
+						Schema: list[0],
+						Name:   list[1],
+					},
+				}
+			case 2:
+				dropTriggerStmt.Trigger = &ast.TriggerDef{
+					Name: list[1],
+					Table: &ast.TableDef{
+						Type:   ast.TableTypeUnknown,
+						Schema: "",
+						Name:   list[0],
+					},
+				}
+			default:
+				return nil, parser.NewConvertErrorf("expected one or two but found %d", len(list))
+			}
+
+			return dropTriggerStmt, nil
+		case pgquery.ObjectType_OBJECT_TYPE:
+			dropTypeStmt := &ast.DropTypeStmt{
+				IfExists: in.DropStmt.MissingOk,
+				Behavior: convertDropBehavior(in.DropStmt.Behavior),
+			}
+
+			for _, object := range in.DropStmt.Objects {
+				typeName, ok := object.Node.(*pgquery.Node_TypeName)
+				if !ok {
+					return nil, parser.NewConvertErrorf("expected TypeName but found %t", object.Node)
+				}
+				schema, name, err := convertObjectName(typeName.TypeName.Names)
+				if err != nil {
+					return nil, err
+				}
+				dropTypeStmt.TypeNameList = append(dropTypeStmt.TypeNameList, &ast.TypeNameDef{
+					Schema: schema,
+					Name:   name,
+				})
+			}
+
+			return dropTypeStmt, nil
 		}
 	case *pgquery.Node_DropdbStmt:
 		return &ast.DropDatabaseStmt{
@@ -557,11 +659,187 @@ func convert(node *pgquery.Node, statement parser.SingleSQL) (res ast.Node, err 
 			}
 		}
 		return &createSchemaStmt, nil
+	case *pgquery.Node_CreateExtensionStmt:
+		createExtensionStmt := &ast.CreateExtensionStmt{
+			Name:        in.CreateExtensionStmt.Extname,
+			IfNotExists: in.CreateExtensionStmt.IfNotExists,
+		}
+
+		for _, option := range in.CreateExtensionStmt.Options {
+			if item, ok := option.Node.(*pgquery.Node_DefElem); ok {
+				if item.DefElem.Defname == "schema" {
+					schemaName, ok := item.DefElem.Arg.Node.(*pgquery.Node_String_)
+					if !ok {
+						return nil, parser.NewConvertErrorf("expected String but found %t", item.DefElem.Arg.Node)
+					}
+					createExtensionStmt.Schema = schemaName.String_.Str
+				}
+			}
+		}
+
+		return createExtensionStmt, nil
+	case *pgquery.Node_CreateFunctionStmt:
+		var err error
+		functionDef := &ast.FunctionDef{}
+
+		functionDef.Schema, functionDef.Name, err = convertObjectName(in.CreateFunctionStmt.Funcname)
+		if err != nil {
+			return nil, err
+		}
+
+		functionDef.ParameterList, err = convertFunctionParameterList(in.CreateFunctionStmt.Parameters)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.CreateFunctionStmt{Function: functionDef}, nil
+	case *pgquery.Node_CreateTrigStmt:
+		createTriggerStmt := &ast.CreateTriggerStmt{
+			Trigger: &ast.TriggerDef{
+				Name:  in.CreateTrigStmt.Trigname,
+				Table: convertRangeVarToTableName(in.CreateTrigStmt.Relation, ast.TableTypeUnknown),
+			},
+		}
+
+		return createTriggerStmt, nil
+	case *pgquery.Node_CreateEnumStmt:
+		var err error
+		enumTypeDef := &ast.EnumTypeDef{Name: &ast.TypeNameDef{}}
+
+		enumTypeDef.Name.Schema, enumTypeDef.Name.Name, err = convertObjectName(in.CreateEnumStmt.TypeName)
+		if err != nil {
+			return nil, err
+		}
+
+		enumTypeDef.LabelList, err = convertEnumLabelList(in.CreateEnumStmt.Vals)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.CreateTypeStmt{Type: enumTypeDef}, nil
+	case *pgquery.Node_AlterEnumStmt:
+		if in.AlterEnumStmt.OldVal == "" {
+			schema, name, err := convertObjectName(in.AlterEnumStmt.TypeName)
+			if err != nil {
+				return nil, err
+			}
+			typeName := &ast.TypeNameDef{
+				Schema: schema,
+				Name:   name,
+			}
+			// ADD ENUM VALUE STATEMENT
+			addEnumValueStmt := &ast.AddEnumLabelStmt{
+				EnumType:      typeName,
+				NewLabel:      in.AlterEnumStmt.NewVal,
+				NeighborLabel: in.AlterEnumStmt.NewValNeighbor,
+			}
+			if in.AlterEnumStmt.NewValNeighbor == "" {
+				addEnumValueStmt.Position = ast.PositionTypeEnd
+			} else if in.AlterEnumStmt.NewValIsAfter {
+				addEnumValueStmt.Position = ast.PositionTypeAfter
+			} else {
+				addEnumValueStmt.Position = ast.PositionTypeBefore
+			}
+
+			return &ast.AlterTypeStmt{
+				Type:          typeName,
+				AlterItemList: []ast.Node{addEnumValueStmt},
+			}, nil
+		}
+		// TODO(rebelice): support RENAME ENUM VALUE statements
 	default:
 		return &ast.UnconvertedStmt{}, nil
 	}
 
 	return nil, nil
+}
+
+func convertEnumLabelList(list []*pgquery.Node) ([]string, error) {
+	var result []string
+	for _, node := range list {
+		stringNode, ok := node.Node.(*pgquery.Node_String_)
+		if !ok {
+			return nil, parser.NewConvertErrorf("expected String but found %t", node.Node)
+		}
+		result = append(result, stringNode.String_.Str)
+	}
+	return result, nil
+}
+
+func convertFunctionParameterList(parameterList []*pgquery.Node) ([]*ast.FunctionParameterDef, error) {
+	var result []*ast.FunctionParameterDef
+	for _, node := range parameterList {
+		var err error
+		switch parameterNode := node.Node.(type) {
+		case *pgquery.Node_FunctionParameter:
+			parameterDef := &ast.FunctionParameterDef{
+				Name: parameterNode.FunctionParameter.Name,
+				Mode: convertParameterMode(parameterNode.FunctionParameter.Mode),
+			}
+			parameterDef.Type, err = convertDataType(parameterNode.FunctionParameter.ArgType)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, parameterDef)
+		case *pgquery.Node_TypeName:
+			parameterDef := &ast.FunctionParameterDef{}
+			parameterDef.Type, err = convertDataType(parameterNode.TypeName)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, parameterDef)
+		default:
+			return nil, parser.NewConvertErrorf("expected FunctionParameter or TypeName but found %t", node.Node)
+		}
+	}
+	return result, nil
+}
+
+func convertParameterMode(mode pgquery.FunctionParameterMode) ast.FunctionParameterMode {
+	switch mode {
+	case pgquery.FunctionParameterMode_FUNC_PARAM_IN:
+		return ast.FunctionParameterModeIn
+	case pgquery.FunctionParameterMode_FUNC_PARAM_OUT:
+		return ast.FunctionParameterModeOut
+	case pgquery.FunctionParameterMode_FUNC_PARAM_INOUT:
+		return ast.FunctionParameterModeInOut
+	case pgquery.FunctionParameterMode_FUNC_PARAM_VARIADIC:
+		return ast.FunctionParameterModeVariadic
+	default:
+		return ast.FunctionParameterModeUndefined
+	}
+}
+
+// convertObjectName requires one or two nodes, and return two strings.
+func convertObjectName(list []*pgquery.Node) (string, string, error) {
+	switch len(list) {
+	case 2:
+		schema, err := convertToString(list[0])
+		if err != nil {
+			return "", "", err
+		}
+		name, err := convertToString(list[1])
+		if err != nil {
+			return "", "", err
+		}
+		return schema, name, nil
+	case 1:
+		name, err := convertToString(list[0])
+		if err != nil {
+			return "", "", err
+		}
+		return "", name, nil
+	default:
+		return "", "", parser.NewConvertErrorf("expected 1 or 2 items but found %d", len(list))
+	}
+}
+
+func convertToString(in *pgquery.Node) (string, error) {
+	stringNode, ok := in.Node.(*pgquery.Node_String_)
+	if !ok {
+		return "", parser.NewConvertErrorf("expected String but found %t", in.Node)
+	}
+	return stringNode.String_.Str, nil
 }
 
 func convertAlterSequence(in *pgquery.AlterSeqStmt) (*ast.AlterSequenceStmt, error) {

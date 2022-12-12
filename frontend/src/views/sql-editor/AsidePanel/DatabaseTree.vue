@@ -52,9 +52,16 @@ import { useI18n } from "vue-i18n";
 import { stringify } from "qs";
 import ConnectedIcon from "~icons/heroicons-outline/lightning-bolt";
 
-import type { ConnectionAtom, DatabaseId, InstanceId } from "@/types";
-import { ConnectionTreeState, UNKNOWN_ID } from "@/types";
+import type {
+  ConnectionAtom,
+  CoreTabInfo,
+  DatabaseId,
+  InstanceId,
+  SheetId,
+} from "@/types";
+import { ConnectionTreeState, TabMode, UNKNOWN_ID } from "@/types";
 import {
+  useCurrentUser,
   useDatabaseStore,
   useInstanceStore,
   useIsLoggedIn,
@@ -65,8 +72,9 @@ import {
 import {
   emptyConnection,
   getHighlightHTMLByKeyWords,
+  hasWorkspacePermission,
   isDescendantOf,
-  isSameConnection,
+  isSimilarTab,
   mapConnectionAtom,
 } from "@/utils";
 import { generateTableItem } from "./utils";
@@ -93,6 +101,7 @@ const sqlEditorStore = useSQLEditorStore();
 const tableStore = useTableStore();
 const tabStore = useTabStore();
 const isLoggedIn = useIsLoggedIn();
+const currentUser = useCurrentUser();
 
 const searchPattern = ref();
 const showDropdown = ref(false);
@@ -113,13 +122,26 @@ const dropdownOptions = computed((): DropdownOptionWithConnectionAtom[] => {
       },
     ];
   } else {
-    return [
+    // Don't show any context menu actions for disabled
+    // instances/databases
+    if (dropdownContext.value.disabled) {
+      return [];
+    }
+    const items = [
       {
-        key: "open-connection",
-        label: t("sql-editor.open-connection"),
+        key: "connect",
+        label: t("sql-editor.connect"),
         item: dropdownContext.value,
       },
     ];
+    if (allowAdmin.value) {
+      items.push({
+        key: "connect-in-admin-mode",
+        label: t("sql-editor.connect-in-admin-mode"),
+        item: dropdownContext.value,
+      });
+    }
+    return items;
   }
 });
 
@@ -135,24 +157,36 @@ const selectedKeys = computed(() => {
   return [];
 });
 
+const allowAdmin = computed(() =>
+  hasWorkspacePermission(
+    "bb.permission.workspace.admin-sql-editor",
+    currentUser.value.role
+  )
+);
+
 const treeData = computed(() => sqlEditorStore.connectionTree.data);
 
-const setConnection = (option: ConnectionAtom) => {
+const setConnection = (
+  option: ConnectionAtom,
+  extra: { sheetId?: SheetId; mode: TabMode } = {
+    sheetId: undefined,
+    mode: TabMode.ReadOnly,
+  }
+) => {
   if (option) {
-    const conn = emptyConnection();
+    const target: CoreTabInfo = {
+      connection: emptyConnection(),
+      ...extra,
+    };
+    const conn = target.connection;
+
     const connect = () => {
-      if (isSameConnection(tabStore.currentTab.connection, conn)) {
+      if (isSimilarTab(target, tabStore.currentTab)) {
         // Don't go further if the connection doesn't change.
         return;
       }
-      if (tabStore.currentTab.sheetId) {
-        // We won't mutate a saved sheet's connection.
-        // So we'll set connection in a temp or new tab.
-        tabStore.selectOrAddTempTab();
-      }
-      tabStore.updateCurrentTab({
-        connection: conn,
-      });
+      tabStore.selectOrAddSimilarTab(target);
+      tabStore.updateCurrentTab(target);
     };
 
     // If selected item is instance node
@@ -219,12 +253,12 @@ const renderPrefix = ({ option }: { option: ConnectionAtom }) => {
       }),
       h(ProtectedEnvironmentIcon, {
         environment: instance.environment,
-        class: "w-4 h-4",
+        class: "w-4 h-4 text-inherit",
       }),
       h(
         "span",
         {
-          class: "text-gray-500 text-sm",
+          class: ["text-sm", !option.disabled && "text-gray-500"],
         },
         `(${instance.environment.name})`
       ),
@@ -305,8 +339,10 @@ const handleSelect = (key: string) => {
 
   if (key === "alter-table") {
     gotoAlterSchema(option.item);
-  } else if (key === "open-connection") {
+  } else if (key === "connect") {
     setConnection(option.item);
+  } else if (key === "connect-in-admin-mode") {
+    setConnection(option.item, { mode: TabMode.Admin });
   }
 
   showDropdown.value = false;
@@ -319,6 +355,8 @@ const handleClickoutside = () => {
 const nodeProps = ({ option }: { option: ConnectionAtom }) => {
   return {
     onClick(e: MouseEvent) {
+      if (option.disabled) return;
+
       if (isDescendantOf(e.target as Element, ".n-tree-node-content")) {
         // Check if clicked on the content part.
         // And ignore the fold/unfold arrow.
@@ -417,10 +455,6 @@ watch(
 .databases-tree .n-tree-node--selected,
 .databases-tree .n-tree-node--selected:hover {
   background-color: var(--n-node-color-active) !important;
-}
-.databases-tree .n-tree-node--disabled > * {
-  pointer-events: none;
-  cursor: not-allowed !important;
 }
 </style>
 

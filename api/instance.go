@@ -34,6 +34,8 @@ type Instance struct {
 	// Database is the initial connection database for PostgreSQL only.
 	Database string `jsonapi:"attr,database"`
 	Username string `jsonapi:"attr,username"`
+	// SRV record is used for MongoDB only.
+	SRV bool `jsonapi:"attr,srv"`
 	// Password is not returned to the client
 	Password string
 }
@@ -59,6 +61,9 @@ type InstanceCreate struct {
 	SslCa        string  `jsonapi:"attr,sslCa"`
 	SslCert      string  `jsonapi:"attr,sslCert"`
 	SslKey       string  `jsonapi:"attr,sslKey"`
+
+	// SRV record is used for MongoDB only.
+	SRV bool `jsonapi:"attr,srv"`
 }
 
 // InstanceFind is the API message for finding instances.
@@ -72,6 +77,7 @@ type InstanceFind struct {
 	EnvironmentID *int
 
 	// Domain specific fields
+	Name *string
 	Host *string
 	Port *string
 }
@@ -100,6 +106,8 @@ type InstancePatch struct {
 	Host          *string `jsonapi:"attr,host"`
 	Port          *string `jsonapi:"attr,port"`
 	Database      *string `jsonapi:"attr,database"`
+	// SRV record is used for MongoDB only.
+	SRV bool `jsonapi:"attr,srv"`
 }
 
 // DataSourceFromInstanceWithType gets a typed data source from a instance.

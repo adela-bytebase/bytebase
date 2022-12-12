@@ -31,6 +31,9 @@
             &nbsp;
             <span style="color: red">*</span>
           </label>
+          <p class="text-sm text-gray-500 mt-1 mb-2">
+            {{ $t("instance.instance-name-unique") }}
+          </p>
           <input
             id="name"
             required
@@ -113,6 +116,17 @@
             @input="handleInstancePortInput"
           />
         </div>
+
+        <template v-if="state.instance.engine == 'MONGODB'">
+          <div class="sm:row-span-1">
+            <div class="ml-1">
+              <BBCheckbox
+                title="DNS SRV Record"
+                :value="state.instance.useDNSSRVRecord"
+                @toggle="handleToggleDNSSRVRecord"
+              />
+            </div></div
+        ></template>
       </div>
 
       <p class="mt-6 pt-4 w-full text-lg leading-6 font-medium text-gray-900">
@@ -163,6 +177,24 @@
             :placeholder="$t('instance.password-write-only')"
             :value="state.instance.password"
             @input="handleInstancePasswordInput"
+          />
+        </div>
+
+        <div v-if="showDatabase" class="sm:col-span-1 sm:col-start-1">
+          <div class="flex flex-row items-center space-x-2">
+            <label for="database" class="textlabel block">
+              {{ $t("common.database") }}
+            </label>
+          </div>
+          <input
+            id="database"
+            name="database"
+            type="text"
+            class="textfield mt-1 w-full"
+            autocomplete="off"
+            :placeholder="$t('common.database')"
+            :value="state.instance.database"
+            @input="handleInstanceDatabaseInput"
           />
         </div>
 
@@ -221,7 +253,8 @@
               :disabled="
                 !allowCreate ||
                 state.isCreatingInstance ||
-                state.isPingingInstance
+                state.isPingingInstance ||
+                state.instance.engine == 'MONGODB'
               "
               @click.prevent="tryCreate"
             >
@@ -260,6 +293,7 @@ import {
   ConnectionInfo,
   SQLResultSet,
   EngineType,
+  engineName,
 } from "../types";
 import isEmpty from "lodash-es/isEmpty";
 import { useI18n } from "vue-i18n";
@@ -284,13 +318,19 @@ const router = useRouter();
 const { t } = useI18n();
 const sqlStore = useSQLStore();
 
-const engineList: EngineType[] = [
-  "MYSQL",
-  "POSTGRES",
-  "TIDB",
-  "SNOWFLAKE",
-  "CLICKHOUSE",
-];
+const engineList = computed(() => {
+  const engines: EngineType[] = [
+    "MYSQL",
+    "POSTGRES",
+    "TIDB",
+    "SNOWFLAKE",
+    "CLICKHOUSE",
+  ];
+  if (isDev()) {
+    engines.push("MONGODB");
+  }
+  return engines;
+});
 
 const EngineIconPath = {
   MYSQL: new URL("../assets/db-mysql.png", import.meta.url).href,
@@ -298,6 +338,7 @@ const EngineIconPath = {
   TIDB: new URL("../assets/db-tidb.png", import.meta.url).href,
   SNOWFLAKE: new URL("../assets/db-snowflake.png", import.meta.url).href,
   CLICKHOUSE: new URL("../assets/db-clickhouse.png", import.meta.url).href,
+  MONGODB: new URL("../assets/db-mongodb.png", import.meta.url).href,
 };
 
 const state = reactive<LocalState>({
@@ -309,6 +350,7 @@ const state = reactive<LocalState>({
     // In release mode, Bytebase is likely run inside docker and access the local network via host.docker.internal.
     host: isDev() ? "127.0.0.1" : "host.docker.internal",
     username: "",
+    useDNSSRVRecord: false,
   },
   showCreateInstanceWarningModal: false,
   createInstanceWarning: "",
@@ -337,12 +379,20 @@ const defaultPort = computed(() => {
     return "443";
   } else if (state.instance.engine == "TIDB") {
     return "4000";
+  } else if (state.instance.engine == "MONGODB") {
+    return "27017";
   }
   return "3306";
 });
 
 const showSSL = computed((): boolean => {
   return state.instance.engine === "CLICKHOUSE";
+});
+
+const showDatabase = computed((): boolean => {
+  return (
+    state.instance.engine === "POSTGRES" || state.instance.engine === "MONGODB"
+  );
 });
 
 const isInOnboaringCreateDatabaseGuide = computed(() => {
@@ -379,21 +429,6 @@ watch(showSSL, (ssl) => {
     state.instance.sslCert = "";
   }
 });
-
-const engineName = (type: EngineType): string => {
-  switch (type) {
-    case "CLICKHOUSE":
-      return "ClickHouse";
-    case "MYSQL":
-      return "MySQL";
-    case "POSTGRES":
-      return "PostgreSQL";
-    case "SNOWFLAKE":
-      return "Snowflake";
-    case "TIDB":
-      return "TiDB";
-  }
-};
 
 // The default host name is 127.0.0.1 or host.docker.internal which is not applicable to Snowflake, so we change
 // the host name between 127.0.0.1/host.docker.internal and "" if user hasn't changed default yet.
@@ -437,7 +472,15 @@ const handleInstancePasswordInput = (event: Event) => {
   updateInstance("password", (event.target as HTMLInputElement).value);
 };
 
-const updateInstance = (field: string, value: string) => {
+const handleInstanceDatabaseInput = (event: Event) => {
+  updateInstance("database", (event.target as HTMLInputElement).value);
+};
+
+const handleToggleDNSSRVRecord = (on: boolean) => {
+  updateInstance("useDNSSRVRecord", on);
+};
+
+const updateInstance = (field: string, value: string | boolean) => {
   let str = value;
   if (
     field === "name" ||
@@ -445,9 +488,10 @@ const updateInstance = (field: string, value: string) => {
     field === "port" ||
     field === "externalLink" ||
     field === "username" ||
-    field === "password"
+    field === "password" ||
+    field === "database"
   ) {
-    str = value.trim();
+    str = (value as string).trim();
   }
   (state.instance as any)[field] = str;
 };
@@ -500,6 +544,7 @@ const tryCreate = () => {
     useEmptyPassword: false,
     host: instance.host,
     port: instance.port,
+    srv: instance.useDNSSRVRecord,
   };
 
   if (showSSL.value) {
@@ -534,6 +579,11 @@ const tryCreate = () => {
 // Conceptually, data source is the proper place to store connection info (thinking of DSN)
 const doCreate = () => {
   state.isCreatingInstance = true;
+
+  if (state.instance.engine !== "POSTGRES") {
+    // Clear the `database` field if not needed.
+    state.instance.database = "";
+  }
   useInstanceStore()
     .createInstance(state.instance)
     .then((createdInstance) => {
@@ -550,6 +600,9 @@ const doCreate = () => {
           [createdInstance.name]
         ),
       });
+    })
+    .finally(() => {
+      state.isCreatingInstance = false;
     });
 };
 
@@ -562,8 +615,14 @@ const testConnection = () => {
     engine: instance.engine,
     username: instance.username,
     password: instance.password,
+    // Use the `database` field only when needed.
+    database:
+      instance.engine === "POSTGRES" || instance.engine === "MONGODB"
+        ? instance.database
+        : undefined,
     useEmptyPassword: false,
     instanceId: undefined,
+    srv: instance.useDNSSRVRecord,
   };
 
   if (showSSL.value) {

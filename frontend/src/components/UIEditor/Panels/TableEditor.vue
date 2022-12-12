@@ -1,220 +1,270 @@
 <template>
   <div class="grid auto-rows-auto w-full h-full overflow-y-auto">
     <div
-      class="w-full h-auto flex flex-row justify-between items-center py-2 border-b"
+      class="pt-3 pl-1 w-full flex justify-start items-center border-b border-b-gray-300"
     >
-      <div class="flex flex-row items-center space-x-2">
-        <div class="flex flex-row justify-start items-center">
-          <span class="mr-1 text-sm ml-3 whitespace-nowrap text-gray-500"
-            >{{ $t("ui-editor.table.name") }}:
-          </span>
-          <input
-            v-model="tableCache.name"
-            placeholder=""
-            class="w-full leading-6 px-2 py-1 rounded border border-gray-200 text-sm"
-            type="text"
-          />
-        </div>
-      </div>
-      <div class="flex flex-row items-center space-x-2">
-        <NPopover
-          trigger="click"
-          placement="bottom-center"
-          @update:show="handlePreviewDDLStatement"
-        >
-          <template #trigger>
-            <button
-              class="flex flex-row justify-center items-center border px-3 py-1 leading-6 text-sm text-gray-700 rounded cursor-pointer hover:bg-gray-100"
-            >
-              {{ $t("ui-editor.actions.sql-preview") }}
-            </button>
-          </template>
-          <div class="w-112 min-h-[16em] max-h-[32em] overflow-y-auto">
-            <div
-              v-if="state.isFetchingDDL"
-              class="w-full h-full flex justify-center items-center"
-            >
-              <BBSpin />
-            </div>
-            <template v-else>
-              <HighlightCodeBlock
-                v-if="state.statement !== ''"
-                class="text-sm whitespace-pre-wrap break-all"
-                language="sql"
-                :code="state.statement"
-              ></HighlightCodeBlock>
-              <span v-else class="py-2 italic">{{
-                $t("ui-editor.nothing-changed")
-              }}</span>
-            </template>
-          </div>
-        </NPopover>
-        <button
-          class="flex flex-row justify-center items-center border px-3 py-1 leading-6 text-sm text-gray-700 rounded cursor-pointer hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="!allowSave"
-          @click="handleDiscardChanges"
-        >
-          <heroicons-solid:arrow-uturn-left
-            class="w-4 h-auto mr-1 text-gray-400"
-          />
-          {{ $t("ui-editor.actions.discard-changes") }}
-        </button>
-        <button
-          class="flex flex-row bg-accent text-white justify-center items-center px-3 py-1 leading-6 text-sm rounded cursor-pointer hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="!allowSave"
-          @click="handleSaveChanges"
-        >
-          <heroicons-outline:save class="w-4 h-auto mr-1" />
-          {{ $t("ui-editor.actions.save") }}
-        </button>
-      </div>
-    </div>
-    <!-- column table -->
-    <div class="w-full py-2 flex flex-row justify-between items-center">
-      <span class="ml-3 text-gray-500 font-normal text-sm">{{
-        t("ui-editor.columns")
-      }}</span>
-      <div>
-        <button
-          class="flex flex-row justify-center items-center border px-3 py-1 leading-6 text-sm text-gray-700 rounded cursor-pointer hover:bg-gray-100"
-          @click="handleAddColumn"
-        >
-          <heroicons-outline:plus class="w-4 h-auto mr-1 text-gray-400" />
-          {{ $t("ui-editor.actions.add-column") }}
-        </button>
-      </div>
-    </div>
-    <div
-      class="w-full h-auto grid auto-rows-auto border-y relative overflow-y-auto"
-    >
-      <!-- column table header -->
-      <div
-        class="sticky top-0 z-10 grid grid-cols-[repeat(4,_minmax(0,_1fr))_112px_32px] w-full text-sm leading-6 select-none bg-gray-50 text-gray-400"
-        :class="tableCache.columnList.length > 0 && 'border-b'"
+      <span
+        class="-mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none"
+        :class="
+          state.selectedTab === 'column-list' &&
+          'bg-white border-gray-300 text-gray-800'
+        "
+        @click="handleChangeTab('column-list')"
+        >{{ $t("ui-editor.column-list") }}</span
       >
-        <span
-          v-for="header in columnHeaderList"
-          :key="header.key"
-          class="table-header-item-container"
-          >{{ header.label }}</span
-        >
-        <span></span>
+      <span
+        class="-mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none"
+        :class="
+          state.selectedTab === 'raw-sql' &&
+          'bg-white border-gray-300 text-gray-800'
+        "
+        @click="handleChangeTab('raw-sql')"
+        >{{ $t("ui-editor.raw-sql") }}</span
+      >
+    </div>
+
+    <template v-if="state.selectedTab === 'column-list'">
+      <div class="w-full py-2 flex flex-row justify-between items-center">
+        <div>
+          <button
+            class="flex flex-row justify-center items-center border px-3 py-1 leading-6 text-sm text-gray-700 rounded cursor-pointer hover:opacity-80"
+            :disabled="isDroppedTable"
+            @click="handleAddColumn"
+          >
+            <heroicons-outline:plus class="w-4 h-auto mr-1 text-gray-400" />
+            {{ $t("ui-editor.actions.add-column") }}
+          </button>
+        </div>
+        <div class="w-auto flex flex-row justify-end items-center space-x-3">
+          <button
+            v-if="state.tableCache.status !== 'created'"
+            class="flex flex-row justify-center items-center border px-3 py-1 leading-6 text-sm text-gray-700 rounded cursor-pointer hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="!allowResetTable"
+            @click="handleDiscardChanges"
+          >
+            <heroicons-solid:arrow-uturn-left
+              class="w-4 h-auto mr-1 text-gray-400"
+            />
+            {{ $t("ui-editor.actions.reset") }}
+          </button>
+        </div>
       </div>
-      <!-- column table body -->
-      <div class="w-full">
+
+      <!-- column table -->
+      <div
+        class="w-full h-auto grid auto-rows-auto border-y relative overflow-y-auto"
+      >
+        <!-- column table header -->
         <div
-          v-for="(column, index) in tableCache.columnList"
-          :key="`${index}-${column.id}`"
-          class="grid grid-cols-[repeat(4,_minmax(0,_1fr))_112px_32px] gr text-sm even:bg-gray-50"
+          class="sticky top-0 z-10 grid grid-cols-[repeat(4,_minmax(0,_1fr))_112px_32px] w-full text-sm leading-6 select-none bg-gray-50 text-gray-400"
+          :class="state.tableCache.columnList.length > 0 && 'border-b'"
         >
-          <div class="table-body-item-container">
-            <input
-              v-model="column.name"
-              placeholder="column name"
-              class="column-field-input"
-              type="text"
-            />
-          </div>
-          <div
-            class="table-body-item-container flex flex-row justify-between items-center"
+          <span
+            v-for="header in columnHeaderList"
+            :key="header.key"
+            class="table-header-item-container"
+            >{{ header.label }}</span
           >
-            <input
-              v-model="column.type"
-              placeholder="column type"
-              class="column-field-input !pr-8"
-              type="text"
-            />
-            <NDropdown
-              trigger="click"
-              :options="dataTypeOptions"
-              @select="(dataType: string) => (column.type = dataType)"
+          <span></span>
+        </div>
+        <!-- column table body -->
+        <div class="w-full">
+          <div
+            v-for="(column, index) in state.tableCache.columnList"
+            :key="`${index}-${column.oldName}`"
+            class="grid grid-cols-[repeat(4,_minmax(0,_1fr))_112px_32px] gr text-sm even:bg-gray-50"
+            :class="
+              isDroppedColumn(column) &&
+              'text-red-700 cursor-not-allowed !bg-red-50 opacity-70'
+            "
+          >
+            <div class="table-body-item-container">
+              <input
+                v-model="column.newName"
+                :disabled="disableAlterColumn(column)"
+                placeholder="column name"
+                class="column-field-input"
+                type="text"
+              />
+            </div>
+            <div
+              class="table-body-item-container flex flex-row justify-between items-center"
             >
-              <button class="absolute right-5">
-                <heroicons-solid:chevron-up-down
-                  class="w-4 h-auto text-gray-400"
-                />
-              </button>
-            </NDropdown>
-          </div>
-          <div class="table-body-item-container">
-            <input
-              v-model="column.default"
-              placeholder="column default value"
-              class="column-field-input"
-              type="text"
-            />
-          </div>
-          <div class="table-body-item-container">
-            <input
-              v-model="column.comment"
-              placeholder="comment"
-              class="column-field-input"
-              type="text"
-            />
-          </div>
-          <div
-            class="table-body-item-container flex justify-start items-center"
-          >
-            <BBCheckbox
-              class="ml-3"
-              :value="column.nullable"
-              @toggle="(value) => (column.nullable = value)"
-            />
-          </div>
-          <div class="w-full flex justify-start items-center">
-            <n-tooltip trigger="hover">
-              <template #trigger>
-                <heroicons:trash
-                  class="w-[14px] h-auto text-gray-500 cursor-pointer hover:opacity-80"
-                  @click="handleRemoveColumn(column)"
-                />
-              </template>
-              <span>Drop Column</span>
-            </n-tooltip>
+              <input
+                v-model="column.type"
+                :disabled="disableAlterColumn(column)"
+                placeholder="column type"
+                class="column-field-input !pr-8"
+                type="text"
+              />
+              <NDropdown
+                trigger="click"
+                :disabled="disableAlterColumn(column)"
+                :options="dataTypeOptions"
+                @select="(dataType: string) => (column.type = dataType)"
+              >
+                <button class="absolute right-5">
+                  <heroicons-solid:chevron-up-down
+                    class="w-4 h-auto text-gray-400"
+                  />
+                </button>
+              </NDropdown>
+            </div>
+            <div
+              class="table-body-item-container flex flex-row justify-between items-center"
+            >
+              <input
+                v-model="column.default"
+                :disabled="disableAlterColumn(column)"
+                :placeholder="column.default === null ? 'NULL' : ''"
+                class="column-field-input !pr-8"
+                type="text"
+              />
+              <NDropdown
+                trigger="click"
+                :disabled="disableAlterColumn(column)"
+                :options="dataDefaultOptions"
+                @select="(defaultString:string)=>handleColumnDefaultFieldChange(column, defaultString)"
+              >
+                <button class="absolute right-5">
+                  <heroicons-solid:chevron-up-down
+                    class="w-4 h-auto text-gray-400"
+                  />
+                </button>
+              </NDropdown>
+            </div>
+            <div class="table-body-item-container">
+              <input
+                v-model="column.comment"
+                :disabled="disableAlterColumn(column)"
+                placeholder="comment"
+                class="column-field-input"
+                type="text"
+              />
+            </div>
+            <div
+              class="table-body-item-container flex justify-start items-center"
+            >
+              <BBCheckbox
+                class="ml-3"
+                :value="!column.nullable"
+                :disabled="disableAlterColumn(column)"
+                @toggle="(value) => (column.nullable = !value)"
+              />
+            </div>
+            <div class="w-full flex justify-start items-center">
+              <n-tooltip v-if="!isDroppedColumn(column)" trigger="hover">
+                <template #trigger>
+                  <button
+                    :disabled="isDroppedTable"
+                    class="text-gray-500 cursor-pointer hover:opacity-80"
+                    @click="handleDropColumn(column)"
+                  >
+                    <heroicons:trash class="w-4 h-auto" />
+                  </button>
+                </template>
+                <span>{{ $t("ui-editor.actions.drop-column") }}</span>
+              </n-tooltip>
+              <n-tooltip v-else trigger="hover">
+                <template #trigger>
+                  <button
+                    class="text-gray-500 cursor-pointer hover:opacity-80"
+                    :disabled="isDroppedTable"
+                    @click="handleRestoreColumn(column)"
+                  >
+                    <heroicons:arrow-uturn-left class="w-4 h-auto" />
+                  </button>
+                </template>
+                <span>{{ $t("ui-editor.actions.restore") }}</span>
+              </n-tooltip>
+            </div>
           </div>
         </div>
       </div>
+    </template>
+    <div
+      v-else-if="state.selectedTab === 'raw-sql'"
+      class="w-full h-full overflow-y-auto"
+    >
+      <div
+        v-if="state.isFetchingDDL"
+        class="w-full h-full min-h-[64px] flex justify-center items-center"
+      >
+        <BBSpin />
+      </div>
+      <template v-else>
+        <HighlightCodeBlock
+          v-if="state.statement !== ''"
+          class="text-sm px-3 py-2 whitespace-pre-wrap break-all"
+          language="sql"
+          :code="state.statement"
+        ></HighlightCodeBlock>
+        <div v-else class="flex px-3 py-2 italic text-sm text-gray-600">
+          {{ $t("ui-editor.nothing-changed") }}
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script lang="ts" setup>
 import { cloneDeep, isEqual } from "lodash-es";
-import { computed, reactive } from "vue";
+import { computed, reactive, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useDebounceFn } from "@vueuse/core";
 import {
+  useDatabaseStore,
   useNotificationStore,
-  useTableStore,
   useUIEditorStore,
 } from "@/store/modules";
-import { TableTabContext, Column, UNKNOWN_ID, DatabaseEdit } from "@/types";
+import { TableTabContext, unknown } from "@/types";
 import { BBCheckbox, BBSpin } from "@/bbkit";
 import { getDataTypeSuggestionList } from "@/utils";
 import { diffTableList } from "@/utils/UIEditor/diffTable";
 import HighlightCodeBlock from "@/components/HighlightCodeBlock";
+import { Column, DatabaseEdit, Table } from "@/types/UIEditor";
+import { transformColumnDataToColumn } from "@/utils/UIEditor/transform";
 
-const tableOrColumnNameFieldRegexp = /^\S+$/;
-const columnTypeFieldRegexp = /^\S+$/;
+type TabType = "column-list" | "raw-sql";
 
 interface LocalState {
+  selectedTab: TabType;
   isFetchingDDL: boolean;
   statement: string;
+  tableCache: Table;
 }
 
 const { t } = useI18n();
-const state = reactive<LocalState>({
-  isFetchingDDL: false,
-  statement: "",
-});
 const editorStore = useUIEditorStore();
-const tableStore = useTableStore();
+const databaseStore = useDatabaseStore();
 const notificationStore = useNotificationStore();
 const currentTab = editorStore.currentTab as TableTabContext;
-const table = currentTab.table;
-const tableCache = currentTab.tableCache;
+const state = reactive<LocalState>({
+  selectedTab: "column-list",
+  isFetchingDDL: false,
+  statement: "",
+  tableCache: cloneDeep(editorStore.getTableWithTableTab(currentTab) as Table),
+});
 
-const allowSave = computed(() => {
-  return !isEqual(tableCache, table);
+const table = computed(
+  () => editorStore.getTableWithTableTab(currentTab) as Table
+);
+
+const isDroppedTable = computed(() => {
+  return state.tableCache.status === "dropped";
+});
+
+const allowResetTable = computed(() => {
+  if (state.tableCache.status === "created") {
+    return false;
+  }
+
+  const originTable = editorStore.originTableList.find(
+    (item) =>
+      item.databaseId === state.tableCache.databaseId &&
+      item.oldName === state.tableCache.oldName
+  );
+  return !isEqual(originTable, state.tableCache) || isDroppedTable.value;
 });
 
 const columnHeaderList = computed(() => {
@@ -237,138 +287,150 @@ const columnHeaderList = computed(() => {
     },
     {
       key: "nullable",
-      label: t("ui-editor.column.is-nullable"),
+      label: t("ui-editor.column.not-null"),
     },
   ];
 });
 
 const dataTypeOptions = computed(() => {
-  return getDataTypeSuggestionList(tableCache.database.instance.engine).map(
-    (dataType) => {
-      return {
-        label: dataType,
-        key: dataType,
-      };
-    }
-  );
+  const database = databaseStore.getDatabaseById(state.tableCache.databaseId);
+  return getDataTypeSuggestionList(database.instance.engine).map((dataType) => {
+    return {
+      label: dataType,
+      key: dataType,
+    };
+  });
 });
 
-const handleSaveChanges = async () => {
-  if (!tableOrColumnNameFieldRegexp.test(tableCache.name)) {
-    notificationStore.pushNotification({
-      module: "bytebase",
-      style: "CRITICAL",
-      title: t("ui-editor.message.invalid-table-name"),
-    });
-    return;
-  }
+const dataDefaultOptions = [
+  // TODO(steven): support set default field with EMPTY.
+  // {
+  //   label: "EMPTY",
+  //   key: "EMPTY",
+  // },
+  {
+    label: "NULL",
+    key: "NULL",
+  },
+];
 
-  const tableNameList = (
-    await editorStore.getOrFetchTableListByDatabaseId(tableCache.database.id)
-  )
-    .filter((item) => item !== table)
-    .map((table) => table.name);
-  if (tableNameList.includes(tableCache.name)) {
-    notificationStore.pushNotification({
-      module: "bytebase",
-      style: "CRITICAL",
-      title: t("ui-editor.message.duplicated-table-name"),
-    });
-    return;
+watch(
+  () => state.tableCache,
+  () => {
+    handleSaveChanges();
+  },
+  {
+    deep: true,
   }
+);
 
-  for (const column of tableCache.columnList) {
-    if (!tableOrColumnNameFieldRegexp.test(column.name)) {
-      notificationStore.pushNotification({
-        module: "bytebase",
-        style: "CRITICAL",
-        title: t("ui-editor.message.invalid-column-name"),
-      });
-      return;
-    }
-    const foundColumnListByName = tableCache.columnList.filter(
-      (item) => item.name === column.name
-    );
-    if (foundColumnListByName.length > 1) {
-      notificationStore.pushNotification({
-        module: "bytebase",
-        style: "CRITICAL",
-        title: t("ui-editor.message.duplicated-column-name"),
-      });
-      return;
-    }
-    if (!columnTypeFieldRegexp.test(column.type)) {
-      notificationStore.pushNotification({
-        module: "bytebase",
-        style: "CRITICAL",
-        title: t("ui-editor.message.invalid-column-type"),
-      });
-      return;
+watch([table.value], () => {
+  state.tableCache.newName = table.value.newName;
+  state.tableCache.status = table.value.status;
+});
+
+watch(
+  () => state.selectedTab,
+  async () => {
+    if (state.selectedTab === "raw-sql") {
+      const originTable = editorStore.originTableList.find(
+        (item) =>
+          item.databaseId === state.tableCache.databaseId &&
+          item.oldName === state.tableCache.oldName
+      );
+      const diffTableListResult = diffTableList(
+        originTable ? [originTable] : [],
+        [state.tableCache]
+      );
+      const databaseEdit: DatabaseEdit = {
+        databaseId: state.tableCache.databaseId,
+        ...diffTableListResult,
+      };
+      state.isFetchingDDL = true;
+      const databaseEditResult = await editorStore.postDatabaseEdit(
+        databaseEdit
+      );
+      if (databaseEditResult.validateResultList.length > 0) {
+        notificationStore.pushNotification({
+          module: "bytebase",
+          style: "CRITICAL",
+          title: "Invalid request",
+          description: databaseEditResult.validateResultList
+            .map((result) => result.message)
+            .join("\n"),
+        });
+        state.statement = "";
+        return;
+      }
+      state.statement = databaseEditResult.statement;
+      state.isFetchingDDL = false;
     }
   }
+);
 
-  editorStore.saveTab(currentTab);
+const isDroppedColumn = (column: Column): boolean => {
+  return column.status === "dropped";
 };
+
+const disableAlterColumn = (column: Column): boolean => {
+  return isDroppedTable.value || isDroppedColumn(column);
+};
+
+const handleChangeTab = (tab: TabType) => {
+  state.selectedTab = tab;
+};
+
+const handleSaveChanges = useDebounceFn(async () => {
+  const table = editorStore.getTableWithTableTab(currentTab) as Table;
+  table.columnList = cloneDeep(state.tableCache.columnList);
+}, 500);
 
 const handleAddColumn = () => {
-  tableCache.columnList.push({
-    id: UNKNOWN_ID,
-    name: "",
-    type: "",
-    nullable: false,
-    comment: "",
-  } as Column);
+  const column = transformColumnDataToColumn(unknown("COLUMN"));
+  column.status = "created";
+  state.tableCache.columnList.push(column);
 };
 
-const handleRemoveColumn = (column: Column) => {
-  tableCache.columnList = tableCache.columnList.filter(
-    (item) => item !== column
-  );
+const handleColumnDefaultFieldChange = (
+  column: Column,
+  defaultString: string
+) => {
+  if (defaultString === "NULL") {
+    column.default = null;
+  }
+};
+
+const handleDropColumn = (column: Column) => {
+  if (column.status === "created") {
+    state.tableCache.columnList = state.tableCache.columnList.filter(
+      (item) => item !== column
+    );
+  } else {
+    column.status = "dropped";
+  }
+};
+
+const handleRestoreColumn = (column: Column) => {
+  if (column.status === "created") {
+    return;
+  }
+
+  column.status = "normal";
 };
 
 const handleDiscardChanges = () => {
-  tableCache.name = table.name;
-  tableCache.columnList = cloneDeep(table.columnList);
-};
-
-const handlePreviewDDLStatement = async (show: boolean) => {
-  if (!show) {
+  if (state.tableCache.status === "created") {
     return;
   }
 
-  const databaseEdit: DatabaseEdit = {
-    databaseId: table.database.id,
-    createTableList: [],
-    alterTableList: [],
-    renameTableList: [],
-    dropTableList: [],
-  };
-  if (table.id === UNKNOWN_ID) {
-    const diffTableListResult = diffTableList([], [table]);
-    databaseEdit.createTableList = diffTableListResult.createTableList;
-  } else {
-    const originTable = tableStore.getTableByDatabaseIdAndTableId(
-      table.database.id,
-      table.id
-    );
-    const isDropped = editorStore.droppedTableList.includes(table);
-    if (isDropped) {
-      const diffTableListResult = diffTableList([originTable], []);
-      databaseEdit.dropTableList = diffTableListResult.dropTableList;
-    } else {
-      const diffTableListResult = diffTableList([originTable], [table]);
-      databaseEdit.alterTableList = diffTableListResult.alterTableList;
-      databaseEdit.renameTableList = diffTableListResult.renameTableList;
-    }
-  }
-  state.isFetchingDDL = true;
-  try {
-    const statement = await editorStore.postDatabaseEdit(databaseEdit);
-    state.statement = statement;
-  } catch (error) {
-    state.statement = "";
-  }
-  state.isFetchingDDL = false;
+  state.tableCache.newName = state.tableCache.oldName;
+  state.tableCache.columnList = cloneDeep(state.tableCache.originColumnList);
+  state.tableCache.status = "normal";
+
+  const table = editorStore.getTableWithTableTab(currentTab) as Table;
+  table.newName = table.oldName;
+  table.columnList = cloneDeep(table.columnList);
+  table.status = "normal";
 };
 </script>
 
@@ -380,6 +442,6 @@ const handlePreviewDDLStatement = async (show: boolean) => {
   @apply w-full h-10 box-border p-px pr-2 relative;
 }
 .column-field-input {
-  @apply w-full pr-1 box-border border-transparent text-ellipsis rounded bg-transparent text-sm placeholder:italic placeholder:text-gray-400 focus:bg-white focus:text-black;
+  @apply w-full pr-1 box-border border-transparent truncate select-none rounded bg-transparent text-sm placeholder:italic placeholder:text-gray-400 focus:bg-white focus:text-black;
 }
 </style>

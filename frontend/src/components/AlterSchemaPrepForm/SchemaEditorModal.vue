@@ -2,13 +2,14 @@
   <BBModal
     :title="$t('database.alter-schema')"
     class="ui-editor-modal-container !w-320 h-auto overflow-auto !max-w-[calc(100%-40px)] !max-h-[calc(100%-40px)]"
+    :esc-closable="false"
     @close="dismissModal"
   >
     <div
-      class="w-full flex flex-row justify-start items-center border-b border-b-gray-300"
+      class="w-full flex flex-row justify-start items-center border-b pl-1 border-b-gray-300"
     >
       <button
-        class="-mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none"
+        class="-mb-px px-3 leading-9 rounded-t-md flex items-center text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none outline-none"
         :class="
           state.selectedTab === 'ui-editor' &&
           'bg-white border-gray-300 text-gray-800'
@@ -16,9 +17,12 @@
         @click="handleChangeTab('ui-editor')"
       >
         {{ $t("ui-editor.self") }}
+        <div class="ml-1">
+          <BBBetaBadge />
+        </div>
       </button>
       <button
-        class="-mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none"
+        class="-mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none outline-none"
         :class="
           state.selectedTab === 'raw-sql' &&
           'bg-white border-gray-300 text-gray-800'
@@ -41,11 +45,31 @@
           class="w-full h-full pl-3 shrink-0 flex flex-row justify-between items-center"
         >
           <div>{{ $t("sql-editor.self") }}</div>
-          <div>
+          <div class="flex flex-row justify-end items-center space-x-3">
+            <label
+              for="sql-file-input"
+              class="text-sm border px-3 leading-8 flex items-center rounded cursor-pointer hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <heroicons-outline:arrow-up-tray
+                class="w-4 h-auto mr-1 text-gray-500"
+              />
+              {{ $t("issue.upload-sql") }}
+              <input
+                id="sql-file-input"
+                type="file"
+                accept=".sql,.txt,application/sql,text/plain"
+                class="hidden"
+                @change="handleUploadFile"
+              />
+            </label>
             <button
-              class="text-sm border px-3 leading-8 rounded cursor-pointer hover:bg-gray-100"
+              class="text-sm border px-3 leading-8 flex items-center rounded cursor-pointer hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="!allowSyncSQLFromUIEditor"
               @click="handleSyncSQLFromUIEditor"
             >
+              <heroicons-outline:arrow-path
+                class="w-4 h-auto mr-1 text-gray-500"
+              />
               {{ $t("ui-editor.sync-sql-from-ui-editor") }}
             </button>
           </div>
@@ -61,11 +85,15 @@
         />
       </div>
     </div>
-    <div class="w-full flex items-center justify-end mt-2 space-x-3">
+    <div class="w-full flex items-center justify-end mt-2 space-x-3 pr-1 pb-1">
       <button type="button" class="btn-normal" @click="dismissModal">
         {{ $t("common.cancel") }}
       </button>
-      <button class="btn-primary" @click="handlePreviewIssue">
+      <button
+        class="btn-primary"
+        :disabled="!allowPreviewIssue"
+        @click="handlePreviewIssue"
+      >
         {{ $t("ui-editor.preview-issue") }}
       </button>
     </div>
@@ -73,34 +101,51 @@
 
   <!-- Select DDL mode for MySQL -->
   <GhostDialog ref="ghostDialog" />
+
+  <!-- Close modal confirm dialog -->
+  <ActionConfirmModal
+    v-if="state.showActionConfirmModal"
+    :title="$t('ui-editor.confirm-to-close.title')"
+    :description="$t('ui-editor.confirm-to-close.description')"
+    @close="state.showActionConfirmModal = false"
+    @confirm="emit('close')"
+  />
 </template>
 
 <script lang="ts" setup>
 import dayjs from "dayjs";
-import { head, isEqual } from "lodash-es";
-import { useDialog } from "naive-ui";
-import { onMounted, PropType, reactive, ref } from "vue";
+import { head } from "lodash-es";
+import { computed, onMounted, PropType, reactive, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import {
   Database,
   DatabaseEdit,
   DatabaseId,
   SQLDialect,
-  TabContext,
-  UIEditorTabType,
   UNKNOWN_ID,
 } from "@/types";
 import { allowGhostMigration } from "@/utils";
-import { useDatabaseStore, useTableStore, useUIEditorStore } from "@/store";
+import {
+  useDatabaseStore,
+  useNotificationStore,
+  useUIEditorStore,
+} from "@/store";
 import { diffTableList } from "@/utils/UIEditor/diffTable";
+import { validateDatabaseEdit } from "@/utils/UIEditor/validate";
+import BBBetaBadge from "@/bbkit/BBBetaBadge.vue";
 import UIEditor from "@/components/UIEditor/UIEditor.vue";
 import GhostDialog from "./GhostDialog.vue";
+import ActionConfirmModal from "../UIEditor/Modals/ActionConfirmModal.vue";
+
+const MAX_UPLOAD_FILE_SIZE_MB = 1;
 
 type TabType = "raw-sql" | "ui-editor";
 
 interface LocalState {
   selectedTab: TabType;
   editStatement: string;
+  showActionConfirmModal: boolean;
 }
 
 const props = defineProps({
@@ -118,16 +163,34 @@ const emit = defineEmits<{
   (event: "close"): void;
 }>();
 
+const { t } = useI18n();
 const router = useRouter();
 const state = reactive<LocalState>({
   selectedTab: "ui-editor",
   editStatement: "",
+  showActionConfirmModal: false,
 });
 const editorStore = useUIEditorStore();
-const tableStore = useTableStore();
 const databaseStore = useDatabaseStore();
-const dialog = useDialog();
+const notificationStore = useNotificationStore();
+const statementFromUIEditor = ref<string>();
 const ghostDialog = ref<InstanceType<typeof GhostDialog>>();
+
+const allowPreviewIssue = computed(() => {
+  if (state.selectedTab === "ui-editor") {
+    const databaseEditList = getDatabaseEditListWithUIEditor();
+    return databaseEditList.length !== 0;
+  } else {
+    return state.editStatement !== "";
+  }
+});
+
+const allowSyncSQLFromUIEditor = computed(() => {
+  if (state.selectedTab === "raw-sql") {
+    return statementFromUIEditor.value !== state.editStatement;
+  }
+  return false;
+});
 
 const databaseList = props.databaseIdList.map((databaseId) => {
   return databaseStore.getDatabaseById(databaseId);
@@ -160,7 +223,11 @@ const handleStatementChange = (value: string) => {
 };
 
 const dismissModal = () => {
-  emit("close");
+  if (allowPreviewIssue.value) {
+    state.showActionConfirmModal = true;
+  } else {
+    emit("close");
+  }
 };
 
 // 'normal' -> normal migration
@@ -187,23 +254,28 @@ const isUsingGhostMigration = async (databaseList: Database[]) => {
 };
 
 const handleSyncSQLFromUIEditor = async () => {
+  if (!allowSyncSQLFromUIEditor.value) {
+    return;
+  }
+
   const databaseEditMap = await fetchDatabaseEditMapWithUIEditor();
+  if (!databaseEditMap) {
+    return;
+  }
   state.editStatement = Array.from(databaseEditMap.values()).join("\n");
+  statementFromUIEditor.value = state.editStatement;
 };
 
-const fetchDatabaseEditMapWithUIEditor = async () => {
+const getDatabaseEditListWithUIEditor = () => {
   const databaseEditList: DatabaseEdit[] = [];
   for (const database of editorStore.databaseList) {
-    const originTableList = await tableStore.getOrFetchTableListByDatabaseId(
-      database.id
+    const originTableList = editorStore.originTableList.filter(
+      (table) => table.databaseId === database.id
     );
-    const updatedTableList = (
-      await editorStore.getOrFetchTableListByDatabaseId(database.id)
-    ).filter((table) => !editorStore.droppedTableList.includes(table));
-    const diffTableListResult = diffTableList(
-      originTableList,
-      updatedTableList
+    const tableList = editorStore.tableList.filter(
+      (table) => table.databaseId === database.id
     );
+    const diffTableListResult = diffTableList(originTableList, tableList);
     if (
       diffTableListResult.createTableList.length > 0 ||
       diffTableListResult.alterTableList.length > 0 ||
@@ -216,37 +288,78 @@ const fetchDatabaseEditMapWithUIEditor = async () => {
       });
     }
   }
+  return databaseEditList;
+};
 
+const fetchDatabaseEditMapWithUIEditor = async () => {
+  const databaseEditList = getDatabaseEditListWithUIEditor();
   const databaseEditMap: Map<DatabaseId, string> = new Map();
   if (databaseEditList.length > 0) {
     for (const databaseEdit of databaseEditList) {
-      const statement = await editorStore.postDatabaseEdit(databaseEdit);
-      databaseEditMap.set(databaseEdit.databaseId, statement);
+      const databaseEditResult = await editorStore.postDatabaseEdit(
+        databaseEdit
+      );
+      if (databaseEditResult.validateResultList.length > 0) {
+        notificationStore.pushNotification({
+          module: "bytebase",
+          style: "CRITICAL",
+          title: "Invalid request",
+          description: databaseEditResult.validateResultList
+            .map((result) => result.message)
+            .join("\n"),
+        });
+        return;
+      }
+      databaseEditMap.set(
+        databaseEdit.databaseId,
+        databaseEditResult.statement
+      );
     }
   }
   return databaseEditMap;
 };
 
-const unsavedDialogWarning = (): Promise<
-  "Close" | "NegativeClick" | "PositiveClick"
-> => {
-  return new Promise((resolve) => {
-    dialog.warning({
-      title: "Confirm to continue",
-      content: "There are unsaved changes. Are you sure confirm to continue?",
-      negativeText: "Discard",
-      positiveText: "Save",
-      onClose: () => {
-        resolve("Close");
-      },
-      onNegativeClick: () => {
-        resolve("NegativeClick");
-      },
-      onPositiveClick: () => {
-        resolve("PositiveClick");
-      },
+const handleUploadFile = (e: Event) => {
+  const target = e.target as HTMLInputElement;
+  const file = (target.files || [])[0];
+  const cleanup = () => {
+    // Note that once selected a file, selecting the same file again will not
+    // trigger <input type="file">'s change event.
+    // So we need to do some cleanup stuff here.
+    target.files = null;
+    target.value = "";
+  };
+
+  if (!file) {
+    return cleanup();
+  }
+  if (file.size > MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024) {
+    notificationStore.pushNotification({
+      module: "bytebase",
+      style: "CRITICAL",
+      title: t("issue.upload-sql-file-max-size-exceeded", {
+        size: `${MAX_UPLOAD_FILE_SIZE_MB}MB`,
+      }),
     });
-  });
+    return cleanup();
+  }
+  const fr = new FileReader();
+  fr.onload = () => {
+    const sql = fr.result as string;
+    state.editStatement = sql;
+  };
+  fr.onerror = (e) => {
+    notificationStore.pushNotification({
+      module: "bytebase",
+      style: "WARN",
+      title: `Read file error`,
+      description: String(fr.error),
+    });
+    return;
+  };
+  fr.readAsText(file);
+
+  cleanup();
 };
 
 const handlePreviewIssue = async () => {
@@ -286,38 +399,36 @@ const handlePreviewIssue = async () => {
   if (state.selectedTab === "raw-sql") {
     query.sql = state.editStatement;
   } else {
-    // Check whether tabs saved.
-    const unsavedTabList: TabContext[] = [];
-    for (const tab of editorStore.tabList) {
-      if (tab.type === UIEditorTabType.TabForTable) {
-        if (!isEqual(tab.tableCache, tab.table)) {
-          unsavedTabList.push(tab);
-        }
-      }
+    const databaseEditList = getDatabaseEditListWithUIEditor();
+    // Validate databaseEditList in frontend.
+    const validateResultList = [];
+    for (const databaseEdit of databaseEditList) {
+      validateResultList.push(...validateDatabaseEdit(databaseEdit));
     }
-    if (unsavedTabList.length > 0) {
-      const action = await unsavedDialogWarning();
-      if (action === "NegativeClick") {
-        for (const unsavedTab of unsavedTabList) {
-          editorStore.discardTabChanges(unsavedTab);
-        }
-      } else if (action === "PositiveClick") {
-        for (const unsavedTab of unsavedTabList) {
-          editorStore.saveTab(unsavedTab);
-        }
-      } else {
-        return;
-      }
+    if (validateResultList.length > 0) {
+      notificationStore.pushNotification({
+        module: "bytebase",
+        style: "CRITICAL",
+        title: "Invalid request",
+        description: validateResultList
+          .map((result) => result.message)
+          .join("\n"),
+      });
+      return;
     }
 
     const databaseEditMap = await fetchDatabaseEditMapWithUIEditor();
+    if (!databaseEditMap) {
+      return;
+    }
     const databaseIdList = Array.from(databaseEditMap.keys());
     if (databaseIdList.length > 0) {
       const statmentList = Array.from(databaseEditMap.values());
-      query.sql = statmentList.join("\n");
-
-      if (!props.tenantMode) {
+      if (props.tenantMode) {
+        query.sql = statmentList.join("\n");
+      } else {
         query.databaseList = databaseIdList.join(",");
+        query.sqlList = JSON.stringify(statmentList);
         query.name = generateIssueName(
           databaseList
             .filter((database) => databaseIdList.includes(database.id))
@@ -358,6 +469,16 @@ const generateIssueName = (
 
   return issueNameParts.join(" ");
 };
+
+watch(
+  () => getDatabaseEditListWithUIEditor(),
+  () => {
+    statementFromUIEditor.value = undefined;
+  },
+  {
+    deep: true,
+  }
+);
 </script>
 
 <style>

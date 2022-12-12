@@ -2628,3 +2628,399 @@ func TestAlterSequence(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestCreateExtension(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`,
+			want: []ast.Node{
+				&ast.CreateExtensionStmt{
+					Schema:      "public",
+					Name:        "pg_trgm",
+					IfNotExists: true,
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text:     `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestDropExtension(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `DROP EXTENSION IF EXISTS pg_trgm, hstore`,
+			want: []ast.Node{
+				&ast.DropExtensionStmt{
+					IfExists: true,
+					NameList: []string{
+						"pg_trgm",
+						"hstore",
+					},
+					Behavior: ast.DropBehaviorRestrict,
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text:     `DROP EXTENSION IF EXISTS pg_trgm, hstore`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestCreateFunction(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `Create function get_car_Price("Price_from" int, Price_to int)  
+			returns int  
+			language plpgsql  
+			as  
+			$$  
+			Declare  
+			 Car_count integer;  
+			Begin  
+			   select count(*)   
+			   into Car_count  
+			   from Car  
+			   where Car_price between "Price_from" and Price_to;  
+			   return Car_count;  
+			End;  
+			$$;`,
+			want: []ast.Node{
+				&ast.CreateFunctionStmt{
+					Function: &ast.FunctionDef{
+						Schema: "",
+						Name:   "get_car_price",
+						ParameterList: []*ast.FunctionParameterDef{
+							{
+								Name: "Price_from",
+								Type: &ast.Integer{Size: 4},
+								Mode: ast.FunctionParameterModeIn,
+							},
+							{
+								Name: "price_to",
+								Type: &ast.Integer{Size: 4},
+								Mode: ast.FunctionParameterModeIn,
+							},
+						},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text: `Create function get_car_Price("Price_from" int, Price_to int)  
+			returns int  
+			language plpgsql  
+			as  
+			$$  
+			Declare  
+			 Car_count integer;  
+			Begin  
+			   select count(*)   
+			   into Car_count  
+			   from Car  
+			   where Car_price between "Price_from" and Price_to;  
+			   return Car_count;  
+			End;  
+			$$;`,
+					LastLine: 15,
+				},
+			},
+		},
+		{
+			stmt: `CREATE FUNCTION public.trigger_update_updated_ts() RETURNS trigger
+			LANGUAGE plpgsql
+			AS $$
+		BEGIN
+		  NEW.updated_ts = extract(epoch from now());
+		  RETURN NEW;
+		END;
+		$$;`,
+			want: []ast.Node{
+				&ast.CreateFunctionStmt{
+					Function: &ast.FunctionDef{
+						Schema: "public",
+						Name:   "trigger_update_updated_ts",
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text: `CREATE FUNCTION public.trigger_update_updated_ts() RETURNS trigger
+			LANGUAGE plpgsql
+			AS $$
+		BEGIN
+		  NEW.updated_ts = extract(epoch from now());
+		  RETURN NEW;
+		END;
+		$$;`,
+					LastLine: 8,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestDropFunction(t *testing.T) {
+	tests := []testData{
+		{
+			// pg_query_go will skip the OUT parameters and only parse the parameter data type.
+			stmt: `DROP FUNCTION IF EXISTS public.func1(INOUT "Price_from" int, IN price_to int, OUT out_item int), func2()`,
+			want: []ast.Node{
+				&ast.DropFunctionStmt{
+					IfExists: true,
+					FunctionList: []*ast.FunctionDef{
+						{
+							Schema: "public",
+							Name:   "func1",
+							ParameterList: []*ast.FunctionParameterDef{
+								{
+									Type: &ast.Integer{Size: 4},
+								},
+								{
+									Type: &ast.Integer{Size: 4},
+								},
+							},
+						},
+						{
+							Schema: "",
+							Name:   "func2",
+						},
+					},
+					Behavior: ast.DropBehaviorRestrict,
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text:     `DROP FUNCTION IF EXISTS public.func1(INOUT "Price_from" int, IN price_to int, OUT out_item int), func2()`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestCreateTrigger(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `CREATE TRIGGER update_principal_updated_ts BEFORE UPDATE ON public.principal FOR EACH ROW EXECUTE FUNCTION public.trigger_update_updated_ts();`,
+			want: []ast.Node{
+				&ast.CreateTriggerStmt{
+					Trigger: &ast.TriggerDef{
+						Name: "update_principal_updated_ts",
+						Table: &ast.TableDef{
+							Type:   ast.TableTypeUnknown,
+							Schema: "public",
+							Name:   "principal",
+						},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text:     `CREATE TRIGGER update_principal_updated_ts BEFORE UPDATE ON public.principal FOR EACH ROW EXECUTE FUNCTION public.trigger_update_updated_ts();`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestDropTrigger(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `DROP TRIGGER update_ts ON public.principal`,
+			want: []ast.Node{
+				&ast.DropTriggerStmt{
+					IfExists: false,
+					Behavior: ast.DropBehaviorRestrict,
+					Trigger: &ast.TriggerDef{
+						Name: "update_ts",
+						Table: &ast.TableDef{
+							Type:   ast.TableTypeUnknown,
+							Schema: "public",
+							Name:   "principal",
+						},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text:     `DROP TRIGGER update_ts ON public.principal`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestCreateType(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `CREATE TYPE public.bug_status AS ENUM ('new', 'open', 'closed');`,
+			want: []ast.Node{
+				&ast.CreateTypeStmt{
+					Type: &ast.EnumTypeDef{
+						Name: &ast.TypeNameDef{
+							Schema: "public",
+							Name:   "bug_status",
+						},
+						LabelList: []string{"new", "open", "closed"},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text:     `CREATE TYPE public.bug_status AS ENUM ('new', 'open', 'closed');`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestDropType(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `DROP TYPE public.bug_status, tp1`,
+			want: []ast.Node{
+				&ast.DropTypeStmt{
+					IfExists: false,
+					Behavior: ast.DropBehaviorRestrict,
+					TypeNameList: []*ast.TypeNameDef{
+						{
+							Schema: "public",
+							Name:   "bug_status",
+						},
+						{
+							Schema: "",
+							Name:   "tp1",
+						},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+					Text:     `DROP TYPE public.bug_status, tp1`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestAlterType(t *testing.T) {
+	tests := []testData{
+		{
+			stmt: `ALTER TYPE public.bug_status ADD VALUE 'a' BEFORE 'b'`,
+			want: []ast.Node{
+				&ast.AlterTypeStmt{
+					Type: &ast.TypeNameDef{
+						Schema: "public",
+						Name:   "bug_status",
+					},
+					AlterItemList: []ast.Node{
+						&ast.AddEnumLabelStmt{
+							EnumType: &ast.TypeNameDef{
+								Schema: "public",
+								Name:   "bug_status",
+							},
+							NewLabel:      "a",
+							Position:      ast.PositionTypeBefore,
+							NeighborLabel: "b",
+						},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+
+					Text:     `ALTER TYPE public.bug_status ADD VALUE 'a' BEFORE 'b'`,
+					LastLine: 1,
+				},
+			},
+		},
+		{
+			stmt: `ALTER TYPE public.bug_status ADD VALUE 'a' AFTER 'b'`,
+			want: []ast.Node{
+				&ast.AlterTypeStmt{
+					Type: &ast.TypeNameDef{
+						Schema: "public",
+						Name:   "bug_status",
+					},
+					AlterItemList: []ast.Node{
+						&ast.AddEnumLabelStmt{
+							EnumType: &ast.TypeNameDef{
+								Schema: "public",
+								Name:   "bug_status",
+							},
+							NewLabel:      "a",
+							Position:      ast.PositionTypeAfter,
+							NeighborLabel: "b",
+						},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+
+					Text:     `ALTER TYPE public.bug_status ADD VALUE 'a' AFTER 'b'`,
+					LastLine: 1,
+				},
+			},
+		},
+		{
+			stmt: `ALTER TYPE public.bug_status ADD VALUE 'a'`,
+			want: []ast.Node{
+				&ast.AlterTypeStmt{
+					Type: &ast.TypeNameDef{
+						Schema: "public",
+						Name:   "bug_status",
+					},
+					AlterItemList: []ast.Node{
+						&ast.AddEnumLabelStmt{
+							EnumType: &ast.TypeNameDef{
+								Schema: "public",
+								Name:   "bug_status",
+							},
+							NewLabel:      "a",
+							Position:      ast.PositionTypeEnd,
+							NeighborLabel: "",
+						},
+					},
+				},
+			},
+			statementList: []parser.SingleSQL{
+				{
+
+					Text:     `ALTER TYPE public.bug_status ADD VALUE 'a'`,
+					LastLine: 1,
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}

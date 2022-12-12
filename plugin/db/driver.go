@@ -33,6 +33,8 @@ const (
 	SQLite Type = "SQLITE"
 	// TiDB is the database type for TiDB.
 	TiDB Type = "TIDB"
+	// MongoDB is the database type for MongoDB.
+	MongoDB Type = "MONGODB"
 
 	// BytebaseDatabase is the database installed in the controlled database server.
 	BytebaseDatabase = "bytebase"
@@ -47,6 +49,10 @@ type User struct {
 // View is the database view.
 type View struct {
 	Name string
+	// ShortName is the short table name.
+	ShortName string
+	// Schema is the schema name for a table. It should be supported only for Postgres and Snowflake.
+	Schema string
 	// CreatedTs isn't supported for ClickHouse.
 	CreatedTs  int64
 	UpdatedTs  int64
@@ -96,7 +102,12 @@ type Column struct {
 
 // Table is the database table.
 type Table struct {
+	// Name is a combination of schema and short name for legacy purpose.
 	Name string
+	// ShortName is the short table name.
+	ShortName string
+	// Schema is the schema name for a table. It should be supported only for Postgres and Snowflake.
+	Schema string
 	// CreatedTs isn't supported for ClickHouse, SQLite.
 	CreatedTs int64
 	// UpdatedTs isn't supported for SQLite.
@@ -438,6 +449,8 @@ type ConnectionConfig struct {
 	ReadOnly bool
 	// StrictUseDb will only set as true if the user gives only a database instead of a whole instance to access.
 	StrictUseDb bool
+	// SRV is only supported for MongoDB now.
+	SRV bool
 }
 
 // ConnectionContext is the context for connection.
@@ -450,9 +463,10 @@ type ConnectionContext struct {
 // QueryContext is the context to query.
 type QueryContext struct {
 	// Limit is the maximum row count returned. No limit enforced if limit <= 0
-	Limit            int
-	ReadOnly         bool
-	SensitiveDataMap SensitiveDataMap
+	Limit                 int
+	ReadOnly              bool
+	SensitiveDataMaskType SensitiveDataMaskType
+	SensitiveSchemaInfo   *SensitiveSchemaInfo
 
 	// CurrentDatabase is for MySQL
 	CurrentDatabase string
@@ -561,16 +575,6 @@ func FormatParamNameInNumberedPosition(paramNames []string) string {
 	return fmt.Sprintf("WHERE %s ", strings.Join(parts, " AND "))
 }
 
-// SensitiveData is the struct for sensitive column.
-type SensitiveData struct {
-	Database string
-	Table    string
-	Column   string
-}
-
-// SensitiveDataMap is the map for sensitive data.
-type SensitiveDataMap map[SensitiveData]SensitiveDataMaskType
-
 // SensitiveDataMaskType is the mask type for sensitive data.
 type SensitiveDataMaskType string
 
@@ -579,3 +583,32 @@ const (
 	// The default method is subject to change.
 	SensitiveDataMaskTypeDefault SensitiveDataMaskType = "DEFAULT"
 )
+
+// SensitiveSchemaInfo is the schema info using to extract sensitive fields.
+type SensitiveSchemaInfo struct {
+	DatabaseList []DatabaseSchema
+}
+
+// DatabaseSchema is the database schema using to extract sensitive fields.
+type DatabaseSchema struct {
+	Name      string
+	TableList []TableSchema
+}
+
+// TableSchema is the table schema using to extract sensitive fields.
+type TableSchema struct {
+	Name       string
+	ColumnList []ColumnInfo
+}
+
+// ColumnInfo is the column info using to extract sensitive fields.
+type ColumnInfo struct {
+	Name      string
+	Sensitive bool
+}
+
+// SensitiveField is the struct about SELECT fields.
+type SensitiveField struct {
+	Name      string
+	Sensitive bool
+}

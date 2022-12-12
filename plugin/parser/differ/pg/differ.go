@@ -31,16 +31,24 @@ type diffNode struct {
 	// Drop nodes
 	dropForeignKeyList         []ast.Node
 	dropConstraintExceptFkList []ast.Node
+	dropTriggerList            []ast.Node
 	dropIndexList              []ast.Node
 	dropDefaultList            []ast.Node
 	dropSequenceOwnedByList    []ast.Node
 	dropColumnList             []ast.Node
 	dropTableList              []ast.Node
 	dropSequenceList           []ast.Node
+	dropFunctionList           []ast.Node
+	dropExtensionList          []ast.Node
+	dropTypeList               []ast.Node
 	dropSchemaList             []ast.Node
 
 	// Create nodes
 	createSchemaList               []ast.Node
+	createTypeList                 []ast.Node
+	alterTypeList                  []ast.Node
+	createExtensionList            []ast.Node
+	createFunctionList             []ast.Node
 	createSequenceList             []ast.Node
 	alterSequenceExceptOwnedByList []ast.Node
 	createTableList                []ast.Node
@@ -49,6 +57,7 @@ type diffNode struct {
 	setSequenceOwnedByList         []ast.Node
 	setDefaultList                 []ast.Node
 	createIndexList                []ast.Node
+	createTriggerList              []ast.Node
 	createConstraintExceptFkList   []ast.Node
 	createForeignKeyList           []ast.Node
 }
@@ -58,6 +67,10 @@ type tableMap map[string]*tableInfo
 type constraintMap map[string]*constraintInfo
 type indexMap map[string]*indexInfo
 type sequenceMap map[string]*sequenceInfo
+type extensionMap map[string]*extensionInfo
+type functionMap map[string]*functionInfo
+type triggerMap map[string]*triggerInfo
+type typeMap map[string]*typeInfo
 
 type schemaInfo struct {
 	id           int
@@ -66,6 +79,9 @@ type schemaInfo struct {
 	tableMap     tableMap
 	indexMap     indexMap
 	sequenceMap  sequenceMap
+	extensionMap extensionMap
+	functionMap  functionMap
+	typeMap      typeMap
 }
 
 func newSchemaInfo(id int, createSchema *ast.CreateSchemaStmt) *schemaInfo {
@@ -76,6 +92,9 @@ func newSchemaInfo(id int, createSchema *ast.CreateSchemaStmt) *schemaInfo {
 		tableMap:     make(tableMap),
 		indexMap:     make(indexMap),
 		sequenceMap:  make(sequenceMap),
+		extensionMap: make(extensionMap),
+		functionMap:  make(functionMap),
+		typeMap:      make(typeMap),
 	}
 }
 
@@ -84,6 +103,7 @@ type tableInfo struct {
 	existsInNew   bool
 	createTable   *ast.CreateTableStmt
 	constraintMap constraintMap
+	triggerMap    triggerMap
 }
 
 func newTableInfo(id int, createTable *ast.CreateTableStmt) *tableInfo {
@@ -92,6 +112,7 @@ func newTableInfo(id int, createTable *ast.CreateTableStmt) *tableInfo {
 		existsInNew:   false,
 		createTable:   createTable,
 		constraintMap: make(constraintMap),
+		triggerMap:    make(triggerMap),
 	}
 }
 
@@ -152,6 +173,62 @@ func newSequenceOwnedByInfo(id int, ownedBy *ast.AlterSequenceStmt) *sequenceOwn
 	}
 }
 
+type extensionInfo struct {
+	id              int
+	existsInNew     bool
+	createExtension *ast.CreateExtensionStmt
+}
+
+func newExtensionInfo(id int, createExtension *ast.CreateExtensionStmt) *extensionInfo {
+	return &extensionInfo{
+		id:              id,
+		existsInNew:     false,
+		createExtension: createExtension,
+	}
+}
+
+type functionInfo struct {
+	id             int
+	existsInNew    bool
+	createFunction *ast.CreateFunctionStmt
+}
+
+func newFunctionInfo(id int, createFunction *ast.CreateFunctionStmt) *functionInfo {
+	return &functionInfo{
+		id:             id,
+		existsInNew:    false,
+		createFunction: createFunction,
+	}
+}
+
+type triggerInfo struct {
+	id            int
+	existsInNew   bool
+	createTrigger *ast.CreateTriggerStmt
+}
+
+func newTriggerInfo(id int, createTrigger *ast.CreateTriggerStmt) *triggerInfo {
+	return &triggerInfo{
+		id:            id,
+		existsInNew:   false,
+		createTrigger: createTrigger,
+	}
+}
+
+type typeInfo struct {
+	id          int
+	existsInNew bool
+	createType  *ast.CreateTypeStmt
+}
+
+func newTypeInfo(id int, createType *ast.CreateTypeStmt) *typeInfo {
+	return &typeInfo{
+		id:          id,
+		existsInNew: false,
+		createType:  createType,
+	}
+}
+
 func (m schemaMap) addTable(id int, table *ast.CreateTableStmt) error {
 	schema, exists := m[table.Name.Schema]
 	if !exists {
@@ -198,6 +275,44 @@ func (m schemaMap) getConstraint(schemaName string, tableName string, constraint
 	return table.constraintMap[constraintName]
 }
 
+func (m schemaMap) addExtension(id int, extension *ast.CreateExtensionStmt) error {
+	schema, exists := m[extension.Schema]
+	if !exists {
+		return errors.Errorf("failed to add extension: schema %s not found", extension.Schema)
+	}
+	schema.extensionMap[extension.Name] = newExtensionInfo(id, extension)
+	return nil
+}
+
+func (m schemaMap) getExtension(schemaName string, extensionName string) *extensionInfo {
+	schema, exists := m[schemaName]
+	if !exists {
+		return nil
+	}
+	return schema.extensionMap[extensionName]
+}
+
+func (m schemaMap) addFunction(id int, function *ast.CreateFunctionStmt) error {
+	schema, exists := m[function.Function.Schema]
+	if !exists {
+		return errors.Errorf("failed to add function: schema %s not found", function.Function.Schema)
+	}
+	signature, err := functionSignature(function.Function)
+	if err != nil {
+		return err
+	}
+	schema.functionMap[signature] = newFunctionInfo(id, function)
+	return nil
+}
+
+func (m schemaMap) getFunction(schemaName string, signature string) *functionInfo {
+	schema, exists := m[schemaName]
+	if !exists {
+		return nil
+	}
+	return schema.functionMap[signature]
+}
+
 func (m schemaMap) addIndex(id int, index *ast.CreateIndexStmt) error {
 	schema, exists := m[index.Index.Table.Schema]
 	if !exists {
@@ -230,6 +345,48 @@ func (m schemaMap) getSequence(schemaName string, sequenceName string) *sequence
 		return nil
 	}
 	return schema.sequenceMap[sequenceName]
+}
+
+func (m schemaMap) addTrigger(id int, trigger *ast.CreateTriggerStmt) error {
+	schema, exists := m[trigger.Trigger.Table.Schema]
+	if !exists {
+		return errors.Errorf("failed to add trigger: schema %s not found", trigger.Trigger.Table.Schema)
+	}
+	table, exists := schema.tableMap[trigger.Trigger.Table.Name]
+	if !exists {
+		return errors.Errorf("failed to add trigger: table %s no found", trigger.Trigger.Table.Name)
+	}
+	table.triggerMap[trigger.Trigger.Name] = newTriggerInfo(id, trigger)
+	return nil
+}
+
+func (m schemaMap) getTrigger(schemaName string, tableName string, triggerName string) *triggerInfo {
+	schema, exists := m[schemaName]
+	if !exists {
+		return nil
+	}
+	table, exists := schema.tableMap[tableName]
+	if !exists {
+		return nil
+	}
+	return table.triggerMap[triggerName]
+}
+
+func (m schemaMap) addType(id int, createType *ast.CreateTypeStmt) error {
+	schema, exists := m[createType.Type.TypeName().Schema]
+	if !exists {
+		return errors.Errorf("failed to add type: schema %s not found", createType.Type.TypeName().Schema)
+	}
+	schema.typeMap[createType.Type.TypeName().Name] = newTypeInfo(id, createType)
+	return nil
+}
+
+func (m schemaMap) getType(schemaName string, typeName string) *typeInfo {
+	schema, exists := m[schemaName]
+	if !exists {
+		return nil
+	}
+	return schema.typeMap[typeName]
 }
 
 func onlySetOwnedBy(sequence *ast.AlterSequenceStmt) bool {
@@ -373,6 +530,22 @@ func (*SchemaDiffer) SchemaDiff(oldStmt, newStmt string) (string, error) {
 			if err := oldSchemaMap.addSequenceOwnedBy(i, stmt); err != nil {
 				return "", err
 			}
+		case *ast.CreateExtensionStmt:
+			if err := oldSchemaMap.addExtension(i, stmt); err != nil {
+				return "", err
+			}
+		case *ast.CreateFunctionStmt:
+			if err := oldSchemaMap.addFunction(i, stmt); err != nil {
+				return "", err
+			}
+		case *ast.CreateTriggerStmt:
+			if err := oldSchemaMap.addTrigger(i, stmt); err != nil {
+				return "", err
+			}
+		case *ast.CreateTypeStmt:
+			if err := oldSchemaMap.addType(i, stmt); err != nil {
+				return "", err
+			}
 			// TODO(rebelice): add default back here
 		}
 	}
@@ -465,6 +638,58 @@ func (*SchemaDiffer) SchemaDiff(oldStmt, newStmt string) (string, error) {
 			}
 			oldSequence.ownedByInfo.existsInNew = true
 			if err := diff.modifySequenceOwnedBy(oldSequence.ownedByInfo.ownedBy, stmt); err != nil {
+				return "", err
+			}
+		case *ast.CreateExtensionStmt:
+			oldExtension := oldSchemaMap.getExtension(stmt.Schema, stmt.Name)
+			// Add the extension.
+			if oldExtension == nil {
+				diff.createExtensionList = append(diff.createExtensionList, stmt)
+				continue
+			}
+			oldExtension.existsInNew = true
+			// Modify the extension.
+			if err := diff.modifyExtension(oldExtension.createExtension, stmt); err != nil {
+				return "", err
+			}
+		case *ast.CreateFunctionStmt:
+			signature, err := functionSignature(stmt.Function)
+			if err != nil {
+				return "", err
+			}
+			oldFunction := oldSchemaMap.getFunction(stmt.Function.Schema, signature)
+			// Add the function.
+			if oldFunction == nil {
+				diff.createFunctionList = append(diff.createFunctionList, stmt)
+				continue
+			}
+			oldFunction.existsInNew = true
+			// Modify the function.
+			if err := diff.modifyFunction(oldFunction.createFunction, stmt); err != nil {
+				return "", err
+			}
+		case *ast.CreateTriggerStmt:
+			oldTrigger := oldSchemaMap.getTrigger(stmt.Trigger.Table.Schema, stmt.Trigger.Table.Name, stmt.Trigger.Name)
+			// Add the trigger.
+			if oldTrigger == nil {
+				diff.createTriggerList = append(diff.createTriggerList, stmt)
+				continue
+			}
+			oldTrigger.existsInNew = true
+			// Modify the trigger.
+			if err := diff.modifyTrigger(oldTrigger.createTrigger, stmt); err != nil {
+				return "", err
+			}
+		case *ast.CreateTypeStmt:
+			oldType := oldSchemaMap.getType(stmt.Type.TypeName().Schema, stmt.Type.TypeName().Name)
+			// Add the type.
+			if oldType == nil {
+				diff.createTypeList = append(diff.createTypeList, stmt)
+				continue
+			}
+			oldType.existsInNew = true
+			// Modify the type.
+			if err := diff.modifyType(oldType.createType, stmt); err != nil {
 				return "", err
 			}
 		}
@@ -562,6 +787,22 @@ func (diff *diffNode) dropObject(oldSchemaMap schemaMap) error {
 	if dropSequenceStmt := dropSequence(oldSchemaMap); dropSequenceStmt != nil {
 		diff.dropSequenceList = append(diff.dropSequenceList, dropSequenceStmt)
 	}
+
+	// Drop the remaining old extension.
+	if dropExtensionStmt := dropExtension(oldSchemaMap); dropExtensionStmt != nil {
+		diff.dropExtensionList = append(diff.dropExtensionList, dropExtensionStmt)
+	}
+
+	// Drop the remaining old function.
+	if dropFunctionStmt := dropFunction(oldSchemaMap); dropFunctionStmt != nil {
+		diff.dropFunctionList = append(diff.dropFunctionList, dropFunctionStmt)
+	}
+
+	// Drop the remaining old trigger.
+	diff.dropTriggerStmt(oldSchemaMap)
+
+	// Drop the remaining old type.
+	diff.dropTypeStmt(oldSchemaMap)
 
 	return nil
 }
@@ -763,6 +1004,151 @@ func (diff *diffNode) modifyColumn(tableName *ast.TableDef, oldColumn *ast.Colum
 	return nil
 }
 
+func (diff *diffNode) modifyExtension(oldExtension *ast.CreateExtensionStmt, newExtension *ast.CreateExtensionStmt) error {
+	// TODO(rebelice): not use Text(), it only works for pg_dump.
+	if oldExtension.Text() != newExtension.Text() {
+		diff.dropExtensionList = append(diff.dropExtensionList, &ast.DropExtensionStmt{
+			NameList: []string{oldExtension.Name},
+		})
+		diff.createExtensionList = append(diff.createExtensionList, newExtension)
+	}
+	return nil
+}
+
+func (diff *diffNode) modifyFunction(oldFunction *ast.CreateFunctionStmt, newFunction *ast.CreateFunctionStmt) error {
+	// TODO(rebelice): not use Text(), it only works for pg_dump.
+	if oldFunction.Text() != newFunction.Text() {
+		diff.dropFunctionList = append(diff.dropFunctionList, &ast.DropFunctionStmt{
+			FunctionList: []*ast.FunctionDef{oldFunction.Function},
+		})
+		diff.createFunctionList = append(diff.createFunctionList, newFunction)
+	}
+	return nil
+}
+
+func isSubsequenceEnum(oldType ast.UserDefinedType, newType ast.UserDefinedType) bool {
+	oldEnum, ok := oldType.(*ast.EnumTypeDef)
+	if !ok {
+		return false
+	}
+	newEnum, ok := newType.(*ast.EnumTypeDef)
+	if !ok {
+		return false
+	}
+
+	pos := 0
+	for _, oldLabel := range oldEnum.LabelList {
+		for {
+			if pos >= len(newEnum.LabelList) {
+				return false
+			}
+			if newEnum.LabelList[pos] == oldLabel {
+				break
+			}
+			pos++
+		}
+	}
+	return true
+}
+
+func (diff *diffNode) addEnumValue(oldType *ast.CreateTypeStmt, newType *ast.CreateTypeStmt) error {
+	oldEnum, ok := oldType.Type.(*ast.EnumTypeDef)
+	if !ok {
+		// never catch
+		return parser.NewConvertErrorf("expected EnumTypeDef but found %t", oldType.Type)
+	}
+	newEnum, ok := newType.Type.(*ast.EnumTypeDef)
+	if !ok {
+		// never catch
+		return parser.NewConvertErrorf("expected EnumTypeDef but found %t", newType.Type)
+	}
+
+	// oldEnum has empty label list, so append newEnum labels.
+	if len(oldEnum.LabelList) == 0 {
+		for _, label := range newEnum.LabelList {
+			diff.alterTypeList = append(diff.alterTypeList, &ast.AlterTypeStmt{
+				Type: newType.Type.TypeName(),
+				AlterItemList: []ast.Node{&ast.AddEnumLabelStmt{
+					EnumType: newType.Type.TypeName(),
+					NewLabel: label,
+					Position: ast.PositionTypeEnd,
+				}},
+			})
+		}
+		return nil
+	}
+
+	firstOldLabelPos := 0
+	for {
+		if newEnum.LabelList[firstOldLabelPos] == oldEnum.LabelList[0] {
+			break
+		}
+		firstOldLabelPos++
+	}
+
+	// Add Labels before first equal label by BEFORE.
+	for i := firstOldLabelPos - 1; i >= 0; i-- {
+		diff.alterTypeList = append(diff.alterTypeList, &ast.AlterTypeStmt{
+			Type: newType.Type.TypeName(),
+			AlterItemList: []ast.Node{&ast.AddEnumLabelStmt{
+				EnumType:      newType.Type.TypeName(),
+				NewLabel:      newEnum.LabelList[i],
+				Position:      ast.PositionTypeBefore,
+				NeighborLabel: newEnum.LabelList[i+1],
+			}},
+		})
+	}
+
+	// Add remaining labels by AFTER.
+	oldLabelPos := 1
+	for i := firstOldLabelPos + 1; i < len(newEnum.LabelList); i++ {
+		newLabel := newEnum.LabelList[i]
+		if len(oldEnum.LabelList) > oldLabelPos && newLabel == oldEnum.LabelList[oldLabelPos] {
+			oldLabelPos++
+			continue
+		}
+		diff.alterTypeList = append(diff.alterTypeList, &ast.AlterTypeStmt{
+			Type: newType.Type.TypeName(),
+			AlterItemList: []ast.Node{&ast.AddEnumLabelStmt{
+				EnumType:      newType.Type.TypeName(),
+				NewLabel:      newLabel,
+				Position:      ast.PositionTypeAfter,
+				NeighborLabel: newEnum.LabelList[i-1],
+			}},
+		})
+	}
+
+	return nil
+}
+
+func (diff *diffNode) modifyType(oldType *ast.CreateTypeStmt, newType *ast.CreateTypeStmt) error {
+	// TODO(rebelice): not use Text(), it only works for pg_dump.
+	if oldType.Text() != newType.Text() {
+		// Add enum value.
+		if isSubsequenceEnum(oldType.Type, newType.Type) {
+			return diff.addEnumValue(oldType, newType)
+		}
+
+		// DROP and RE-CREATE.
+		diff.dropTypeList = append(diff.dropTypeList, &ast.DropTypeStmt{
+			TypeNameList: []*ast.TypeNameDef{oldType.Type.TypeName()},
+		})
+		diff.createTypeList = append(diff.createTypeList, newType)
+	}
+	return nil
+}
+
+func (diff *diffNode) modifyTrigger(oldTrigger *ast.CreateTriggerStmt, newTrigger *ast.CreateTriggerStmt) error {
+	// TODO(rebelice): not use Text(), it only works for pg_dump.
+	if oldTrigger.Text() != newTrigger.Text() {
+		diff.dropTriggerList = append(diff.dropTriggerList, &ast.DropTriggerStmt{
+			Trigger: oldTrigger.Trigger,
+		})
+		diff.createTriggerList = append(diff.createTriggerList, newTrigger)
+	}
+	return nil
+}
+
 func (diff *diffNode) modifyIndex(oldIndex *ast.CreateIndexStmt, newIndex *ast.CreateIndexStmt) error {
 	// TODO(rebelice): not use Text(), it only works for pg_dump.
 	if oldIndex.Text() != newIndex.Text() {
@@ -940,6 +1326,15 @@ func equivalentType(typeA ast.DataType, typeB ast.DataType) (bool, error) {
 	return typeStringA == typeStringB, nil
 }
 
+func printStmtSliceByText(buf io.Writer, nodeList []ast.Node) error {
+	for _, node := range nodeList {
+		if err := writeStringWithNewLine(buf, node.Text()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func printStmtSlice(buf io.Writer, nodeList []ast.Node) error {
 	for _, node := range nodeList {
 		sql, err := parser.Deparse(parser.Postgres, parser.DeparseContext{}, node)
@@ -964,6 +1359,9 @@ func (diff *diffNode) deparse() (string, error) {
 	if err := printStmtSlice(&buf, diff.dropConstraintExceptFkList); err != nil {
 		return "", err
 	}
+	if err := printStmtSlice(&buf, diff.dropTriggerList); err != nil {
+		return "", err
+	}
 	if err := printStmtSlice(&buf, diff.dropIndexList); err != nil {
 		return "", err
 	}
@@ -982,12 +1380,33 @@ func (diff *diffNode) deparse() (string, error) {
 	if err := printStmtSlice(&buf, diff.dropSequenceList); err != nil {
 		return "", err
 	}
+	if err := printStmtSlice(&buf, diff.dropFunctionList); err != nil {
+		return "", err
+	}
+	if err := printStmtSlice(&buf, diff.dropExtensionList); err != nil {
+		return "", err
+	}
+	if err := printStmtSlice(&buf, diff.dropTypeList); err != nil {
+		return "", err
+	}
 	if err := printStmtSlice(&buf, diff.dropSchemaList); err != nil {
 		return "", err
 	}
 
 	// create
 	if err := printStmtSlice(&buf, diff.createSchemaList); err != nil {
+		return "", err
+	}
+	if err := printStmtSliceByText(&buf, diff.createTypeList); err != nil {
+		return "", err
+	}
+	if err := printStmtSlice(&buf, diff.alterTypeList); err != nil {
+		return "", err
+	}
+	if err := printStmtSliceByText(&buf, diff.createExtensionList); err != nil {
+		return "", err
+	}
+	if err := printStmtSliceByText(&buf, diff.createFunctionList); err != nil {
 		return "", err
 	}
 	if err := printStmtSlice(&buf, diff.createSequenceList); err != nil {
@@ -1011,7 +1430,10 @@ func (diff *diffNode) deparse() (string, error) {
 	if err := printStmtSlice(&buf, diff.setDefaultList); err != nil {
 		return "", err
 	}
-	if err := printStmtSlice(&buf, diff.createIndexList); err != nil {
+	if err := printStmtSliceByText(&buf, diff.createIndexList); err != nil {
+		return "", err
+	}
+	if err := printStmtSliceByText(&buf, diff.createTriggerList); err != nil {
 		return "", err
 	}
 	if err := printStmtSlice(&buf, diff.createConstraintExceptFkList); err != nil {
@@ -1094,6 +1516,109 @@ func dropSchema(m schemaMap) *ast.DropSchemaStmt {
 	}
 	return &ast.DropSchemaStmt{
 		SchemaList: schemaNameList,
+	}
+}
+
+func dropExtension(m schemaMap) *ast.DropExtensionStmt {
+	var extensionList []*extensionInfo
+	for _, schema := range m {
+		for _, extension := range schema.extensionMap {
+			if extension.existsInNew {
+				// no need to drop
+				continue
+			}
+			extensionList = append(extensionList, extension)
+		}
+	}
+	if len(extensionList) == 0 {
+		return nil
+	}
+	sort.Slice(extensionList, func(i, j int) bool {
+		return extensionList[i].id < extensionList[j].id
+	})
+
+	var extensionNameList []string
+	for _, extension := range extensionList {
+		extensionNameList = append(extensionNameList, extension.createExtension.Name)
+	}
+	return &ast.DropExtensionStmt{
+		NameList: extensionNameList,
+	}
+}
+
+func dropFunction(m schemaMap) *ast.DropFunctionStmt {
+	var functionList []*functionInfo
+	for _, schema := range m {
+		for _, function := range schema.functionMap {
+			if function.existsInNew {
+				// no need to drop
+				continue
+			}
+			functionList = append(functionList, function)
+		}
+	}
+	if len(functionList) == 0 {
+		return nil
+	}
+	sort.Slice(functionList, func(i, j int) bool {
+		return functionList[i].id < functionList[j].id
+	})
+
+	var functionDefList []*ast.FunctionDef
+	for _, function := range functionList {
+		functionDefList = append(functionDefList, function.createFunction.Function)
+	}
+	return &ast.DropFunctionStmt{FunctionList: functionDefList}
+}
+
+func (diff *diffNode) dropTypeStmt(m schemaMap) {
+	var typeList []*typeInfo
+	for _, schema := range m {
+		for _, tp := range schema.typeMap {
+			if tp.existsInNew {
+				// no need to drop
+				continue
+			}
+			typeList = append(typeList, tp)
+		}
+	}
+	if len(typeList) == 0 {
+		return
+	}
+	sort.Slice(typeList, func(i, j int) bool {
+		return typeList[i].id < typeList[j].id
+	})
+
+	for _, tp := range typeList {
+		diff.dropTypeList = append(diff.dropTypeList, &ast.DropTypeStmt{
+			TypeNameList: []*ast.TypeNameDef{tp.createType.Type.TypeName()},
+		})
+	}
+}
+
+func (diff *diffNode) dropTriggerStmt(m schemaMap) {
+	var triggerList []*triggerInfo
+	for _, schema := range m {
+		for _, table := range schema.tableMap {
+			for _, trigger := range table.triggerMap {
+				if trigger.existsInNew {
+					// no need to drop
+					continue
+				}
+				triggerList = append(triggerList, trigger)
+			}
+		}
+	}
+	if len(triggerList) == 0 {
+		return
+	}
+	sort.Slice(triggerList, func(i, j int) bool {
+		return triggerList[i].id < triggerList[j].id
+	})
+
+	for _, trigger := range triggerList {
+		diff.dropTriggerList = append(diff.dropTriggerList,
+			&ast.DropTriggerStmt{Trigger: trigger.createTrigger.Trigger})
 	}
 }
 
@@ -1193,4 +1718,11 @@ func writeStringWithNewLine(out io.Writer, str string) error {
 		return err
 	}
 	return nil
+}
+
+// use DROP FUNCTION statement as the function signature.
+func functionSignature(function *ast.FunctionDef) (string, error) {
+	return parser.Deparse(parser.Postgres, parser.DeparseContext{}, &ast.DropFunctionStmt{
+		FunctionList: []*ast.FunctionDef{function},
+	})
 }

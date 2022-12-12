@@ -149,8 +149,7 @@ type CreateTableContext struct {
 
 // AlterTableContext is the edit database context to alter a table.
 type AlterTableContext struct {
-	TableID int    `json:"tableId"`
-	Name    string `json:"name"`
+	Name string `json:"name"`
 
 	// ColumnNameList should be the final order of columns in UI editor and is used to confirm column positions.
 	ColumnNameList []string `json:"columnNameList"`
@@ -168,8 +167,7 @@ type RenameTableContext struct {
 
 // DropTableContext is the edit database context to drop a table.
 type DropTableContext struct {
-	TableID int    `json:"tableId"`
-	Name    string `json:"name"`
+	Name string `json:"name"`
 }
 
 // AddColumnContext is the create/alter table context to add a column.
@@ -198,4 +196,32 @@ type ChangeColumnContext struct {
 // DropColumnContext is the alter table context to drop a column.
 type DropColumnContext struct {
 	Name string `json:"name"`
+}
+
+// ValidateResultType is the type of a validate result.
+type ValidateResultType string
+
+const (
+	// ValidateErrorResult is the validate result type for ERROR validation.
+	ValidateErrorResult ValidateResultType = "ERROR"
+)
+
+// ValidateResult is a validation result type, including validation type and message.
+type ValidateResult struct {
+	Type    ValidateResultType `json:"type"`
+	Message string             `json:"message"`
+}
+
+func (result *ValidateResult) String() string {
+	str, err := json.Marshal(*result)
+	if err != nil {
+		return err.Error()
+	}
+	return string(str)
+}
+
+// DatabaseEditResult is the response api message for editing database.
+type DatabaseEditResult struct {
+	Statement          string            `jsonapi:"attr,statement"`
+	ValidateResultList []*ValidateResult `jsonapi:"attr,validateResultList"`
 }

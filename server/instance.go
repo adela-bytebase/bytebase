@@ -18,6 +18,7 @@ import (
 	"github.com/bytebase/bytebase/common/log"
 	"github.com/bytebase/bytebase/plugin/db"
 	"github.com/bytebase/bytebase/resources/postgres"
+	"github.com/bytebase/bytebase/store"
 )
 
 // pgConnectionInfo represents the embedded postgres instance connection info.
@@ -32,14 +33,32 @@ func (s *Server) registerInstanceRoutes(g *echo.Group) {
 	g.POST("/instance", func(c echo.Context) error {
 		ctx := c.Request().Context()
 
-		instanceCreate := &api.InstanceCreate{
-			CreatorID: c.Get(getPrincipalIDContextKey()).(int),
-		}
+		instanceCreate := &api.InstanceCreate{}
 		if err := jsonapi.UnmarshalPayload(c.Request().Body, instanceCreate); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "Malformed create instance request").SetInternal(err)
 		}
 
-		instance, err := s.createInstance(ctx, instanceCreate)
+		instance, err := s.createInstance(ctx, &store.InstanceCreate{
+			CreatorID:     c.Get(getPrincipalIDContextKey()).(int),
+			EnvironmentID: instanceCreate.EnvironmentID,
+			DataSourceList: []*api.DataSourceCreate{
+				{
+					Name:     api.AdminDataSourceName,
+					Type:     api.Admin,
+					Username: instanceCreate.Username,
+					Password: instanceCreate.Password,
+					SslCa:    instanceCreate.SslCa,
+					SslCert:  instanceCreate.SslCert,
+					SslKey:   instanceCreate.SslKey,
+				},
+			},
+			Name:         instanceCreate.Name,
+			Engine:       instanceCreate.Engine,
+			ExternalLink: instanceCreate.ExternalLink,
+			Host:         instanceCreate.Host,
+			Port:         instanceCreate.Port,
+			Database:     instanceCreate.Database,
+		})
 		if err != nil {
 			return err
 		}
@@ -99,15 +118,22 @@ func (s *Server) registerInstanceRoutes(g *echo.Group) {
 			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("ID is not a number: %s", c.Param("instanceID"))).SetInternal(err)
 		}
 
-		instancePatch := &api.InstancePatch{
-			ID:        id,
-			UpdaterID: c.Get(getPrincipalIDContextKey()).(int),
-		}
+		instancePatch := &api.InstancePatch{}
 		if err := jsonapi.UnmarshalPayload(c.Request().Body, instancePatch); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "Malformed patch instance request").SetInternal(err)
 		}
 
-		instancePatched, err := s.updateInstance(ctx, instancePatch)
+		instancePatched, err := s.updateInstance(ctx, &store.InstancePatch{
+			ID:            id,
+			RowStatus:     instancePatch.RowStatus,
+			UpdaterID:     c.Get(getPrincipalIDContextKey()).(int),
+			Name:          instancePatch.Name,
+			EngineVersion: instancePatch.EngineVersion,
+			ExternalLink:  instancePatch.ExternalLink,
+			Host:          instancePatch.Host,
+			Port:          instancePatch.Port,
+			Database:      instancePatch.Database,
+		})
 		if err != nil {
 			return err
 		}
@@ -433,13 +459,22 @@ func (s *Server) disallowBytebaseStore(engine db.Type, host, port string) error 
 	return nil
 }
 
-func (s *Server) createInstance(ctx context.Context, create *api.InstanceCreate) (*api.Instance, error) {
+func (s *Server) createInstance(ctx context.Context, create *store.InstanceCreate) (*api.Instance, error) {
 	if err := s.instanceCountGuard(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.validateInstanceName(ctx, create.Name); err != nil {
+		return nil, err
+	}
+	if err := s.validateDataSourceList(create.DataSourceList); err != nil {
 		return nil, err
 	}
 
 	if err := s.disallowBytebaseStore(create.Engine, create.Host, create.Port); err != nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error()).SetInternal(err)
+	}
+	if create.Engine != db.Postgres && create.Database != "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "database parameter is only allowed for Postgres")
 	}
 
 	instance, err := s.store.CreateInstance(ctx, create)
@@ -462,19 +497,30 @@ func (s *Server) createInstance(ctx context.Context, create *api.InstanceCreate)
 				zap.String("engine", string(instance.Engine)),
 				zap.Error(err))
 		}
-		if _, err := s.SchemaSyncer.syncInstance(ctx, instance); err != nil {
+		if _, err := s.SchemaSyncer.SyncInstance(ctx, instance); err != nil {
 			log.Warn("Failed to sync instance",
 				zap.Int("instance_id", instance.ID),
 				zap.Error(err))
 		}
 		// Sync all databases in the instance asynchronously.
-		instanceDatabaseSyncChan <- instance
+		s.stateCfg.InstanceDatabaseSyncChan <- instance
 	}
 
 	return instance, nil
 }
 
-func (s *Server) updateInstance(ctx context.Context, patch *api.InstancePatch) (*api.Instance, error) {
+func (s *Server) updateInstance(ctx context.Context, patch *store.InstancePatch) (*api.Instance, error) {
+	if v := patch.Name; v != nil {
+		if err := s.validateInstanceName(ctx, *v); err != nil {
+			return nil, err
+		}
+	}
+	if v := patch.DataSourceList; v != nil {
+		if err := s.validateDataSourceList(v); err != nil {
+			return nil, err
+		}
+	}
+
 	instance, err := s.store.GetInstanceByID(ctx, patch.ID)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to get instance ID: %v", patch.ID)).SetInternal(err)
@@ -483,19 +529,25 @@ func (s *Server) updateInstance(ctx context.Context, patch *api.InstancePatch) (
 		return nil, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("Instance ID not found: %d", patch.ID))
 	}
 
-	host, port := instance.Host, instance.Port
+	host, port, database := instance.Host, instance.Port, instance.Database
 	if patch.Host != nil {
 		host = *patch.Host
 	}
 	if patch.Port != nil {
 		port = *patch.Port
 	}
+	if patch.Database != nil {
+		database = *patch.Database
+	}
 	if err := s.disallowBytebaseStore(instance.Engine, host, port); err != nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error()).SetInternal(err)
 	}
+	if instance.Engine != db.Postgres && database != "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "database parameter is only allowed for Postgres")
+	}
 
-	var instancePatched *api.Instance
-	if patch.RowStatus != nil || patch.Name != nil || patch.ExternalLink != nil || patch.Host != nil || patch.Port != nil || patch.Database != nil {
+	instancePatched := instance
+	if patch.RowStatus != nil || patch.Name != nil || patch.ExternalLink != nil || patch.Host != nil || patch.Port != nil || patch.Database != nil || patch.DataSourceList != nil {
 		// Users can switch instance status from ARCHIVED to NORMAL.
 		// So we need to check the current instance count with NORMAL status for quota limitation.
 		if patch.RowStatus != nil && *patch.RowStatus == string(api.Normal) {
@@ -541,15 +593,45 @@ func (s *Server) updateInstance(ctx context.Context, patch *api.InstancePatch) (
 					zap.String("engine", string(instancePatched.Engine)),
 					zap.Error(err))
 			}
-			if _, err := s.SchemaSyncer.syncInstance(ctx, instancePatched); err != nil {
+			if _, err := s.SchemaSyncer.SyncInstance(ctx, instancePatched); err != nil {
 				log.Warn("Failed to sync instance",
 					zap.Int("instance_id", instancePatched.ID),
 					zap.Error(err))
 			}
 			// Sync all databases in the instance asynchronously.
-			instanceDatabaseSyncChan <- instancePatched
+			s.stateCfg.InstanceDatabaseSyncChan <- instancePatched
 		}
 	}
 
 	return instancePatched, nil
+}
+
+func (s *Server) validateInstanceName(ctx context.Context, instanceName string) error {
+	count, err := s.store.CountInstance(ctx, &api.InstanceFind{
+		Name: &instanceName,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to count the instance by name").SetInternal(err)
+	}
+
+	if count > 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Duplicate instance name %s", instanceName))
+	}
+
+	return nil
+}
+
+func (*Server) validateDataSourceList(dataSourceList []*api.DataSourceCreate) error {
+	dataSourceMap := map[api.DataSourceType]bool{}
+	for _, dataSource := range dataSourceList {
+		if dataSourceMap[dataSource.Type] {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Duplicate data source type %s", dataSource.Type))
+		}
+		dataSourceMap[dataSource.Type] = true
+	}
+	if !dataSourceMap[api.Admin] {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Missing required data source type %s", api.Admin))
+	}
+
+	return nil
 }

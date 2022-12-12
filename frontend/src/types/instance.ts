@@ -10,7 +10,8 @@ export type EngineType =
   | "MYSQL"
   | "POSTGRES"
   | "SNOWFLAKE"
-  | "TIDB";
+  | "TIDB"
+  | "MONGODB";
 
 export function defaultCharset(type: EngineType): string {
   switch (type) {
@@ -22,6 +23,25 @@ export function defaultCharset(type: EngineType): string {
       return "utf8mb4";
     case "POSTGRES":
       return "UTF8";
+    case "MONGODB":
+      return "";
+  }
+}
+
+export function engineName(type: EngineType): string {
+  switch (type) {
+    case "CLICKHOUSE":
+      return "ClickHouse";
+    case "MYSQL":
+      return "MySQL";
+    case "POSTGRES":
+      return "PostgreSQL";
+    case "SNOWFLAKE":
+      return "Snowflake";
+    case "TIDB":
+      return "TiDB";
+    case "MONGODB":
+      return "MongoDB";
   }
 }
 
@@ -37,6 +57,8 @@ export function defaultCollation(type: EngineType): string {
     // If that's the case, setting an explicit default such as "en_US.UTF-8" might fail if the instance doesn't
     // install it.
     case "POSTGRES":
+      return "";
+    case "MONGODB":
       return "";
   }
 }
@@ -61,6 +83,7 @@ export type Instance = {
   engine: EngineType;
   engineVersion: string;
   externalLink?: string;
+  database: string;
   host: string;
   port?: string;
 };
@@ -75,12 +98,15 @@ export type InstanceCreate = {
   externalLink?: string;
   host: string;
   port?: string;
+  database?: string;
   // In mysql, username can be empty which means anonymous user
   username?: string;
   password?: string;
   sslCa?: string;
   sslCert?: string;
   sslKey?: string;
+  // DNS SRV record is only used for MongoDB.
+  useDNSSRVRecord: boolean;
 };
 
 export type InstancePatch = {
@@ -92,6 +118,7 @@ export type InstancePatch = {
   externalLink?: string;
   host?: string;
   port?: string;
+  database?: string;
 };
 
 export type MigrationSchemaStatus = "UNKNOWN" | "OK" | "NOT_EXIST";

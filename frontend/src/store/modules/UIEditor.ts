@@ -3,18 +3,17 @@ import { defineStore } from "pinia";
 import { cloneDeep, isUndefined, uniqueId } from "lodash-es";
 import {
   DatabaseId,
-  TableId,
-  Table,
   Database,
-  unknown,
-  UNKNOWN_ID,
   TabContext,
   UIEditorState,
   UIEditorTabType,
   TableTabContext,
   DatabaseEdit,
+  ResourceObject,
 } from "@/types";
+import { DatabaseEditResult, Table } from "@/types/UIEditor";
 import { useDatabaseStore, useTableStore } from "./";
+import { transformTableDataToTable } from "@/utils/UIEditor/transform";
 
 export const generateUniqueTabId = () => {
   return uniqueId();
@@ -27,10 +26,18 @@ const getDefaultUIEditorState = (): UIEditorState => {
       currentTabId: "",
     },
     databaseList: [],
+    originTableList: [],
     tableList: [],
-    droppedTableList: [],
   };
 };
+
+function convertDatabaseEditResult(
+  databaseEditResult: ResourceObject
+): DatabaseEditResult {
+  return {
+    ...databaseEditResult.attributes,
+  } as any as DatabaseEditResult;
+}
 
 export const useUIEditorStore = defineStore("UIEditor", {
   state: (): UIEditorState => {
@@ -62,7 +69,8 @@ export const useUIEditorStore = defineStore("UIEditor", {
         }
         if (
           item.type === UIEditorTabType.TabForTable &&
-          item.table === (tab as TableTabContext).table
+          item.databaseId === tab.databaseId &&
+          item.tableName === (tab as TableTabContext).tableName
         ) {
           return true;
         }
@@ -72,34 +80,11 @@ export const useUIEditorStore = defineStore("UIEditor", {
       if (tabCache !== undefined) {
         tab = tabCache;
       } else {
-        // Don't show tab for dropped table.
-        if (tab.type === UIEditorTabType.TabForTable) {
-          if (this.droppedTableList.includes(tab.table)) {
-            return;
-          }
-        }
-
         this.tabState.tabMap.set(tab.id, tab);
       }
 
       if (setAsCurrentTab) {
         this.setCurrentTab(tab.id);
-      }
-    },
-    saveTab(tab: TabContext) {
-      if (tab.type === UIEditorTabType.TabForDatabase) {
-        // Edit database metadata is not allowed.
-      } else if (tab.type === UIEditorTabType.TabForTable) {
-        tab.table.name = tab.tableCache.name;
-        tab.table.columnList = cloneDeep(tab.tableCache.columnList);
-      }
-    },
-    discardTabChanges(tab: TabContext) {
-      if (tab.type === UIEditorTabType.TabForDatabase) {
-        // Edit database metadata is not allowed.
-      } else if (tab.type === UIEditorTabType.TabForTable) {
-        tab.tableCache.name = tab.table.name;
-        tab.tableCache.columnList = cloneDeep(tab.table.columnList);
       }
     },
     setCurrentTab(tabId: string) {
@@ -129,6 +114,31 @@ export const useUIEditorStore = defineStore("UIEditor", {
       }
       this.tabState.tabMap.delete(tabId);
     },
+    findTab(databaseId: DatabaseId, tableName?: string) {
+      let tabType = UIEditorTabType.TabForDatabase;
+      if (tableName !== undefined) {
+        tabType = UIEditorTabType.TabForTable;
+      }
+
+      const tab = this.tabList.find((tab) => {
+        if (tab.type !== tabType || tab.databaseId !== databaseId) {
+          return false;
+        }
+
+        if (tab.type === UIEditorTabType.TabForDatabase) {
+          return true;
+        } else if (
+          tab.type === UIEditorTabType.TabForTable &&
+          tab.tableName === tableName
+        ) {
+          return true;
+        }
+
+        return false;
+      });
+
+      return tab;
+    },
     async fetchDatabaseList(databaseIdList: DatabaseId[]) {
       const databaseList: Database[] = [];
       for (const id of databaseIdList) {
@@ -143,86 +153,56 @@ export const useUIEditorStore = defineStore("UIEditor", {
     async getOrFetchTableListByDatabaseId(databaseId: DatabaseId) {
       const tableList: Table[] = [];
       for (const table of this.tableList) {
-        if (table.database.id === databaseId) {
+        if (table.databaseId === databaseId) {
           tableList.push(table);
         }
       }
 
       if (tableList.length === 0) {
-        const tableListData = cloneDeep(
-          await useTableStore().fetchTableListByDatabaseId(databaseId)
+        const tableDataList = await useTableStore().fetchTableListByDatabaseId(
+          databaseId
         );
-        tableList.push(...tableListData);
-        this.tableList.push(...tableListData);
+        const transformTableList = tableDataList.map((tableData) =>
+          transformTableDataToTable(tableData)
+        );
+
+        tableList.push(...transformTableList);
+        this.originTableList.push(...transformTableList);
+        this.tableList.push(...cloneDeep(transformTableList));
       }
       return tableList;
     },
-    // createNewTable creates a temp table with databaseId.
-    // Its ID is UNKNOWN_ID and name should be an unique temp name.
-    createNewTable(databaseId: DatabaseId) {
-      const table = unknown("TABLE");
-      const databaseTableList = this.tableList.filter(
-        (table) => table.database.id === databaseId
+    getTableWithTableTab(tab: TableTabContext) {
+      return this.tableList.find(
+        (table) =>
+          table.databaseId === tab.databaseId && table.newName === tab.tableName
       );
-      const databaseTableNameList = databaseTableList.map(
-        (table) => table.name
-      );
-      let tableNameUniqueIndex =
-        databaseTableList.filter((table) => table.id === UNKNOWN_ID).length + 1;
-      let tableName = `untitled_table_${tableNameUniqueIndex}`;
-      while (databaseTableNameList.includes(tableName)) {
-        tableNameUniqueIndex++;
-        tableName = `untitled_table_${tableNameUniqueIndex}`;
-      }
-
-      const database = useDatabaseStore().getDatabaseById(databaseId);
-      table.id = UNKNOWN_ID;
-      table.name = tableName;
-      table.database = database;
-      table.columnList = [];
-
-      // generate a default column.
-      const unknownColumn = unknown("COLUMN");
-      unknownColumn.name = "id";
-      unknownColumn.type = "int";
-      unknownColumn.comment = "ID";
-      table.columnList.push(unknownColumn);
-
-      this.tableList.push(table);
-      return table;
     },
     dropTable(table: Table) {
-      const index = this.tableList.findIndex((item) => item === table);
-      if (table.id === UNKNOWN_ID) {
+      // Remove table record and close tab for created table.
+      if (table.status === "created") {
+        const index = this.tableList.findIndex((item) => item === table);
         this.tableList.splice(index, 1);
+        const tab = this.findTab(table.databaseId, table.newName);
+        if (tab) {
+          this.closeTab(tab.id);
+        }
       } else {
-        this.droppedTableList.push(table);
-      }
-
-      const tab = this.tabList.find(
-        (tab) => tab.type === UIEditorTabType.TabForTable && tab.table === table
-      );
-      if (tab) {
-        this.closeTab(tab.id);
+        table.status = "dropped";
       }
     },
-    restoreTable(databaseId: DatabaseId, tableId: TableId, tableName: string) {
-      const index = this.droppedTableList.findIndex(
-        (table) =>
-          table.database.id === databaseId &&
-          table.id === tableId &&
-          table.name === tableName
-      );
-      this.droppedTableList.splice(index, 1);
+    restoreTable(table: Table) {
+      table.status = "normal";
     },
     async postDatabaseEdit(databaseEdit: DatabaseEdit) {
-      const stmt = (
-        await axios.post<string>(
+      const resData = (
+        await axios.post(
           `/api/database/${databaseEdit.databaseId}/edit`,
           databaseEdit
         )
       ).data;
-      return stmt;
+      const databaseEditResult = convertDatabaseEditResult(resData.data);
+      return databaseEditResult;
     },
   },
 });

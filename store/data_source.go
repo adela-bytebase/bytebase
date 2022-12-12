@@ -145,7 +145,7 @@ func (s *Store) DeleteDataSource(ctx context.Context, deleteDataSource *api.Data
 	}
 
 	// Invalidate the cache.
-	s.cache.DeleteCache(api.DataSourceCache, deleteDataSource.InstanceID)
+	s.cache.DeleteCache(dataSourceCacheNamespace, deleteDataSource.InstanceID)
 	return nil
 }
 
@@ -160,7 +160,7 @@ func (s *Store) createDataSourceRawTx(ctx context.Context, tx *Tx, create *api.D
 		return errors.Wrapf(err, "failed to create data source with DataSourceCreate[%+v]", create)
 	}
 	// Invalidate the cache.
-	s.cache.DeleteCache(api.DataSourceCache, create.InstanceID)
+	s.cache.DeleteCache(dataSourceCacheNamespace, create.InstanceID)
 	return nil
 }
 
@@ -199,7 +199,7 @@ func (s *Store) createDataSourceRaw(ctx context.Context, create *api.DataSourceC
 		return nil, FormatError(err)
 	}
 	// Invalidate the cache.
-	s.cache.DeleteCache(api.DataSourceCache, dataSource.InstanceID)
+	s.cache.DeleteCache(dataSourceCacheNamespace, dataSource.InstanceID)
 
 	return dataSource, nil
 }
@@ -210,7 +210,7 @@ func (s *Store) findDataSourceRaw(ctx context.Context, find *api.DataSourceFind)
 	findCopy.InstanceID = nil
 	isListDataSource := find.InstanceID != nil && findCopy == api.DataSourceFind{}
 	var cacheList []*dataSourceRaw
-	has, err := s.cache.FindCache(api.DataSourceCache, *find.InstanceID, &cacheList)
+	has, err := s.cache.FindCache(dataSourceCacheNamespace, *find.InstanceID, &cacheList)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (s *Store) findDataSourceRaw(ctx context.Context, find *api.DataSourceFind)
 		return nil, err
 	}
 	if isListDataSource {
-		if err := s.cache.UpsertCache(api.DataSourceCache, *find.InstanceID, list); err != nil {
+		if err := s.cache.UpsertCache(dataSourceCacheNamespace, *find.InstanceID, list); err != nil {
 			return nil, err
 		}
 	}
@@ -276,7 +276,7 @@ func (s *Store) patchDataSourceRaw(ctx context.Context, patch *api.DataSourcePat
 		return nil, FormatError(err)
 	}
 	// Invalidate the cache.
-	s.cache.DeleteCache(api.DataSourceCache, dataSource.InstanceID)
+	s.cache.DeleteCache(dataSourceCacheNamespace, dataSource.InstanceID)
 
 	return dataSource, nil
 }
@@ -486,6 +486,14 @@ func (*Store) patchDataSourceImpl(ctx context.Context, tx *Tx, patch *api.DataSo
 // deleteDataSourceImpl permanently deletes a dataSource by ID.
 func (*Store) deleteDataSourceImpl(ctx context.Context, tx *Tx, delete *api.DataSourceDelete) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM data_source WHERE id = $1`, delete.ID); err != nil {
+		return FormatError(err)
+	}
+	return nil
+}
+
+// clearDataSourceImpl deletes dataSources by instance id and database id.
+func (*Store) clearDataSourceImpl(ctx context.Context, tx *Tx, instanceID, databaseID int) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM data_source WHERE instance_id = $1 AND database_id = $2`, instanceID, databaseID); err != nil {
 		return FormatError(err)
 	}
 	return nil

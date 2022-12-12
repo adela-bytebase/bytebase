@@ -10,6 +10,9 @@
             <InstanceEngineIcon :instance="state.instance" />
             <span class="ml-1">{{ state.instance.engineVersion }}</span>
           </label>
+          <p class="text-sm text-gray-500 mt-1 mb-2">
+            {{ $t("instance.instance-name-unique") }}
+          </p>
           <input
             id="name"
             required
@@ -288,6 +291,21 @@
           </div>
         </template>
 
+        <div v-if="showDatabase" class="mt-2 sm:col-span-1 sm:col-start-1">
+          <label for="database" class="textlabel block">
+            {{ $t("common.database") }}
+          </label>
+          <input
+            id="database"
+            v-model="state.instance.database"
+            name="database"
+            type="text"
+            class="textfield mt-1 w-full"
+            :disabled="!allowEdit"
+            :placeholder="$t('common.database')"
+          />
+        </div>
+
         <div v-if="showSSL" class="mt-2 sm:col-span-3 sm:col-start-1">
           <div class="flex flex-row items-center">
             <label for="password" class="textlabel block">
@@ -411,6 +429,7 @@ interface State {
   dataSourceList: EditDataSource[];
   currentDataSourceType: DataSourceType;
   showFeatureModal: boolean;
+  useDNSSRVRecord: boolean;
 }
 
 const props = defineProps({
@@ -443,6 +462,7 @@ const state = reactive<State>({
   dataSourceList: dataSourceList,
   currentDataSourceType: "ADMIN",
   showFeatureModal: false,
+  useDNSSRVRecord: false,
 });
 
 const allowEdit = computed(() => {
@@ -465,8 +485,9 @@ const connectionInfoChanged = computed(() => {
   }
 
   return (
-    state.instance.host != state.originalInstance.host ||
-    state.instance.port != state.originalInstance.port ||
+    state.instance.host !== state.originalInstance.host ||
+    state.instance.port !== state.originalInstance.port ||
+    state.instance.database !== state.originalInstance.database ||
     !isEqual(
       state.originalInstance.dataSourceList,
       state.instance.dataSourceList
@@ -523,6 +544,13 @@ const instanceLink = (instance: Instance): string => {
   }
   return instance.host;
 };
+
+const showDatabase = computed((): boolean => {
+  return (
+    state.instance.engine === "POSTGRES" &&
+    currentDataSource.value.type === "ADMIN"
+  );
+});
 
 const showSSL = computed((): boolean => {
   return state.instance.engine === "CLICKHOUSE";
@@ -754,6 +782,10 @@ const doUpdate = () => {
     patchedInstance.port = state.instance.port;
     instanceInfoChanged = true;
   }
+  if (state.instance.database !== state.originalInstance.database) {
+    patchedInstance.database = state.instance.database;
+    instanceInfoChanged = true;
+  }
 
   if (
     !isEqual(
@@ -863,7 +895,9 @@ const testConnection = () => {
     useEmptyPassword: dataSource.useEmptyPassword,
     host: connectionHost,
     port: connectionPort,
+    database: instance.database,
     instanceId: instance.id,
+    srv: state.useDNSSRVRecord,
   };
 
   if (typeof dataSource.sslCa !== "undefined") {

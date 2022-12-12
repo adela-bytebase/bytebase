@@ -71,6 +71,14 @@ func TestDeparse(t *testing.T) {
 		"test_create_sequence_data.yaml",
 		"test_alter_sequence_data.yaml",
 		"test_drop_sequence_data.yaml",
+		// Extension
+		"test_extension_data.yaml",
+		// Function
+		"test_function_data.yaml",
+		// Trigger
+		"test_trigger_data.yaml",
+		// Type
+		"test_type_data.yaml",
 	}
 	for _, test := range testFileList {
 		runDeparseTest(t, test, false /* record */)

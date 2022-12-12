@@ -65,16 +65,15 @@ func (s *Store) UpsertPolicy(ctx context.Context, upsert *api.PolicyUpsert) (*ap
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to upsert policy with PolicyUpsert[%+v]", upsert)
 	}
-	// Cache environment tier policy as it is used widely.
-	if upsert.Type == api.PolicyTypeEnvironmentTier {
-		if err := s.cache.UpsertCache(api.TierPolicyCache, upsert.ResourceID, policyRaw); err != nil {
-			return nil, err
-		}
-	}
 	policy, err := s.composePolicy(ctx, policyRaw)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to compose policy with policyRaw[%+v]", policyRaw)
 	}
+
+	if err := s.upsertPolicyCache(upsert.Type, upsert.ResourceID, policy.Payload); err != nil {
+		return nil, err
+	}
+
 	return policy, nil
 }
 
@@ -130,8 +129,11 @@ func (s *Store) DeletePolicy(ctx context.Context, policyDelete *api.PolicyDelete
 		return FormatError(err)
 	}
 
-	if policyDelete.Type == api.PolicyTypeEnvironmentTier {
-		s.cache.DeleteCache(api.TierPolicyCache, policyDelete.ResourceID)
+	switch policyDelete.Type {
+	case api.PolicyTypeEnvironmentTier:
+		s.cache.DeleteCache(tierPolicyCacheNamespace, policyDelete.ResourceID)
+	case api.PolicyTypePipelineApproval:
+		s.cache.DeleteCache(approvalPolicyCacheNamespace, policyDelete.ResourceID)
 	}
 	return nil
 }
@@ -177,16 +179,28 @@ func (s *Store) GetBackupPlanPolicyByEnvID(ctx context.Context, environmentID in
 
 // GetPipelineApprovalPolicy will get the pipeline approval policy for an environment.
 func (s *Store) GetPipelineApprovalPolicy(ctx context.Context, environmentID int) (*api.PipelineApprovalPolicy, error) {
-	environmentResourceType := api.PolicyResourceTypeEnvironment
-	policy, err := s.getPolicyRaw(ctx, &api.PolicyFind{
-		ResourceType: &environmentResourceType,
-		ResourceID:   &environmentID,
-		Type:         api.PolicyTypePipelineApproval,
-	})
+	var payload *string
+	ok, err := s.cache.FindCache(approvalPolicyCacheNamespace, environmentID, &payload)
 	if err != nil {
 		return nil, err
 	}
-	return api.UnmarshalPipelineApprovalPolicy(policy.Payload)
+	if !ok {
+		environmentResourceType := api.PolicyResourceTypeEnvironment
+		p, err := s.getPolicyRaw(ctx, &api.PolicyFind{
+			ResourceType: &environmentResourceType,
+			ResourceID:   &environmentID,
+			Type:         api.PolicyTypePipelineApproval,
+		})
+		if err != nil {
+			return nil, err
+		}
+		payload = &p.Payload
+		// Cache the tier policy.
+		if err := s.cache.UpsertCache(approvalPolicyCacheNamespace, environmentID, payload); err != nil {
+			return nil, err
+		}
+	}
+	return api.UnmarshalPipelineApprovalPolicy(*payload)
 }
 
 // GetNormalSQLReviewPolicy will get the normal SQL review policy for an environment.
@@ -227,8 +241,8 @@ func (s *Store) GetSQLReviewPolicyIDByEnvID(ctx context.Context, environmentID i
 
 // GetEnvironmentTierPolicyByEnvID will get the environment tier policy for an environment.
 func (s *Store) GetEnvironmentTierPolicyByEnvID(ctx context.Context, environmentID int) (*api.EnvironmentTierPolicy, error) {
-	var policy *policyRaw
-	ok, err := s.cache.FindCache(api.TierPolicyCache, environmentID, &policy)
+	var payload *string
+	ok, err := s.cache.FindCache(tierPolicyCacheNamespace, environmentID, &payload)
 	if err != nil {
 		return nil, err
 	}
@@ -242,13 +256,13 @@ func (s *Store) GetEnvironmentTierPolicyByEnvID(ctx context.Context, environment
 		if err != nil {
 			return nil, err
 		}
-		policy = p
+		payload = &p.Payload
 		// Cache the tier policy.
-		if err := s.cache.UpsertCache(api.TierPolicyCache, environmentID, policy); err != nil {
+		if err := s.cache.UpsertCache(tierPolicyCacheNamespace, environmentID, payload); err != nil {
 			return nil, err
 		}
 	}
-	return api.UnmarshalEnvironmentTierPolicy(policy.Payload)
+	return api.UnmarshalEnvironmentTierPolicy(*payload)
 }
 
 // GetSensitiveDataPolicy will get the sensitive data policy for database ID.
@@ -308,11 +322,13 @@ func (s *Store) composePolicy(ctx context.Context, raw *policyRaw) (*api.Policy,
 	}
 	policy.Updater = updater
 
-	env, err := s.GetEnvironmentByID(ctx, policy.ResourceID)
-	if err != nil {
-		return nil, err
+	if policy.ResourceType == api.PolicyResourceTypeEnvironment {
+		env, err := s.GetEnvironmentByID(ctx, policy.ResourceID)
+		if err != nil {
+			return nil, err
+		}
+		policy.Environment = env
 	}
-	policy.Environment = env
 
 	return policy, nil
 }
@@ -330,6 +346,10 @@ func (s *Store) getPolicyRaw(ctx context.Context, find *api.PolicyFind) (*policy
 	var ret *policyRaw
 	if err != nil {
 		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, FormatError(err)
 	}
 
 	if len(policyRawList) == 0 {
@@ -532,6 +552,21 @@ func (*Store) deletePolicyImpl(ctx context.Context, tx *Tx, delete *api.PolicyDe
 		api.Archived,
 	); err != nil {
 		return FormatError(err)
+	}
+	return nil
+}
+
+// Cache environment tier policy and pipeline approval policy as it is used widely.
+func (s *Store) upsertPolicyCache(policyType api.PolicyType, resourceID int, payload string) error {
+	switch policyType {
+	case api.PolicyTypeEnvironmentTier:
+		if err := s.cache.UpsertCache(tierPolicyCacheNamespace, resourceID, &payload); err != nil {
+			return err
+		}
+	case api.PolicyTypePipelineApproval:
+		if err := s.cache.UpsertCache(approvalPolicyCacheNamespace, resourceID, &payload); err != nil {
+			return err
+		}
 	}
 	return nil
 }

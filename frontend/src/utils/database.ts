@@ -1,8 +1,7 @@
 import { groupBy } from "lodash-es";
-import semverCompare from "semver/functions/compare";
 import { Database, DataSourceType, Environment, Principal } from "../types";
 import { hasWorkspacePermission } from "./role";
-import { isDev } from "./util";
+import { isDev, semverCompare } from "./util";
 
 export function allowDatabaseAccess(
   database: Database,
@@ -78,12 +77,49 @@ export function allowGhostMigration(databaseList: Database[]): boolean {
   return databaseList.every((db) => {
     return (
       db.instance.engine === "MYSQL" &&
-      semverCompare(
-        db.instance.engineVersion,
-        MIN_GHOST_SUPPORT_MYSQL_VERSION
-      ) >= 0
+      semverCompare(db.instance.engineVersion, MIN_GHOST_SUPPORT_MYSQL_VERSION)
     );
   });
+}
+
+type DatabaseFilterFields = "name" | "project" | "instance" | "environment";
+export function filterDatabaseByKeyword(
+  db: Database,
+  keyword: string,
+  columns: DatabaseFilterFields[] = ["name"]
+): boolean {
+  keyword = keyword.trim().toLowerCase();
+  if (!keyword) {
+    // Skip the filter
+    return true;
+  }
+
+  if (columns.includes("name") && db.name.toLowerCase().includes(keyword)) {
+    return true;
+  }
+
+  if (
+    columns.includes("project") &&
+    db.project.name.toLowerCase().includes(keyword)
+  ) {
+    return true;
+  }
+
+  if (
+    columns.includes("instance") &&
+    db.instance.name.toLowerCase().includes(keyword)
+  ) {
+    return true;
+  }
+
+  if (
+    columns.includes("environment") &&
+    db.instance.environment.name.toLowerCase().includes(keyword)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export function isPITRDatabase(db: Database): boolean {

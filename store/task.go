@@ -182,6 +182,23 @@ func (s *Store) PatchTaskStatus(ctx context.Context, patch *api.TaskStatusPatch)
 	return taskList, nil
 }
 
+// BatchPatchTaskStatus patches status for a list of tasks.
+func (s *Store) BatchPatchTaskStatus(ctx context.Context, taskIDs []int, status api.TaskStatus, updaterID int) error {
+	var ids []string
+	for _, id := range taskIDs {
+		ids = append(ids, fmt.Sprintf("%d", id))
+	}
+	query := fmt.Sprintf(`
+		UPDATE task
+		SET status = $1, updater_id = $2
+		WHERE id IN (%s);
+	`, strings.Join(ids, ","))
+	if _, err := s.db.db.ExecContext(ctx, query, status, updaterID); err != nil {
+		return FormatError(err)
+	}
+	return nil
+}
+
 // CountTaskGroupByTypeAndStatus counts the number of TaskGroup and group by TaskType.
 // Used for the metric collector.
 func (s *Store) CountTaskGroupByTypeAndStatus(ctx context.Context) ([]*metric.TaskCountMetric, error) {
@@ -405,10 +422,7 @@ func (s *Store) patchTaskRaw(ctx context.Context, patch *api.TaskPatch) (*taskRa
 // patchTaskRawStatus updates existing task statuses and the corresponding task run statuses atomically.
 // Returns ENOTFOUND if tasks do not exist.
 func (s *Store) patchTaskRawStatus(ctx context.Context, patch *api.TaskStatusPatch) ([]*taskRaw, error) {
-	// Without using serializable isolation transaction, we will get race condition and have multiple task runs inserted because
-	// we do a read and write on task, without guaranteed consistency on task runs.
-	// Once we have multiple task runs, the task will get to unrecoverable state because find task run will fail with two active runs.
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, FormatError(err)
 	}
@@ -632,6 +646,15 @@ func (*Store) patchTaskImpl(ctx context.Context, tx *Tx, patch *api.TaskPatch) (
 	set, args := []string{"updater_id = $1"}, []interface{}{patch.UpdaterID}
 	if v := patch.DatabaseID; v != nil {
 		set, args = append(set, fmt.Sprintf("database_id = $%d", len(args)+1)), append(args, *v)
+	}
+	if (patch.Statement != nil || patch.SchemaVersion != nil) && patch.Payload != nil {
+		return nil, errors.Errorf("cannot set both statement/schemaVersion and payload for TaskPatch")
+	}
+	if v := patch.Statement; v != nil {
+		set, args = append(set, fmt.Sprintf(`payload['statement'] = to_json($%d::TEXT)`, len(args)+1)), append(args, *v)
+	}
+	if v := patch.SchemaVersion; v != nil {
+		set, args = append(set, fmt.Sprintf(`payload['schemaVersion'] = to_json($%d::TEXT)`, len(args)+1)), append(args, *v)
 	}
 	if v := patch.Payload; v != nil {
 		payload := "{}"
