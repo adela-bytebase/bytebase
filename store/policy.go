@@ -93,9 +93,11 @@ func (s *Store) GetPolicy(ctx context.Context, find *api.PolicyFind) (*api.Polic
 // DeletePolicy deletes an existing ARCHIVED policy by PolicyDelete.
 func (s *Store) DeletePolicy(ctx context.Context, policyDelete *api.PolicyDelete) error {
 	// Validate policy.
-	// Currently we only support PolicyTypeSQLReview type policy to delete by id
-	if policyDelete.Type != api.PolicyTypeSQLReview {
-		return &common.Error{Code: common.Invalid, Err: errors.Errorf("invalid policy type")}
+	switch policyDelete.Type {
+	case api.PolicyTypeSQLReview:
+	case api.PolicyTypeAccessControl:
+	default:
+		return &common.Error{Code: common.Invalid, Err: errors.Errorf("disallow to delete policy type: %s", policyDelete.Type)}
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -117,7 +119,7 @@ func (s *Store) DeletePolicy(ctx context.Context, policyDelete *api.PolicyDelete
 		return &common.Error{Code: common.NotFound, Err: errors.Errorf("failed to found policy with filter %+v, expect 1. ", find)}
 	}
 	policyRaw := policyRawList[0]
-	if policyRaw.RowStatus != api.Archived {
+	if policyRaw.RowStatus != api.Archived && policyDelete.Type == api.PolicyTypeSQLReview {
 		return &common.Error{Code: common.Invalid, Err: errors.Errorf("failed to delete policy with PolicyDelete[%+v], expect 'ARCHIVED' row_status", policyDelete)}
 	}
 
@@ -407,6 +409,7 @@ func findPolicyImpl(ctx context.Context, tx *Tx, find *api.PolicyFind) ([]*polic
 			updater_id,
 			updated_ts,
 			row_status,
+			resource_type,
 			resource_id,
 			inherit_from_parent,
 			type,
@@ -431,6 +434,7 @@ func findPolicyImpl(ctx context.Context, tx *Tx, find *api.PolicyFind) ([]*polic
 			&policyRaw.UpdaterID,
 			&policyRaw.UpdatedTs,
 			&policyRaw.RowStatus,
+			&policyRaw.ResourceType,
 			&policyRaw.ResourceID,
 			&policyRaw.InheritFromParent,
 			&policyRaw.Type,
@@ -508,7 +512,7 @@ func upsertPolicyImpl(ctx context.Context, tx *Tx, upsert *api.PolicyUpsert) (*p
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT(resource_type, resource_id, type) DO UPDATE SET
 			%s
-		RETURNING id, creator_id, created_ts, updater_id, updated_ts, row_status, resource_id, inherit_from_parent, type, payload
+		RETURNING id, creator_id, created_ts, updater_id, updated_ts, row_status, resource_type, resource_id, inherit_from_parent, type, payload
 	`, strings.Join(set, ","))
 	var policyRaw policyRaw
 	if err := tx.QueryRowContext(ctx, query,
@@ -527,6 +531,7 @@ func upsertPolicyImpl(ctx context.Context, tx *Tx, upsert *api.PolicyUpsert) (*p
 		&policyRaw.UpdaterID,
 		&policyRaw.UpdatedTs,
 		&policyRaw.RowStatus,
+		&policyRaw.ResourceType,
 		&policyRaw.ResourceID,
 		&policyRaw.InheritFromParent,
 		&policyRaw.Type,
@@ -544,12 +549,11 @@ func upsertPolicyImpl(ctx context.Context, tx *Tx, upsert *api.PolicyUpsert) (*p
 func (*Store) deletePolicyImpl(ctx context.Context, tx *Tx, delete *api.PolicyDelete) error {
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM policy
-			WHERE resource_type = $1 AND resource_id = $2 AND type = $3 AND row_status = $4
+			WHERE resource_type = $1 AND resource_id = $2 AND type = $3
 		`,
 		delete.ResourceType,
 		delete.ResourceID,
 		delete.Type,
-		api.Archived,
 	); err != nil {
 		return FormatError(err)
 	}
