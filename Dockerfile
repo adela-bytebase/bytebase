@@ -56,7 +56,7 @@ RUN VERSION=`cat ./VERSION`${VERSION_SUFFIX} && CGO_ENABLED=1 GOOS=linux GOARCH=
     ./bin/server/main.go
 
 # Use debian because mysql requires glibc.
-FROM debian:bullseye-slim as monolithic
+FROM debian:11.6-slim as monolithic
 
 ARG VERSION="development"
 ARG GIT_COMMIT="unknown"
