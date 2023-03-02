@@ -25,7 +25,7 @@ RUN GOOS=linux GOARCH=amd64 go build \
     ./bin/bb/main.go
 
 # Use debian because mysql requires glibc.
-FROM debian:bullseye-slim as monolithic
+FROM debian:11.6-slim as monolithic
 
 ARG VERSION="development"
 ARG GIT_COMMIT="unknown"
