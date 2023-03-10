@@ -5,7 +5,7 @@
     :disabled="tabStore.isDisconnected"
     @click="enterAdminMode"
   >
-    <heroicons-outline:wrench />
+    <heroicons-outline:wrench class="-ml-1" />
     <span class="ml-1"> {{ $t("sql-editor.admin-mode.self") }} </span>
   </NButton>
 </template>
@@ -15,7 +15,10 @@ import { computed } from "vue";
 
 import { TabMode } from "@/types";
 import { useCurrentUser, useTabStore, useWebTerminalStore } from "@/store";
-import { hasWorkspacePermission } from "@/utils";
+import {
+  getDefaultTabNameFromConnection,
+  hasWorkspacePermission,
+} from "@/utils";
 import { last } from "lodash-es";
 
 const emit = defineEmits<{
@@ -44,8 +47,9 @@ const enterAdminMode = () => {
   const target = {
     connection: current.connection,
     mode: TabMode.Admin,
+    name: getDefaultTabNameFromConnection(current.connection),
   };
-  tabStore.selectOrAddSimilarTab(target, true);
+  tabStore.selectOrAddSimilarTab(target, /* beside */ true);
   tabStore.updateCurrentTab({
     ...target,
     statement,

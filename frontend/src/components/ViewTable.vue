@@ -9,16 +9,13 @@
   >
     <template #body="{ rowData: view }">
       <BBTableCell :left-padding="4" class="w-16">
-        {{ view.name }}
+        {{ getViewName(view.name) }}
       </BBTableCell>
       <BBTableCell class="w-64">
         {{ view.definition }}
       </BBTableCell>
       <BBTableCell class="w-8">
         {{ view.comment }}
-      </BBTableCell>
-      <BBTableCell class="w-8">
-        {{ humanizeTs(view.createdTs) }}
       </BBTableCell>
     </template>
   </BBTable>
@@ -27,19 +24,33 @@
 <script lang="ts">
 import { computed, PropType } from "vue";
 import { useI18n } from "vue-i18n";
-import { View } from "@/types";
+import { ViewMetadata } from "@/types/proto/store/database";
+import { Database } from "@/types";
 
 export default {
   name: "ViewTable",
   components: {},
   props: {
+    database: {
+      required: true,
+      type: Object as PropType<Database>,
+    },
+    schemaName: {
+      type: String,
+      default: "",
+    },
     viewList: {
       required: true,
-      type: Object as PropType<View[]>,
+      type: Object as PropType<ViewMetadata[]>,
     },
   },
-  setup() {
+  setup(props) {
     const { t } = useI18n();
+
+    const hasSchemaProperty =
+      props.database.instance.engine === "POSTGRES" ||
+      props.database.instance.engine === "SNOWFLAKE";
+
     const columnList = computed(() => [
       {
         title: t("common.name"),
@@ -50,13 +61,19 @@ export default {
       {
         title: t("database.comment"),
       },
-      {
-        title: t("common.created-at"),
-      },
     ]);
+
+    const getViewName = (viewName: string) => {
+      if (hasSchemaProperty) {
+        return `"${props.schemaName}"."${viewName}"`;
+      }
+      return viewName;
+    };
 
     return {
       columnList,
+      hasSchemaProperty,
+      getViewName,
     };
   },
 };

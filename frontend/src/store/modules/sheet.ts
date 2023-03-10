@@ -19,7 +19,7 @@ import {
   SheetPayload,
 } from "@/types";
 import { getPrincipalFromIncludedList } from "./principal";
-import { useAuthStore } from "./auth";
+import { useCurrentUser } from "./auth";
 import { useDatabaseStore } from "./database";
 import { useProjectStore } from "./project";
 import { useTabStore } from "./tab";
@@ -101,12 +101,12 @@ export const useSheetStore = defineStore("sheet", {
       return state.sheetById.get(sheetId) || unknown("SHEET");
     },
     isCreator() {
-      const { currentUser } = useAuthStore();
+      const currentUser = useCurrentUser();
       const currentSheet = this.currentSheet as Sheet;
 
       if (!currentSheet) return false;
 
-      return currentUser.id === currentSheet!.creator.id;
+      return currentUser.value.id === currentSheet!.creator.id;
     },
     /**
      * Check the sheet whether is read-only.
@@ -117,7 +117,7 @@ export const useSheetStore = defineStore("sheet", {
      *   b) If the sheet's visibility is project, will be checked whether the current user is the `OWNER` of the project, only the current user is the `OWNER` of the project, it can be edited.
      */
     isReadOnly() {
-      const { currentUser } = useAuthStore();
+      const currentUser = useCurrentUser();
       const currentSheet = this.currentSheet as Sheet;
 
       // We don't have a selected sheet, we've got nothing to edit.
@@ -130,7 +130,12 @@ export const useSheetStore = defineStore("sheet", {
         return false;
       }
 
-      return !isSheetWritable(currentSheet, currentUser);
+      // Incomplete sheets should be read-only. e.g. 100MB sheet from issue task.
+      if (currentSheet.statement.length !== currentSheet.size) {
+        return true;
+      }
+
+      return !isSheetWritable(currentSheet, currentUser.value);
     },
   },
 

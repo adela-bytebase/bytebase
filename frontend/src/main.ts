@@ -7,12 +7,14 @@ import NaiveUI from "./plugins/naive-ui";
 import dayjs from "./plugins/dayjs";
 import highlight from "./plugins/highlight";
 import mountDemoApp from "./plugins/demo";
+import { isSilent } from "./plugins/silent-request";
 import { router } from "./router";
 import {
   pinia,
   pushNotification,
   useActuatorStore,
   useAuthStore,
+  useIdentityProviderStore,
   useSubscriptionStore,
 } from "./store";
 import {
@@ -88,7 +90,7 @@ axios.interceptors.response.use(
         }
       }
 
-      if (error.response.data.message) {
+      if (error.response.data.message && !isSilent()) {
         pushNotification({
           module: "bytebase",
           style: "CRITICAL",
@@ -99,7 +101,7 @@ axios.interceptors.response.use(
             : undefined,
         });
       }
-    } else if (error.code == "ECONNABORTED") {
+    } else if (error.code == "ECONNABORTED" && !isSilent()) {
       pushNotification({
         module: "bytebase",
         style: "CRITICAL",
@@ -149,18 +151,33 @@ const initSubscription = () => {
   const subscriptionStore = useSubscriptionStore();
   return subscriptionStore.fetchSubscription();
 };
+const initFeatureMatrix = () => {
+  const subscriptionStore = useSubscriptionStore();
+  return subscriptionStore.fetchFeatureMatrix();
+};
+// Initial identity providers to provide sso options in signin page and user's related domain name.
+const initIdentityProvider = () => {
+  const idpStore = useIdentityProviderStore();
+  return idpStore.fetchIdentityProviderList();
+};
 const restoreUser = () => {
   const authStore = useAuthStore();
   return authStore.restoreUser();
 };
-Promise.all([initActuator(), initSubscription(), restoreUser()]).finally(() => {
+Promise.all([
+  initActuator(),
+  initFeatureMatrix(),
+  initSubscription(),
+  initIdentityProvider(),
+  restoreUser(),
+]).finally(() => {
   // Install router after the necessary data fetching is complete.
   app.use(router).use(highlight).use(i18n).use(NaiveUI);
   app.mount("#app");
 
   // Try to mount demo vue app instance
   const serverInfo = useActuatorStore().serverInfo;
-  if ((serverInfo && serverInfo.demo && serverInfo.demoName) || isDev()) {
+  if ((serverInfo && serverInfo.demoName) || isDev()) {
     mountDemoApp();
   }
 });

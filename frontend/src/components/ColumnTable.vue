@@ -70,17 +70,16 @@
 </template>
 
 <script lang="ts">
+import { cloneDeep } from "lodash-es";
 import { computed, defineComponent, PropType, reactive } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Column,
   Database,
-  EngineType,
   SensitiveData,
   SensitiveDataPolicyPayload,
-  Table,
-} from "../types";
-import { useI18n } from "vue-i18n";
-import { cloneDeep } from "lodash-es";
+} from "@/types";
+import { ColumnMetadata, TableMetadata } from "@/types/proto/store/database";
 import { featureToRef, useCurrentUser, usePolicyStore } from "@/store";
 import { hasWorkspacePermission } from "@/utils";
 import { BBTableColumn } from "@/bbkit/types";
@@ -96,17 +95,17 @@ export default defineComponent({
       required: true,
       type: Object as PropType<Database>,
     },
+    schema: {
+      required: true,
+      type: String,
+    },
     table: {
       required: true,
-      type: Object as PropType<Table>,
+      type: Object as PropType<TableMetadata>,
     },
     columnList: {
       required: true,
-      type: Object as PropType<Column[]>,
-    },
-    engine: {
-      required: true,
-      type: String as PropType<EngineType>,
+      type: Object as PropType<ColumnMetadata[]>,
     },
     sensitiveDataList: {
       required: true,
@@ -118,10 +117,18 @@ export default defineComponent({
     const state = reactive<LocalState>({
       showFeatureModal: false,
     });
+    const engine = computed(() => {
+      return props.database.instance.engine;
+    });
 
     const hasSensitiveDataFeature = featureToRef("bb.feature.sensitive-data");
     const showSensitiveColumn = computed(() => {
-      return hasSensitiveDataFeature.value && props.engine === "MYSQL";
+      return (
+        hasSensitiveDataFeature.value &&
+        (engine.value === "MYSQL" ||
+          engine.value === "TIDB" ||
+          engine.value === "POSTGRES")
+      );
     });
 
     const currentUser = useCurrentUser();
@@ -174,26 +181,36 @@ export default defineComponent({
       }
       return columnList;
     });
-    const POSTGRES_COLUMN_LIST = computed((): BBTableColumn[] => [
-      {
-        title: t("common.name"),
-      },
-      {
-        title: t("common.type"),
-      },
-      {
-        title: t("common.Default"),
-      },
-      {
-        title: t("database.nullable"),
-      },
-      {
-        title: t("db.collation"),
-      },
-      {
-        title: t("database.comment"),
-      },
-    ]);
+    const POSTGRES_COLUMN_LIST = computed(() => {
+      const columnList: BBTableColumn[] = [
+        {
+          title: t("common.name"),
+        },
+        {
+          title: t("common.type"),
+        },
+        {
+          title: t("common.Default"),
+        },
+        {
+          title: t("database.nullable"),
+        },
+        {
+          title: t("db.collation"),
+        },
+        {
+          title: t("database.comment"),
+        },
+      ];
+      if (showSensitiveColumn.value) {
+        columnList.unshift({
+          title: t("database.sensitive"),
+          center: true,
+          nowrap: true,
+        });
+      }
+      return columnList;
+    });
     const CLICKHOUSE_SNOWFLAKE_COLUMN_LIST = computed((): BBTableColumn[] => [
       {
         title: t("common.name"),
@@ -213,7 +230,7 @@ export default defineComponent({
     ]);
 
     const columnNameList = computed(() => {
-      switch (props.engine) {
+      switch (engine.value) {
         case "POSTGRES":
           return POSTGRES_COLUMN_LIST.value;
         case "CLICKHOUSE":
@@ -256,6 +273,7 @@ export default defineComponent({
       if (on && index < 0) {
         // Turn on sensitive
         sensitiveDataList.push({
+          schema: props.schema,
           table: props.table.name,
           column: column.name,
           maskType: "DEFAULT",
@@ -276,6 +294,7 @@ export default defineComponent({
     };
 
     return {
+      engine,
       state,
       columnNameList,
       showSensitiveColumn,

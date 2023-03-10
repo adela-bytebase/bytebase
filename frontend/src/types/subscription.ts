@@ -1,7 +1,8 @@
-import { PlanType } from "./plan";
+import { PlanType, FeatureType } from "./plan";
 
 export interface Subscription {
   instanceCount: number;
+  seat: number;
   expiresTs: number;
   startedTs: number;
   plan: PlanType;
@@ -9,7 +10,7 @@ export interface Subscription {
 }
 
 export interface SubscriptionState {
+  featureMatrix: Map<FeatureType, boolean[]>;
   subscription: Subscription | undefined;
   trialingDays: number;
-  trialingInstanceCount: number;
 }

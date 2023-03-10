@@ -1,8 +1,7 @@
 <template>
   <BBModal
     :title="$t('database.alter-schema')"
-    class="schema-editor-modal-container !w-320 h-auto overflow-auto !max-w-[calc(100%-40px)] !max-h-[calc(100%-40px)]"
-    :esc-closable="false"
+    class="schema-editor-modal-container !w-[96rem] h-auto overflow-auto !max-w-[calc(100%-40px)] !max-h-[calc(100%-40px)]"
     @close="dismissModal"
   >
     <div
@@ -80,22 +79,33 @@
           data-label="bb-issue-sql-editor"
           :value="state.editStatement"
           :auto-focus="false"
-          :dialect="(databaseEngineType as SQLDialect)"
+          :dialect="dialectOfEngine(databaseEngineType)"
           @change="handleStatementChange"
         />
       </div>
     </div>
-    <div class="w-full flex items-center justify-end mt-2 space-x-3 pr-1 pb-1">
-      <button type="button" class="btn-normal" @click="dismissModal">
-        {{ $t("common.cancel") }}
-      </button>
-      <button
-        class="btn-primary"
-        :disabled="!allowPreviewIssue"
-        @click="handlePreviewIssue"
-      >
-        {{ $t("schema-editor.preview-issue") }}
-      </button>
+    <div class="w-full flex flex-row justify-between items-center mt-4 pr-px">
+      <div class="">
+        <div
+          v-if="isTenantProject"
+          class="flex flex-row items-center text-sm text-gray-500"
+        >
+          <heroicons-outline:exclamation-circle class="w-4 h-auto mr-1" />
+          {{ $t("schema-editor.tenant-mode-tips") }}
+        </div>
+      </div>
+      <div class="flex justify-end items-center space-x-3">
+        <button type="button" class="btn-normal" @click="dismissModal">
+          {{ $t("common.cancel") }}
+        </button>
+        <button
+          class="btn-primary whitespace-nowrap"
+          :disabled="!allowPreviewIssue"
+          @click="handlePreviewIssue"
+        >
+          {{ $t("schema-editor.preview-issue") }}
+        </button>
+      </div>
     </div>
   </BBModal>
 
@@ -114,7 +124,7 @@
 
 <script lang="ts" setup>
 import dayjs from "dayjs";
-import { head } from "lodash-es";
+import { head, uniq } from "lodash-es";
 import { computed, onMounted, PropType, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -122,16 +132,22 @@ import {
   Database,
   DatabaseEdit,
   DatabaseId,
-  SQLDialect,
+  dialectOfEngine,
+  EngineType,
   UNKNOWN_ID,
 } from "@/types";
 import { allowGhostMigration } from "@/utils";
 import {
   useDatabaseStore,
   useNotificationStore,
+  useProjectStore,
   useSchemaEditorStore,
 } from "@/store";
-import { diffTableList } from "@/utils/schemaEditor/diffTable";
+import {
+  checkHasSchemaChanges,
+  diffSchema,
+  mergeDiffResults,
+} from "@/utils/schemaEditor/diffSchema";
 import { validateDatabaseEdit } from "@/utils/schemaEditor/validate";
 import BBBetaBadge from "@/bbkit/BBBetaBadge.vue";
 import SchemaEditor from "@/components/SchemaEditor/SchemaEditor.vue";
@@ -153,7 +169,11 @@ const props = defineProps({
     type: Array as PropType<DatabaseId[]>,
     required: true,
   },
-  tenantMode: {
+  alterType: {
+    type: String as PropType<"TENANT" | "MULTI_DB" | "SINGLE_DB">,
+    required: true,
+  },
+  newWindow: {
     type: Boolean,
     default: false,
   },
@@ -195,20 +215,26 @@ const allowSyncSQLFromSchemaEditor = computed(() => {
 const databaseList = props.databaseIdList.map((databaseId) => {
   return databaseStore.getDatabaseById(databaseId);
 });
-const databaseEngineType = databaseList.reduce(
-  (engine: string, database: Database) => {
-    if (engine === "") {
-      engine = database.instance.engine;
-    } else {
-      engine = database.instance.engine === engine ? engine : "unknown";
-    }
-    return engine;
-  },
-  ""
+// Returns the type if it's uniq.
+// Returns "unknown" if there are more than ONE types.
+const databaseEngineType = computed((): EngineType | "unknown" => {
+  const engineTypes = uniq(databaseList.map((db) => db.instance.engine));
+  if (engineTypes.length !== 1) return "unknown";
+  return engineTypes[0];
+});
+
+const project = useProjectStore().getProjectById(
+  head(databaseList)?.projectId || UNKNOWN_ID
 );
+const isTenantProject = project.tenantMode === "TENANT";
 
 onMounted(() => {
-  if (databaseList.length === 0 || databaseEngineType === "unknown") {
+  if (databaseList.length === 0 || project.id === UNKNOWN_ID) {
+    notificationStore.pushNotification({
+      module: "bytebase",
+      style: "CRITICAL",
+      title: "Invalid database list",
+    });
     emit("close");
     return;
   }
@@ -234,11 +260,6 @@ const dismissModal = () => {
 // 'online' -> online migration
 // false -> user clicked cancel button
 const isUsingGhostMigration = async (databaseList: Database[]) => {
-  // Gh-ost is not available for tenant mode yet.
-  if (databaseList.some((db) => db.project.tenantMode === "TENANT")) {
-    return "normal";
-  }
-
   // check if all selected databases supports gh-ost
   if (allowGhostMigration(databaseList)) {
     // open the dialog to ask the user
@@ -258,7 +279,7 @@ const handleSyncSQLFromSchemaEditor = async () => {
     return;
   }
 
-  const databaseEditMap = await fetchDatabaseEditMapWithSchemaEditor();
+  const databaseEditMap = await fetchDatabaseEditStatementMapWithSchemaEditor();
   if (!databaseEditMap) {
     return;
   }
@@ -269,29 +290,38 @@ const handleSyncSQLFromSchemaEditor = async () => {
 const getDatabaseEditListWithSchemaEditor = () => {
   const databaseEditList: DatabaseEdit[] = [];
   for (const database of editorStore.databaseList) {
-    const originTableList = editorStore.originTableList.filter(
-      (table) => table.databaseId === database.id
-    );
-    const tableList = editorStore.tableList.filter(
-      (table) => table.databaseId === database.id
-    );
-    const diffTableListResult = diffTableList(originTableList, tableList);
-    if (
-      diffTableListResult.createTableList.length > 0 ||
-      diffTableListResult.alterTableList.length > 0 ||
-      diffTableListResult.renameTableList.length > 0 ||
-      diffTableListResult.dropTableList.length > 0
-    ) {
-      databaseEditList.push({
-        databaseId: database.id,
-        ...diffTableListResult,
-      });
+    const databaseSchema = editorStore.databaseSchemaById.get(database.id);
+    if (!databaseSchema) {
+      continue;
+    }
+
+    for (const schema of databaseSchema.schemaList) {
+      const originSchema = databaseSchema.originSchemaList.find(
+        (originSchema) => originSchema.id === schema.id
+      );
+      const diffSchemaResult = diffSchema(database.id, originSchema, schema);
+      if (checkHasSchemaChanges(diffSchemaResult)) {
+        const index = databaseEditList.findIndex(
+          (edit) => edit.databaseId === database.id
+        );
+        if (index !== -1) {
+          databaseEditList[index] = {
+            databaseId: database.id,
+            ...mergeDiffResults([diffSchemaResult, databaseEditList[index]]),
+          };
+        } else {
+          databaseEditList.push({
+            databaseId: database.id,
+            ...diffSchemaResult,
+          });
+        }
+      }
     }
   }
   return databaseEditList;
 };
 
-const fetchDatabaseEditMapWithSchemaEditor = async () => {
+const fetchDatabaseEditStatementMapWithSchemaEditor = async () => {
   const databaseEditList = getDatabaseEditListWithSchemaEditor();
   const databaseEditMap: Map<DatabaseId, string> = new Map();
   if (databaseEditList.length > 0) {
@@ -310,10 +340,12 @@ const fetchDatabaseEditMapWithSchemaEditor = async () => {
         });
         return;
       }
-      databaseEditMap.set(
-        databaseEdit.databaseId,
+      const previousStatement =
+        databaseEditMap.get(databaseEdit.databaseId) || "";
+      const statement = `${previousStatement}${previousStatement && "\n"}${
         databaseEditResult.statement
-      );
+      }`;
+      databaseEditMap.set(databaseEdit.databaseId, statement);
     }
   }
   return databaseEditMap;
@@ -348,7 +380,7 @@ const handleUploadFile = (e: Event) => {
     const sql = fr.result as string;
     state.editStatement = sql;
   };
-  fr.onerror = (e) => {
+  fr.onerror = () => {
     notificationStore.pushNotification({
       module: "bytebase",
       style: "WARN",
@@ -363,47 +395,57 @@ const handleUploadFile = (e: Event) => {
 };
 
 const handlePreviewIssue = async () => {
-  const projectId = head(databaseList)?.projectId || UNKNOWN_ID;
-  if (projectId === UNKNOWN_ID) {
-    console.error("project unknown");
-    return;
+  const query: Record<string, any> = {
+    template: "bb.issue.database.schema.update",
+    project: project.id,
+    mode: "normal",
+    ghost: undefined,
+  };
+  if (isTenantProject) {
+    if (props.databaseIdList.length > 1) {
+      // A tenant pipeline with 2 or more databases will be generated
+      // via deployment config, so we don't need the databaseList parameter.
+      query.mode = "tenant";
+    } else {
+      // A tenant pipeline with only 1 database will be downgraded to
+      // a standard pipeline.
+      // So we need to provide the databaseList parameter
+      query.databaseList = props.databaseIdList.join(",");
+    }
   }
+  if (props.alterType !== "TENANT") {
+    // If we are not using tenant deployment config pipeline
+    // we need to pass the databaseList explicitly.
+    query.databaseList = props.databaseIdList.join(",");
+  }
+  if (state.selectedTab === "raw-sql") {
+    query.sql = state.editStatement;
 
-  let issueMode = "normal";
-
-  if (props.tenantMode) {
-    issueMode = "tenant";
-  } else {
+    // We should show select ghost mode dialog only for altering table statement not create/drop table.
+    // TODO(steven): parse the sql check if there only alter table statement.
     const actionResult = await isUsingGhostMigration(databaseList);
     if (actionResult === false) {
       return;
     }
-    issueMode = actionResult;
-  }
-
-  const isGhostMode = issueMode === "online";
-  const query: Record<string, any> = {
-    template: "bb.issue.database.schema.update",
-    name: generateIssueName(
+    if (actionResult === "online") {
+      query.ghost = 1;
+    }
+    query.name = generateIssueName(
       databaseList.map((db) => db.name),
-      isGhostMode
-    ),
-    project: projectId,
-    mode: issueMode,
-    databaseList: props.databaseIdList.join(","),
-  };
-  if (isGhostMode) {
-    query.ghost = 1;
-  }
-
-  if (state.selectedTab === "raw-sql") {
-    query.sql = state.editStatement;
+      !!query.ghost
+    );
   } else {
     const databaseEditList = getDatabaseEditListWithSchemaEditor();
-    // Validate databaseEditList in frontend.
     const validateResultList = [];
+    let hasOnlyAlterTableChanges = true;
     for (const databaseEdit of databaseEditList) {
       validateResultList.push(...validateDatabaseEdit(databaseEdit));
+      if (
+        databaseEdit.createTableList.length > 0 ||
+        databaseEdit.dropTableList.length > 0
+      ) {
+        hasOnlyAlterTableChanges = false;
+      }
     }
     if (validateResultList.length > 0) {
       notificationStore.pushNotification({
@@ -417,35 +459,51 @@ const handlePreviewIssue = async () => {
       return;
     }
 
-    const databaseEditMap = await fetchDatabaseEditMapWithSchemaEditor();
-    if (!databaseEditMap) {
+    if (hasOnlyAlterTableChanges) {
+      const actionResult = await isUsingGhostMigration(databaseList);
+      if (actionResult === false) {
+        return;
+      }
+      if (actionResult === "online") {
+        query.ghost = 1;
+      }
+    }
+
+    const statementMap = await fetchDatabaseEditStatementMapWithSchemaEditor();
+    if (!statementMap) {
       return;
     }
-    const databaseIdList = Array.from(databaseEditMap.keys());
-    if (databaseIdList.length > 0) {
-      const statmentList = Array.from(databaseEditMap.values());
-      if (props.tenantMode) {
-        query.sql = statmentList.join("\n");
-      } else {
-        query.databaseList = databaseIdList.join(",");
-        query.sqlList = JSON.stringify(statmentList);
-        query.name = generateIssueName(
-          databaseList
-            .filter((database) => databaseIdList.includes(database.id))
-            .map((db) => db.name),
-          isGhostMode
-        );
-      }
+    const databaseIdList = Array.from(statementMap.keys());
+    const statementList = Array.from(statementMap.values());
+    if (isTenantProject) {
+      query.sql = statementList.join("\n");
+      query.name = generateIssueName(
+        databaseList.map((db) => db.name),
+        !!query.ghost
+      );
+    } else {
+      query.databaseList = databaseIdList.join(",");
+      query.sqlList = JSON.stringify(statementList);
+      const databaseNameList = databaseList
+        .filter((database) => databaseIdList.includes(database.id))
+        .map((db) => db.name);
+      query.name = generateIssueName(databaseNameList, !!query.ghost);
     }
   }
 
-  router.push({
+  const routeInfo = {
     name: "workspace.issue.detail",
     params: {
       issueSlug: "new",
     },
     query,
-  });
+  };
+  if (props.newWindow) {
+    const route = router.resolve(routeInfo);
+    window.open(route.fullPath, "__blank");
+  } else {
+    router.push(routeInfo);
+  }
 };
 
 const generateIssueName = (
@@ -483,7 +541,7 @@ watch(
 
 <style>
 .schema-editor-modal-container > .modal-container {
-  @apply w-full h-160 overflow-auto grid;
+  @apply w-full h-[46rem] overflow-auto grid;
   grid-template-rows: min-content 1fr min-content;
 }
 </style>

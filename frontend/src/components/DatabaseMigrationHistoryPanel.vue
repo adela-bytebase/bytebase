@@ -3,22 +3,22 @@
     <div
       class="flex flex-row items-center text-lg leading-6 font-medium text-main space-x-2"
     >
-      <span>{{ $t("migration-history.self") }}</span>
+      <span>{{ $t("change-history.self") }}</span>
       <BBTooltipButton
-        v-if="!isTenantProject && allowEdit"
+        v-if="showEstablishBaselineButton"
         type="primary"
         :disabled="!allowMigrate"
         tooltip-mode="DISABLED-ONLY"
         data-label="bb-establish-baseline-button"
         @click="state.showBaselineModal = true"
       >
-        {{ $t("migration-history.establish-baseline") }}
-        <template v-if="isTenantProject" #tooltip>
-          <div class="w-52 whitespace-pre-wrap">
+        {{ $t("change-history.establish-baseline") }}
+        <template v-if="database.project.id === DEFAULT_PROJECT_ID" #tooltip>
+          <div class="whitespace-pre-line">
             {{
-              $t("issue.not-allowed-to-single-database-in-tenant-mode", {
+              $t("issue.not-allowed-to-operate-unassigned-database", {
                 operation: $t(
-                  "migration-history.establish-baseline"
+                  "change-history.establish-baseline"
                 ).toLowerCase(),
               })
             }}
@@ -28,7 +28,7 @@
       <div>
         <BBSpin
           v-if="state.loading"
-          :title="$t('migration-history.refreshing-history')"
+          :title="$t('change-history.refreshing-history')"
         />
       </div>
     </div>
@@ -42,7 +42,7 @@
       :style="`WARN`"
       :title="attentionTitle"
       :action-text="
-        allowConfigInstance ? $t('migration-history.config-instance') : ''
+        allowConfigInstance ? $t('change-history.config-instance') : ''
       "
       @click-action="configInstance"
     />
@@ -50,16 +50,16 @@
 
   <BBAlert
     v-if="state.showBaselineModal"
-    data-label="bb-migration-history-establish-baseline-alert"
+    data-label="bb-change-history-establish-baseline-alert"
     :style="'INFO'"
-    :ok-text="$t('migration-history.establish-baseline')"
+    :ok-text="$t('change-history.establish-baseline')"
     :cancel-text="$t('common.cancel')"
     :title="
-      $t('migration-history.establish-database-baseline', {
+      $t('change-history.establish-database-baseline', {
         name: database.name,
       })
     "
-    :description="$t('migration-history.establish-baseline-description')"
+    :description="$t('change-history.establish-baseline-description')"
     @ok="doCreateBaseline"
     @cancel="state.showBaselineModal = false"
   >
@@ -78,13 +78,18 @@ import { useI18n } from "vue-i18n";
 import MigrationHistoryTable from "../components/MigrationHistoryTable.vue";
 import {
   Database,
+  DEFAULT_PROJECT_ID,
   InstanceMigration,
   MigrationHistory,
   MigrationSchemaStatus,
 } from "../types";
 import { useRouter } from "vue-router";
 import { BBTableSectionDataSource } from "../bbkit/types";
-import { hasWorkspacePermission, instanceSlug } from "../utils";
+import {
+  hasWorkspacePermission,
+  instanceHasAlterSchema,
+  instanceSlug,
+} from "../utils";
 import { useCurrentUser, useInstanceStore } from "@/store";
 
 interface LocalState {
@@ -153,15 +158,25 @@ export default defineComponent({
         currentUser.value.role
       );
     });
-
     const isTenantProject = computed(() => {
       return props.database.project.tenantMode === "TENANT";
+    });
+
+    const showEstablishBaselineButton = computed(() => {
+      if (!instanceHasAlterSchema(props.database.instance)) return false;
+      if (isTenantProject.value) return false;
+      if (!props.allowEdit) return false;
+      return true;
     });
 
     const allowMigrate = computed(() => {
       if (!props.allowEdit) return false;
 
       if (state.migrationSetupStatus !== "OK") return false;
+
+      if (props.database.project.id === DEFAULT_PROJECT_ID) {
+        return false;
+      }
 
       // Migrating single database in tenant mode is not allowed
       // Since this will probably cause different migration version across a group of tenant databases
@@ -171,21 +186,21 @@ export default defineComponent({
     const attentionTitle = computed((): string => {
       if (state.migrationSetupStatus == "NOT_EXIST") {
         return (
-          t("migration-history.instance-missing-migration-schema", {
+          t("change-history.instance-missing-change-schema", {
             name: props.database.instance.name,
           }) +
           (allowConfigInstance.value
             ? ""
-            : " " + t("migration-history.contact-dba"))
+            : " " + t("change-history.contact-dba"))
         );
       } else if (state.migrationSetupStatus == "UNKNOWN") {
         return (
-          t("migration-history.instance-bad-connection", {
+          t("change-history.instance-bad-connection", {
             name: props.database.instance.name,
           }) +
           (allowConfigInstance.value
             ? ""
-            : " " + t("migration-history.contact-dba"))
+            : " " + t("change-history.contact-dba"))
         );
       }
       return "";
@@ -223,7 +238,7 @@ export default defineComponent({
         },
         query: {
           template: "bb.issue.database.schema.baseline",
-          name: t("migration-history.establish-database-baseline", {
+          name: t("change-history.establish-database-baseline", {
             name: props.database.name,
           }),
           project: props.database.project.id,
@@ -233,9 +248,11 @@ export default defineComponent({
     };
 
     return {
+      DEFAULT_PROJECT_ID,
       state,
       allowConfigInstance,
       isTenantProject,
+      showEstablishBaselineButton,
       allowMigrate,
       attentionTitle,
       migrationHistorySectionList,

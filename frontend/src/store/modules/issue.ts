@@ -150,9 +150,9 @@ export const useIssueStore = defineStore("issue", {
         getIssueFromIncludedList
       );
 
-      issueList.forEach((issue) =>
-        this.setIssueById({ issueId: issue.id, issue })
-      );
+      // The issue list API returns incomplete issue entities (without
+      // task.instance and task.database compositions)
+      // So we shouldn't store the incomplete cache items in issueById set here.
 
       const nextToken = isPagedResponse(responseData, "issues")
         ? responseData.data.attributes.nextToken
@@ -195,6 +195,14 @@ export const useIssueStore = defineStore("issue", {
         }
       }
       return issue;
+    },
+    async getOrFetchIssueById(issueId: IssueId) {
+      if (issueId === EMPTY_ID) return empty("ISSUE");
+      if (issueId === UNKNOWN_ID) return unknown("ISSUE");
+      if (!this.issueById.has(issueId)) {
+        await this.fetchIssueById(issueId);
+      }
+      return this.getIssueById(issueId);
     },
     async createIssue(newIssue: IssueCreate) {
       try {

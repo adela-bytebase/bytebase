@@ -1,13 +1,13 @@
 <template>
   <div class="text-lg leading-6 font-medium text-main">
-    <i18n-t keypath="repository.version-control-status">
+    <i18n-t keypath="repository.gitops-status">
       <template #status>
         <span class="text-success"> {{ $t("common.enabled") }} </span>
       </template>
     </i18n-t>
   </div>
   <div class="mt-2 textinfolabel">
-    <i18n-t keypath="repository.version-control-description-file-path">
+    <i18n-t keypath="repository.gitops-description-file-path">
       <template #fullPath>
         <a class="normal-link" :href="repository.webUrl" target="_blank">{{
           repository.fullPath
@@ -22,7 +22,7 @@
       </template>
     </i18n-t>
     <span>&nbsp;</span>
-    <i18n-t keypath="repository.version-control-description-branch">
+    <i18n-t keypath="repository.gitops-description-branch">
       <template #branch>
         <span class="font-medium text-main">
           <template v-if="state.repositoryConfig.branchFilter">
@@ -36,9 +36,7 @@
     </i18n-t>
     <template v-if="state.repositoryConfig.schemaPathTemplate">
       <span>&nbsp;</span>
-      <i18n-t
-        keypath="repository.version-control-description-description-schema-path"
-      >
+      <i18n-t keypath="repository.gitops-description-description-schema-path">
         <template #schemaPathTemplate>
           <span class="font-medium text-main">{{
             state.repositoryConfig.schemaPathTemplate
@@ -249,7 +247,6 @@ import {
   useProjectStore,
   useRepositoryStore,
 } from "@/store";
-import { isDev } from "@/utils";
 
 interface LocalState {
   repositoryConfig: RepositoryConfig;
@@ -284,6 +281,7 @@ export default defineComponent({
   setup(props) {
     const { t } = useI18n();
     const repositoryStore = useRepositoryStore();
+    const projectStore = useProjectStore();
     const state = reactive<LocalState>({
       repositoryConfig: {
         baseDirectory: props.repository.baseDirectory,
@@ -358,17 +356,22 @@ export default defineComponent({
       restoreToUIWorkflowType(false);
     };
 
-    const restoreToUIWorkflowType = (checkSQLReviewCI: boolean) => {
+    const restoreToUIWorkflowType = async (checkSQLReviewCI: boolean) => {
       if (checkSQLReviewCI && props.repository.enableSQLReviewCI) {
         state.showRestoreSQLReviewCIModal = true;
         return;
       }
-      repositoryStore.deleteRepositoryByProjectId(props.project.id).then(() => {
-        pushNotification({
-          module: "bytebase",
-          style: "SUCCESS",
-          title: t("repository.restore-ui-workflow-success"),
-        });
+      await repositoryStore.deleteRepositoryByProjectId(props.project.id);
+      await projectStore.patchProject({
+        projectId: props.project.id,
+        projectPatch: {
+          workflowType: "UI",
+        },
+      });
+      pushNotification({
+        module: "bytebase",
+        style: "SUCCESS",
+        title: t("repository.restore-ui-workflow-success"),
       });
     };
 
@@ -453,10 +456,7 @@ export default defineComponent({
       }
 
       // Update project schemaChangeType field firstly.
-      if (
-        isDev() &&
-        state.schemaChangeType !== props.project.schemaChangeType
-      ) {
+      if (state.schemaChangeType !== props.project.schemaChangeType) {
         const projectPatch: ProjectPatch = {
           schemaChangeType: state.schemaChangeType,
         };
@@ -482,7 +482,7 @@ export default defineComponent({
       pushNotification({
         module: "bytebase",
         style: "SUCCESS",
-        title: t("repository.update-version-control-config-success"),
+        title: t("repository.update-gitops-config-success"),
       });
     };
 

@@ -3,7 +3,6 @@ import {
   Environment,
   IssueType,
   PolicyId,
-  Principal,
   RuleType,
   RuleLevel,
   SubsetOf,
@@ -41,6 +40,7 @@ export type BackupPlanPolicySchedule = "UNSET" | "DAILY" | "WEEKLY";
 
 export type BackupPlanPolicyPayload = {
   schedule: BackupPlanPolicySchedule;
+  retentionPeriodTs: number;
 };
 
 export const DefaultSchedulePolicy: BackupPlanPolicySchedule = "UNSET";
@@ -52,6 +52,7 @@ export type SQLReviewPolicyPayload = {
     type: RuleType;
     level: RuleLevel;
     payload: string;
+    comment: string;
   }[];
 };
 
@@ -73,6 +74,7 @@ export type AssigneeGroup = {
 export type SensitiveDataMaskType = "DEFAULT";
 
 export type SensitiveData = {
+  schema: string;
   table: string;
   column: string;
   maskType: SensitiveDataMaskType;
@@ -110,10 +112,6 @@ export type Policy = {
   id: PolicyId;
 
   // Standard fields
-  creator: Principal;
-  createdTs: number;
-  updater: Principal;
-  updatedTs: number;
   rowStatus: RowStatus;
 
   // Related fields

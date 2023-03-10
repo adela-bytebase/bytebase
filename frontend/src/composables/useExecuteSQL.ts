@@ -12,6 +12,7 @@ import {
 import { pushNotification, useTabStore, useSQLEditorStore } from "@/store";
 import { BBNotificationStyle } from "@/bbkit/types";
 import { ExecuteConfig, ExecuteOption, SQLResultSet, TabMode } from "@/types";
+import { useSilentRequest } from "@/plugins/silent-request";
 
 const useExecuteSQL = () => {
   const { t } = useI18n();
@@ -45,19 +46,19 @@ const useExecuteSQL = () => {
     }
 
     if (data !== null && !isSelectStatement(data)) {
+      // only DDL and DML statements are allowed
+      if (isDDLStatement(data, "some") || isDMLStatement(data, "some")) {
+        sqlEditorStore.setSQLEditorState({
+          isShowExecutingHint: true,
+        });
+        return;
+      }
       if (isMultipleStatements(data)) {
         notify(
           "INFO",
           t("common.tips"),
           t("sql-editor.notify-multiple-statements")
         );
-        return;
-      }
-      // only DDL and DML statements are allowed
-      if (isDDLStatement(data) || isDMLStatement(data)) {
-        sqlEditorStore.setSQLEditorState({
-          isShowExecutingHint: true,
-        });
         return;
       }
     }
@@ -76,9 +77,11 @@ const useExecuteSQL = () => {
     }
 
     try {
-      const sqlResultSet = await sqlEditorStore.executeQuery({
-        statement: selectStatement,
-      });
+      const sqlResultSet = await useSilentRequest(() =>
+        sqlEditorStore.executeQuery({
+          statement: selectStatement,
+        })
+      );
       // TODO(steven): use BBModel instead of notify to show the advice from SQL review.
       let adviceStatus = "SUCCESS";
       let adviceNotifyMessage = "";
@@ -104,9 +107,7 @@ const useExecuteSQL = () => {
       }
 
       // use `markRaw` to prevent vue from monitoring the object change deeply
-      const queryResult = sqlResultSet.data
-        ? markRaw(sqlResultSet.data)
-        : undefined;
+      const queryResult = sqlResultSet ? markRaw(sqlResultSet) : undefined;
       Object.assign(tab, {
         queryResult,
         adviceList: sqlResultSet.adviceList,
@@ -123,9 +124,13 @@ const useExecuteSQL = () => {
       }
 
       return sqlResultSet;
-    } catch (error) {
+    } catch (error: any) {
       Object.assign(tab, {
-        queryResult: undefined,
+        queryResult: {
+          data: null,
+          error: error.response?.data?.message ?? String(error),
+          adviceList: [],
+        },
         adviceList: undefined,
         executeParams: {
           query,
@@ -133,7 +138,6 @@ const useExecuteSQL = () => {
           option,
         },
       });
-      notify("CRITICAL", error as string);
     }
   };
 
@@ -150,14 +154,14 @@ const useExecuteSQL = () => {
     }
 
     try {
-      const sqlResultSet = await sqlEditorStore.executeAdminQuery({
-        statement,
-      });
+      const sqlResultSet = await useSilentRequest(() =>
+        sqlEditorStore.executeAdminQuery({
+          statement,
+        })
+      );
 
       // use `markRaw` to prevent vue from monitoring the object change deeply
-      const queryResult = sqlResultSet.data
-        ? markRaw(sqlResultSet.data)
-        : undefined;
+      const queryResult = sqlResultSet ? markRaw(sqlResultSet) : undefined;
       Object.assign(tab, {
         queryResult,
         adviceList: sqlResultSet.adviceList,
@@ -174,9 +178,13 @@ const useExecuteSQL = () => {
       }
 
       return sqlResultSet;
-    } catch (error) {
+    } catch (error: any) {
       Object.assign(tab, {
-        queryResult: undefined,
+        queryResult: {
+          data: null,
+          error: error.response?.data?.message ?? String(error),
+          adviceList: [],
+        },
         adviceList: undefined,
         executeParams: {
           query,
@@ -184,7 +192,6 @@ const useExecuteSQL = () => {
           option,
         },
       });
-      notify("CRITICAL", error as string);
     }
   };
 

@@ -15,7 +15,6 @@ import {
   VCS,
   VCSId,
 } from "@/types";
-import { getPrincipalFromIncludedList } from "./principal";
 import { useProjectStore } from "./project";
 import { useVCSStore } from "./vcs";
 
@@ -45,19 +44,8 @@ function convert(
   }
 
   return {
-    ...(repository.attributes as Omit<
-      Repository,
-      "id" | "vcs" | "project" | "creator" | "updater"
-    >),
-    id: parseInt(repository.id),
-    creator: getPrincipalFromIncludedList(
-      repository.relationships!.creator.data,
-      includedList
-    ),
-    updater: getPrincipalFromIncludedList(
-      repository.relationships!.updater.data,
-      includedList
-    ),
+    ...(repository.attributes as Omit<Repository, "id" | "vcs" | "project">),
+    id: repository.id,
     vcs,
     project,
   };

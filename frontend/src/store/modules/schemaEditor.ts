@@ -12,9 +12,13 @@ import {
   ResourceObject,
 } from "@/types";
 import { DatabaseEditResult } from "@/types/schemaEditor";
-import { Table } from "@/types/schemaEditor/atomType";
-import { useDatabaseStore, useTableStore } from ".";
-import { transformTableDataToTable } from "@/utils/schemaEditor/transform";
+import {
+  convertSchemaMetadataList,
+  convertSchemaMetadataToSchema,
+  Table,
+} from "@/types/schemaEditor/atomType";
+import { SchemaMetadata } from "@/types/proto/store/database";
+import { useDatabaseStore, useDBSchemaStore } from ".";
 
 export const generateUniqueTabId = () => {
   return uniqueId();
@@ -26,9 +30,7 @@ const getDefaultSchemaEditorState = (): SchemaEditorState => {
       tabMap: new Map<string, TabContext>(),
       currentTabId: "",
     },
-    databaseList: [],
-    originTableList: [],
-    tableList: [],
+    databaseSchemaById: new Map(),
   };
 };
 
@@ -45,14 +47,19 @@ export const useSchemaEditorStore = defineStore("SchemaEditor", {
     return getDefaultSchemaEditorState();
   },
   getters: {
-    currentTab(state) {
-      if (isUndefined(state.tabState.currentTabId)) {
+    currentTab(): TabContext | undefined {
+      if (isUndefined(this.tabState.currentTabId)) {
         return undefined;
       }
-      return state.tabState.tabMap.get(state.tabState.currentTabId);
+      return this.tabState.tabMap.get(this.tabState.currentTabId);
     },
-    tabList(state) {
-      return Array.from(state.tabState.tabMap.values());
+    tabList(): TabContext[] {
+      return Array.from(this.tabState.tabMap.values());
+    },
+    databaseList(): Database[] {
+      return Array.from(this.databaseSchemaById.values()).map(
+        (databaseSchema) => databaseSchema.database
+      );
     },
   },
   actions: {
@@ -71,7 +78,7 @@ export const useSchemaEditorStore = defineStore("SchemaEditor", {
         if (
           item.type === SchemaEditorTabType.TabForTable &&
           item.databaseId === tab.databaseId &&
-          item.tableName === (tab as TableTabContext).tableName
+          item.tableId === (tab as TableTabContext).tableId
         ) {
           return true;
         }
@@ -79,10 +86,13 @@ export const useSchemaEditorStore = defineStore("SchemaEditor", {
       });
 
       if (tabCache !== undefined) {
-        tab = tabCache;
-      } else {
-        this.tabState.tabMap.set(tab.id, tab);
+        tab = {
+          ...tabCache,
+          ...tab,
+          id: tabCache.id,
+        };
       }
+      this.tabState.tabMap.set(tab.id, tab);
 
       if (setAsCurrentTab) {
         this.setCurrentTab(tab.id);
@@ -115,9 +125,9 @@ export const useSchemaEditorStore = defineStore("SchemaEditor", {
       }
       this.tabState.tabMap.delete(tabId);
     },
-    findTab(databaseId: DatabaseId, tableName?: string) {
+    findTab(databaseId: DatabaseId, tableId?: string) {
       let tabType = SchemaEditorTabType.TabForDatabase;
-      if (tableName !== undefined) {
+      if (tableId !== undefined) {
         tabType = SchemaEditorTabType.TabForTable;
       }
 
@@ -130,7 +140,7 @@ export const useSchemaEditorStore = defineStore("SchemaEditor", {
           return true;
         } else if (
           tab.type === SchemaEditorTabType.TabForTable &&
-          tab.tableName === tableName
+          tab.tableId === tableId
         ) {
           return true;
         }
@@ -147,44 +157,117 @@ export const useSchemaEditorStore = defineStore("SchemaEditor", {
           await useDatabaseStore().getOrFetchDatabaseById(id)
         );
         databaseList.push(database);
+        this.databaseSchemaById.set(database.id, {
+          database: database,
+          schemaList: [],
+          originSchemaList: [],
+        });
       }
-      this.databaseList = databaseList;
       return databaseList;
     },
-    async getOrFetchTableListByDatabaseId(databaseId: DatabaseId) {
-      const tableList: Table[] = [];
-      for (const table of this.tableList) {
-        if (table.databaseId === databaseId) {
-          tableList.push(table);
-        }
+    async fetchSchemaListByDatabaseId(databaseId: DatabaseId) {
+      const database = useDatabaseStore().getDatabaseById(databaseId);
+      const schemaMetadataList =
+        await useDBSchemaStore().getOrFetchSchemaListByDatabaseId(
+          databaseId,
+          true
+        );
+      const schemaList = convertSchemaMetadataList(schemaMetadataList);
+      if (schemaList.length === 0 && database.instance.engine === "MYSQL") {
+        schemaList.push(
+          convertSchemaMetadataToSchema(SchemaMetadata.fromPartial({}))
+        );
       }
 
-      if (tableList.length === 0) {
-        const tableDataList = await useTableStore().fetchTableListByDatabaseId(
-          databaseId
-        );
-        const transformTableList = tableDataList.map((tableData) =>
-          transformTableDataToTable(tableData)
-        );
+      this.databaseSchemaById.set(databaseId, {
+        database: database,
+        schemaList: schemaList,
+        originSchemaList: cloneDeep(schemaList),
+      });
 
-        tableList.push(...transformTableList);
-        this.originTableList.push(...transformTableList);
-        this.tableList.push(...cloneDeep(transformTableList));
-      }
-      return tableList;
+      return this.databaseSchemaById.get(databaseId)!.schemaList;
     },
-    getTableWithTableTab(tab: TableTabContext) {
-      return this.tableList.find(
-        (table) =>
-          table.databaseId === tab.databaseId && table.newName === tab.tableName
+    getSchema(databaseId: DatabaseId, schemaId: string) {
+      return this.databaseSchemaById
+        .get(databaseId)
+        ?.schemaList.find((schema) => schema.id === schemaId);
+    },
+    getOriginSchema(databaseId: DatabaseId, schemaId: string) {
+      return this.databaseSchemaById
+        .get(databaseId)
+        ?.originSchemaList.find((schema) => schema.id === schemaId);
+    },
+    dropSchema(databaseId: DatabaseId, schemaId: string) {
+      const schema = this.getSchema(databaseId, schemaId);
+      if (!schema) {
+        return;
+      }
+
+      if (schema.status === "created") {
+        const databaseSchema = this.databaseSchemaById.get(databaseId);
+        if (databaseSchema) {
+          databaseSchema.schemaList =
+            this.databaseSchemaById
+              .get(databaseId)
+              ?.schemaList.filter((schema) => schema.id !== schemaId) || [];
+
+          // Close related tabs.
+          for (const tab of this.tabList) {
+            if (tab.databaseId !== databaseId) {
+              continue;
+            }
+
+            if (
+              tab.type === SchemaEditorTabType.TabForTable &&
+              tab.schemaId === schemaId
+            ) {
+              this.closeTab(tab.id);
+            }
+          }
+        }
+      } else {
+        schema.status = "dropped";
+      }
+    },
+    restoreSchema(databaseId: DatabaseId, schemaId: string) {
+      const schema = this.getSchema(databaseId, schemaId);
+      if (!schema) {
+        return;
+      }
+
+      schema.status = "normal";
+    },
+    getTable(databaseId: DatabaseId, schemaId: string, tableId: string) {
+      return this.getSchema(databaseId, schemaId)?.tableList.find(
+        (table) => table.id === tableId
       );
     },
-    dropTable(table: Table) {
+    getOriginTable(databaseId: DatabaseId, schemaId: string, tableId: string) {
+      return this.getOriginSchema(databaseId, schemaId)?.tableList.find(
+        (table) => table.id === tableId
+      );
+    },
+    getTableWithTableTab(tab: TableTabContext) {
+      return this.databaseSchemaById
+        .get(tab.databaseId)
+        ?.schemaList.find((schema) => schema.id === tab.schemaId)
+        ?.tableList?.find((table) => table.id === tab.tableId);
+    },
+    dropTable(databaseId: DatabaseId, schemaId: string, tableId: string) {
+      const table = this.getTable(databaseId, schemaId, tableId);
+      if (!table) {
+        return;
+      }
+
       // Remove table record and close tab for created table.
       if (table.status === "created") {
-        const index = this.tableList.findIndex((item) => item === table);
-        this.tableList.splice(index, 1);
-        const tab = this.findTab(table.databaseId, table.newName);
+        const tableList = this.databaseSchemaById
+          .get(databaseId)
+          ?.schemaList.find((schema) => schema.id === schemaId)
+          ?.tableList as Table[];
+        const index = tableList.findIndex((item) => item.id === table.id);
+        tableList.splice(index, 1);
+        const tab = this.findTab(databaseId, table.id);
         if (tab) {
           this.closeTab(tab.id);
         }
@@ -192,7 +275,12 @@ export const useSchemaEditorStore = defineStore("SchemaEditor", {
         table.status = "dropped";
       }
     },
-    restoreTable(table: Table) {
+    restoreTable(databaseId: DatabaseId, schemaId: string, tableId: string) {
+      const table = this.getTable(databaseId, schemaId, tableId);
+      if (!table) {
+        return;
+      }
+
       table.status = "normal";
     },
     async postDatabaseEdit(databaseEdit: DatabaseEdit) {

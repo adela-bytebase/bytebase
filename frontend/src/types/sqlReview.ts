@@ -1,10 +1,10 @@
 import { useI18n } from "vue-i18n";
 import { PolicyId } from "./id";
-import { Principal } from "./principal";
 import { RowStatus } from "./common";
 import { Environment } from "./environment";
 import { PlanType } from "./plan";
 import sqlReviewSchema from "./sql-review-schema.yaml";
+import sqlReviewSampleTemplate from "./sql-review.sample.yaml";
 import sqlReviewProdTemplate from "./sql-review.prod.yaml";
 import sqlReviewDevTemplate from "./sql-review.dev.yaml";
 
@@ -38,7 +38,7 @@ export const LEVEL_LIST = [
 
 // NumberPayload is the number type payload configuration options and default value.
 // Used by the frontend.
-interface NumberPayload {
+export interface NumberPayload {
   type: "NUMBER";
   default: number;
   value?: number;
@@ -46,7 +46,7 @@ interface NumberPayload {
 
 // StringPayload is the string type payload configuration options and default value.
 // Used by the frontend.
-interface StringPayload {
+export interface StringPayload {
   type: "STRING";
   default: string;
   value?: string;
@@ -54,7 +54,7 @@ interface StringPayload {
 
 // BooleanPayload is the boolean type payload configuration options and default value.
 // Used by the frontend.
-interface BooleanPayload {
+export interface BooleanPayload {
   type: "BOOLEAN";
   default: boolean;
   value?: boolean;
@@ -62,7 +62,7 @@ interface BooleanPayload {
 
 // StringArrayPayload is the string array type payload configuration options and default value.
 // Used by the frontend.
-interface StringArrayPayload {
+export interface StringArrayPayload {
   type: "STRING_ARRAY";
   default: string[];
   value?: string[];
@@ -70,7 +70,7 @@ interface StringArrayPayload {
 
 // TemplatePayload is the string template type payload configuration options and default value.
 // Used by the frontend.
-interface TemplatePayload {
+export interface TemplatePayload {
   type: "TEMPLATE";
   default: string;
   templateList: string[];
@@ -131,20 +131,21 @@ export type RuleType =
   | "statement.insert.row-limit"
   | "statement.affected-row-limit"
   | "statement.dml-dry-run"
+  | "statement.disallow-add-column-with-default"
+  | "statement.add-check-not-valid"
+  | "statement.disallow-add-not-null"
   | "schema.backward-compatibility"
   | "database.drop-empty-database"
   | "system.charset.allowlist"
   | "system.collation.allowlist"
+  | "system.comment.length"
   | "index.no-duplicate-column"
   | "index.type-no-blob"
   | "index.key-number-limit"
   | "index.total-number-limit"
+  | "index.primary-key-type-allowlist"
+  | "index.create-concurrently"
   | "index.pk-type-limit";
-
-export const availableRulesForFreePlan: RuleType[] = [
-  "statement.where.require",
-  "column.no-null",
-];
 
 // The naming format rule payload.
 // Used by the backend.
@@ -182,6 +183,7 @@ export interface SchemaPolicyRule {
     | StringArrayLimitPayload
     | CommentFormatPayload
     | NumberLimitPayload;
+  comment: string;
 }
 
 // The API for SQL review policy in backend.
@@ -189,10 +191,6 @@ export interface SQLReviewPolicy {
   id: PolicyId;
 
   // Standard fields
-  creator: Principal;
-  createdTs: number;
-  updater: Principal;
-  updatedTs: number;
   rowStatus: RowStatus;
 
   // Domain specific fields
@@ -208,6 +206,7 @@ export interface RuleTemplate {
   engineList: SchemaRuleEngineType[];
   componentList: RuleConfigComponent[];
   level: RuleLevel;
+  comment?: string;
 }
 
 // SQLReviewPolicyTemplate is the rule template set
@@ -225,7 +224,11 @@ export const TEMPLATE_LIST: SQLReviewPolicyTemplate[] = (function () {
     },
     new Map<RuleType, RuleTemplate>()
   );
-  const templateList = [sqlReviewProdTemplate, sqlReviewDevTemplate] as {
+  const templateList = [
+    sqlReviewSampleTemplate,
+    sqlReviewDevTemplate,
+    sqlReviewProdTemplate,
+  ] as {
     id: string;
     ruleList: {
       type: RuleType;
@@ -269,6 +272,15 @@ export const TEMPLATE_LIST: SQLReviewPolicyTemplate[] = (function () {
     };
   });
 })();
+
+export const findRuleTemplate = (type: RuleType) => {
+  for (let i = 0; i < TEMPLATE_LIST.length; i++) {
+    const template = TEMPLATE_LIST[i];
+    const rule = template.ruleList.find((rule) => rule.type === type);
+    if (rule) return rule;
+  }
+  return undefined;
+};
 
 export const ruleTemplateMap: Map<RuleType, RuleTemplate> =
   TEMPLATE_LIST.reduce((map, template) => {
@@ -323,7 +335,11 @@ export const convertPolicyRuleToRuleTemplate = (
     );
   }
 
-  const res = { ...ruleTemplate, level: policyRule.level };
+  const res = {
+    ...ruleTemplate,
+    level: policyRule.level,
+    comment: policyRule.comment,
+  };
 
   if (ruleTemplate.componentList.length === 0) {
     return res;
@@ -452,6 +468,7 @@ export const convertPolicyRuleToRuleTemplate = (
       };
     }
     case "column.type-disallow-list":
+    case "index.primary-key-type-allowlist":
     case "system.charset.allowlist":
     case "system.collation.allowlist": {
       const stringArrayComponent = ruleTemplate.componentList[0];
@@ -500,6 +517,7 @@ export const convertPolicyRuleToRuleTemplate = (
     case "column.auto-increment-initial-value":
     case "index.key-number-limit":
     case "index.total-number-limit":
+    case "system.comment.length":
       if (!numberComponent) {
         throw new Error(`Invalid rule ${ruleTemplate.type}`);
       }
@@ -529,6 +547,7 @@ export const convertRuleTemplateToPolicyRule = (
   const base: SchemaPolicyRule = {
     type: rule.type,
     level: rule.level,
+    comment: rule.comment ?? "",
   };
   if (rule.componentList.length === 0) {
     return base;
@@ -598,6 +617,7 @@ export const convertRuleTemplateToPolicyRule = (
       };
     case "column.required":
     case "column.type-disallow-list":
+    case "index.primary-key-type-allowlist":
     case "system.charset.allowlist":
     case "system.collation.allowlist": {
       const stringArrayPayload = rule.componentList[0]
@@ -627,6 +647,7 @@ export const convertRuleTemplateToPolicyRule = (
     case "column.auto-increment-initial-value":
     case "index.key-number-limit":
     case "index.total-number-limit":
+    case "system.comment.length":
       if (!numberPayload) {
         throw new Error(`Invalid rule ${rule.type}`);
       }
@@ -659,6 +680,11 @@ export const getRuleLocalization = (
     description,
   };
 };
+
+const availableRulesForFreePlan: RuleType[] = [
+  "statement.where.require",
+  "column.no-null",
+];
 
 export const ruleIsAvailableInSubscription = (
   ruleType: RuleType,

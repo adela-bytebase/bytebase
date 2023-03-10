@@ -4,56 +4,82 @@
     <div v-if="databaseList.length === 0" class="textinfolabel">
       {{ $t("alter-schema.no-databases-in-project") }}
     </div>
-    <div v-else class="textinfolabel">
-      {{ $t("alter-schema.alter-multiple-db-info") }}
-    </div>
-    <slot name="header"></slot>
-    <div class="space-y-4">
-      <div
+    <template v-else>
+      <slot name="header"></slot>
+    </template>
+
+    <NCollapse
+      class="overflow-y-auto"
+      style="max-height: calc(100vh - 380px)"
+      arrow-placement="left"
+      :default-expanded-names="
+        databaseListGroupByEnvironment.map((group) => group.environment.id)
+      "
+    >
+      <NCollapseItem
         v-for="{
           environment,
           databaseList: databaseListInEnvironment,
         } in databaseListGroupByEnvironment"
         :key="environment.id"
+        :name="environment.id"
       >
-        <label class="flex items-center gap-x-2 mb-2 mt-4">
-          <input
-            type="checkbox"
-            class="h-4 w-4 text-accent rounded disabled:cursor-not-allowed border-control-border focus:ring-accent ml-[calc(1rem+1px)]"
-            v-bind="
-              getAllSelectionStateForEnvironment(
-                environment,
-                databaseListInEnvironment
+        <template #header>
+          <label class="flex items-center gap-x-2" @click.stop="">
+            <input
+              type="checkbox"
+              class="h-4 w-4 text-accent rounded disabled:cursor-not-allowed border-control-border focus:ring-accent ml-0.5"
+              v-bind="
+                getAllSelectionStateForEnvironment(
+                  environment,
+                  databaseListInEnvironment
+                )
+              "
+              @click.stop=""
+              @input="
+                toggleAllDatabasesSelectionForEnvironment(
+                  environment,
+                  databaseListInEnvironment,
+                  ($event.target as HTMLInputElement).checked
+                )
+              "
+            />
+            <div>{{ environment.name }}</div>
+            <ProductionEnvironmentIcon
+              class="w-4 h-4 -ml-1"
+              :environment="environment"
+            />
+          </label>
+        </template>
+
+        <template #header-extra>
+          <div class="flex items-center text-xs text-gray-500 mr-2">
+            {{
+              $t(
+                "database.n-selected-m-in-total",
+                getSelectionStateSummaryForEnvironment(
+                  environment,
+                  databaseListInEnvironment
+                )
               )
-            "
-            @input="
-              toggleAllDatabasesSelectionForEnvironment(
-                environment,
-                databaseListInEnvironment,
-                ($event.target as HTMLInputElement).checked
-              )
-            "
-          />
-          <div>{{ environment.name }}</div>
-          <ProtectedEnvironmentIcon
-            class="w-4 h-4 -ml-1"
-            :environment="environment"
-          />
-        </label>
-        <div class="relative bg-white rounded-md -space-y-px">
+            }}
+          </div>
+        </template>
+
+        <div class="relative bg-white rounded-md -space-y-px px-2">
           <template
             v-for="(database, dbIndex) in databaseListInEnvironment"
             :key="dbIndex"
           >
             <label
-              class="border-control-border relative border p-3 flex flex-col md:pl-4 md:pr-6 md:grid md:grid-cols-2"
+              class="border-control-border relative border p-3 flex flex-col gap-y-2 md:flex-row md:pl-4 md:pr-6"
               :class="
                 database.syncStatus == 'OK'
                   ? 'cursor-pointer'
                   : 'cursor-not-allowed'
               "
             >
-              <div class="radio text-sm">
+              <div class="radio text-sm flex justify-start md:flex-1">
                 <input
                   type="checkbox"
                   class="h-4 w-4 text-accent rounded disabled:cursor-not-allowed border-control-border focus:ring-accent"
@@ -66,40 +92,31 @@
                   @input="(e: any) => toggleDatabaseIdForEnvironment(database.id, environment.id, e.target.checked)"
                 />
                 <span
-                  class="font-medium"
-                  :class="
-                    database.syncStatus == 'OK'
-                      ? 'ml-2 text-main'
-                      : 'ml-6 text-control-light'
-                  "
+                  class="font-medium ml-2 text-main"
+                  :class="database.syncStatus !== 'OK' && 'opacity-40'"
                   >{{ database.name }}</span
                 >
               </div>
-              <p
-                class="textinfolabel ml-6 pl-1 text-sm md:ml-0 md:pl-0 md:text-right"
+              <div
+                class="flex items-center gap-x-1 textinfolabel ml-6 pl-0 md:ml-0 md:pl-0 md:justify-end"
               >
-                {{ $t("database.last-sync-status") }}:
-                <span
-                  :class="
-                    database.syncStatus == 'OK'
-                      ? 'textlabel'
-                      : 'text-sm font-medium text-error'
-                  "
-                  >{{ database.syncStatus }}</span
-                >
-              </p>
+                <InstanceEngineIcon :instance="database.instance" />
+                <span class="flex-1 whitespace-pre-wrap">
+                  {{ instanceName(database.instance) }}
+                </span>
+              </div>
             </label>
           </template>
         </div>
-      </div>
-    </div>
+      </NCollapseItem>
+    </NCollapse>
   </template>
   <template v-else>
     <!-- single stage view -->
     <slot name="header"></slot>
     <DatabaseTable
       mode="PROJECT_SHORT"
-      :bordered="true"
+      table-class="border"
       :custom-click="true"
       :database-list="databaseList"
       @select-database="selectDatabase"
@@ -109,7 +126,9 @@
 
 <script lang="ts">
 /* eslint-disable vue/no-mutating-props */
-import { defineComponent, watch, PropType, computed } from "vue";
+import { defineComponent, PropType, computed } from "vue";
+import { NCollapse, NCollapseItem } from "naive-ui";
+
 import {
   Database,
   DatabaseId,
@@ -118,7 +137,7 @@ import {
   Project,
 } from "../../types";
 
-export type AlterType = "SINGLE_DB" | "MULTI_DB" | "DB_GROUP";
+export type AlterType = "SINGLE_DB" | "MULTI_DB" | "TENANT";
 
 export type State = {
   alterType: AlterType;
@@ -127,6 +146,10 @@ export type State = {
 
 export default defineComponent({
   name: "ProjectStandardView",
+  components: {
+    NCollapse,
+    NCollapseItem,
+  },
   props: {
     state: {
       type: Object as PropType<State>,
@@ -147,25 +170,6 @@ export default defineComponent({
   },
   emits: ["select-database"],
   setup(props, { emit }) {
-    // MULTI_DB now supports selecting one database, which can be a replacement
-    // of SINGLE_DB.
-    // So SINGLE_DB is only needed and available for VCS workflow.
-    // And we won't provide a radio button group for single/multi selection in
-    // the future.
-    watch(
-      () => props.project?.workflowType,
-      (type) => {
-        if (type === "VCS") {
-          props.state.alterType = "SINGLE_DB";
-        } else {
-          props.state.alterType = "MULTI_DB";
-        }
-      },
-      {
-        immediate: true,
-      }
-    );
-
     const databaseListGroupByEnvironment = computed(() => {
       const listByEnv = props.environmentList.map((environment) => {
         const databaseList = props.databaseList.filter(
@@ -248,6 +252,19 @@ export default defineComponent({
       emit("select-database", db);
     };
 
+    const getSelectionStateSummaryForEnvironment = (
+      environment: Environment,
+      databaseList: Database[]
+    ) => {
+      const set = new Set(
+        props.state.selectedDatabaseIdListForEnvironment.get(environment.id)
+      );
+      const selected = databaseList.filter((db) => set.has(db.id)).length;
+      const total = databaseList.length;
+
+      return { selected, total };
+    };
+
     return {
       databaseListGroupByEnvironment,
       toggleDatabaseIdForEnvironment,
@@ -255,6 +272,7 @@ export default defineComponent({
       getAllSelectionStateForEnvironment,
       toggleAllDatabasesSelectionForEnvironment,
       selectDatabase,
+      getSelectionStateSummaryForEnvironment,
     };
   },
 });

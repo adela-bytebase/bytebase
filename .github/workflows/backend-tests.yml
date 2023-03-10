@@ -5,11 +5,8 @@ on:
     branches:
       - main
       - "release/*.*.*"
-    paths-ignore:
-      - "docs/**"
-      - "frontend/**"
-      - "scripts/**"
-      - "quickstart/**"
+    paths:
+      - "backend/**"
 
 jobs:
   golangci-lint:
@@ -21,7 +18,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: 1.20.1
           check-latest: true
           cache: true
       - name: Verify go.mod is tidy
@@ -32,16 +29,16 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ./resources/mysql/*.tar.gz
-            ./resources/mysql/*.tar.xz
+            ./backend/resources/mysql/*.tar.gz
+            ./backend/resources/mysql/*.tar.xz
           key: ${{ runner.OS }}-build-mysql-cache
       - name: Install dependencies
         run: go generate -tags mysql ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.49.0
-          args: -v
+          version: v1.51.2
+          args: --verbose --timeout 10m --max-same-issues=30
           skip-cache: true
 
   go-tests:
@@ -51,7 +48,7 @@ jobs:
           - "release,mysql"
           - "mysql"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -59,15 +56,15 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: 1.20.1
           check-latest: true
           cache: true
       - name: Cache MySQL
         uses: actions/cache@v3
         with:
           path: |
-            ./resources/mysql/*.tar.gz
-            ./resources/mysql/*.tar.xz
+            ./backend/resources/mysql/*.tar.gz
+            ./backend/resources/mysql/*.tar.xz
           key: ${{ runner.OS }}-build-mysql-cache
       - name: Install dependencies
         run: go generate -tags ${{ matrix.release-tags }} ./...

@@ -1,5 +1,5 @@
 import { computed, Ref } from "vue";
-import { isEmpty } from "lodash-es";
+import { isEmpty, isUndefined } from "lodash-es";
 import {
   Issue,
   IssueCreate,
@@ -22,7 +22,13 @@ import {
   taskSlug,
 } from "@/utils";
 import { useDatabaseStore, useIssueStore, useProjectStore } from "@/store";
-import { flattenTaskList, TaskTypeWithStatement } from "./common";
+import {
+  flattenTaskList,
+  statementOfTask,
+  TaskTypeWithSheetId,
+  TaskTypeWithStatement,
+} from "./common";
+import { maybeCreateBackTraceComments } from "../rollback/common";
 
 export const useBaseIssueLogic = (params: {
   create: Ref<boolean>;
@@ -44,17 +50,18 @@ export const useBaseIssueLogic = (params: {
     return (issue.value as Issue).project;
   });
 
-  const createIssue = (issue: IssueCreate) => {
+  const createIssue = async (issue: IssueCreate) => {
     // Set issue.pipeline and issue.payload to empty
     // because we are no longer passing parameters via issue.pipeline
     // we are using issue.createContext instead
     delete issue.pipeline;
     issue.payload = {};
 
-    issueStore.createIssue(issue).then((createdIssue) => {
-      // Use replace to omit the new issue url in the navigation history.
-      router.replace(`/issue/${issueSlug(createdIssue.name, createdIssue.id)}`);
-    });
+    const createdIssue = await issueStore.createIssue(issue);
+    await maybeCreateBackTraceComments(createdIssue);
+
+    // Use replace to omit the new issue url in the navigation history.
+    router.replace(`/issue/${issueSlug(createdIssue.name, createdIssue.id)}`);
   };
 
   const selectedStage = computed((): Stage | StageCreate => {
@@ -158,17 +165,21 @@ export const useBaseIssueLogic = (params: {
     return (selectedTask.value as Task).database;
   });
 
+  const isGhostMode = computed((): boolean => {
+    return issue.value.type === "bb.issue.database.schema.update.ghost";
+  });
+
   const isTenantMode = computed((): boolean => {
     if (project.value.tenantMode !== "TENANT") return false;
 
     // We support single database migration in tenant mode projects.
     // So a pipeline should be tenant mode when it contains more
     // than one tasks.
-    return flattenTaskList(issue.value).length > 1;
-  });
-
-  const isGhostMode = computed((): boolean => {
-    return issue.value.type === "bb.issue.database.schema.update.ghost";
+    return (
+      flattenTaskList(issue.value).filter((task) =>
+        TaskTypeWithStatement.includes(task.type)
+      ).length > 1
+    );
   });
 
   const isPITRMode = computed((): boolean => {
@@ -202,6 +213,31 @@ export const useBaseIssueLogic = (params: {
     return true;
   };
 
+  const selectedStatement = computed((): string => {
+    const task = selectedTask.value;
+    if (create.value) {
+      return (task as TaskCreate).statement;
+    }
+
+    // Extract statement from different types of payloads
+    return statementOfTask(task as Task) || "";
+  });
+
+  const allowApplyTaskStateToOthers = computed(() => {
+    if (!create.value) {
+      return false;
+    }
+    const taskList = flattenTaskList<TaskCreate>(issue.value);
+    // Allowed when more than one tasks need SQL statement or sheet.
+    const count = taskList.filter(
+      (task) =>
+        TaskTypeWithStatement.includes(task.type) ||
+        TaskTypeWithSheetId.includes(task.type)
+    ).length;
+
+    return count > 1;
+  });
+
   const allowApplyIssueStatusTransition = () => {
     // no extra logic by default
     return true;
@@ -218,6 +254,24 @@ export const useBaseIssueLogic = (params: {
     return true;
   };
 
+  const applyTaskStateToOthers = (task: TaskCreate) => {
+    const taskList = flattenTaskList<TaskCreate>(issue.value);
+    const sheetId = task.sheetId;
+    const statement = task.statement;
+
+    for (const taskItem of taskList) {
+      if (TaskTypeWithStatement.includes(taskItem.type)) {
+        if (!isUndefined(sheetId)) {
+          taskItem.sheetId = sheetId;
+          taskItem.statement = "";
+        } else {
+          taskItem.sheetId = undefined;
+          taskItem.statement = statement ?? "";
+        }
+      }
+    }
+  };
+
   return {
     project,
     isTenantMode,
@@ -231,6 +285,9 @@ export const useBaseIssueLogic = (params: {
     selectTask,
     taskStatusOfStage,
     isValidStage,
+    selectedStatement,
+    allowApplyTaskStateToOthers,
+    applyTaskStateToOthers,
     allowApplyIssueStatusTransition,
     allowApplyTaskStatusTransition,
   };

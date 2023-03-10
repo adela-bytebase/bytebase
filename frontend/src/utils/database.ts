@@ -1,5 +1,9 @@
-import { groupBy } from "lodash-es";
-import { Database, DataSourceType, Environment, Principal } from "../types";
+import type {
+  Database,
+  DataSourceType,
+  Environment,
+  Principal,
+} from "../types";
 import { hasWorkspacePermission } from "./role";
 import { isDev, semverCompare } from "./util";
 
@@ -62,18 +66,6 @@ export function sortDatabaseList(
 const MIN_GHOST_SUPPORT_MYSQL_VERSION = "5.7.0";
 
 export function allowGhostMigration(databaseList: Database[]): boolean {
-  const groupByEnvironment = groupBy(
-    databaseList,
-    (db) => db.instance.environment.id
-  );
-  // Multiple tasks in one stage is not supported by gh-ost now.
-  for (const environmentId in groupByEnvironment) {
-    const databaseListInStage = groupByEnvironment[environmentId];
-    if (databaseListInStage.length > 1) {
-      return false;
-    }
-  }
-
   return databaseList.every((db) => {
     return (
       db.instance.engine === "MYSQL" &&
@@ -82,7 +74,12 @@ export function allowGhostMigration(databaseList: Database[]): boolean {
   });
 }
 
-type DatabaseFilterFields = "name" | "project" | "instance" | "environment";
+type DatabaseFilterFields =
+  | "name"
+  | "project"
+  | "instance"
+  | "environment"
+  | "tenant";
 export function filterDatabaseByKeyword(
   db: Database,
   keyword: string,
@@ -115,6 +112,16 @@ export function filterDatabaseByKeyword(
   if (
     columns.includes("environment") &&
     db.instance.environment.name.toLowerCase().includes(keyword)
+  ) {
+    return true;
+  }
+
+  if (
+    columns.includes("tenant") &&
+    db.labels
+      .find((label) => label.key === "bb.tenant")
+      ?.value.toLowerCase()
+      .includes(keyword)
   ) {
     return true;
   }

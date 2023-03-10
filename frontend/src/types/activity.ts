@@ -5,15 +5,17 @@ import {
   ContainerId,
   DatabaseId,
   InstanceId,
+  IssueId,
   PrincipalId,
+  StageId,
   TaskId,
 } from "./id";
 import { IssueStatus } from "./issue";
 import { MemberStatus, RoleType } from "./member";
-import { TaskStatus } from "./pipeline";
+import { StageStatusUpdateType, TaskStatus } from "./pipeline";
 import { Principal } from "./principal";
 import { VCSPushEvent } from "./vcs";
-import { Advice } from "./sql";
+import { Advice } from "./sqlAdvice";
 import { t } from "../plugins/i18n";
 
 export type IssueActivityType =
@@ -21,6 +23,7 @@ export type IssueActivityType =
   | "bb.issue.comment.create"
   | "bb.issue.field.update"
   | "bb.issue.status.update"
+  | "bb.pipeline.stage.status.update"
   | "bb.pipeline.task.status.update"
   | "bb.pipeline.task.file.commit"
   | "bb.pipeline.task.statement.update"
@@ -60,6 +63,8 @@ export function activityName(type: ActivityType): string {
       return t("activity.type.issue-field-update");
     case "bb.issue.status.update":
       return t("activity.type.issue-status-update");
+    case "bb.pipeline.stage.status.update":
+      return t("activity.type.pipeline-stage-status-update");
     case "bb.pipeline.task.status.update":
       return t("activity.type.pipeline-task-status-update");
     case "bb.pipeline.task.file.commit":
@@ -99,9 +104,19 @@ export type ActivityIssueCreatePayload = {
   issueName: string;
 };
 
+// TaskRollbackBy records an issue rollback activity.
+// The task with taskID in IssueID is rollbacked by the task with RollbackByTaskID in RollbackByIssueID.
+export type TaskRollbackBy = {
+  issueId: IssueId;
+  taskId: TaskId;
+  rollbackByIssueId: IssueId;
+  rollbackByTaskId: TaskId;
+};
+
 export type ActivityIssueCommentCreatePayload = {
-  externalApprovalEvent: ExternalApprovalEvent;
+  externalApprovalEvent?: ExternalApprovalEvent;
   issueName: string;
+  taskRollbackBy?: TaskRollbackBy;
 };
 
 export type ActivityIssueFieldUpdatePayload = {
@@ -115,6 +130,12 @@ export type ActivityIssueStatusUpdatePayload = {
   oldStatus: IssueStatus;
   newStatus: IssueStatus;
   issueName: string;
+};
+export type ActivityStageStatusUpdatePayload = {
+  stageId: StageId;
+  stageStatusUpdateType: StageStatusUpdateType;
+  issueName: string;
+  stageName: string;
 };
 
 export type ActivityTaskStatusUpdatePayload = {
@@ -241,4 +262,14 @@ export type ActivityCreate = {
 export type ActivityPatch = {
   // Domain specific fields
   comment: string;
+};
+
+export type ActivityFind = {
+  typePrefix?: string | string[];
+  container?: number | string;
+  order?: "ASC" | "DESC";
+  user?: number;
+  limit?: number;
+  level?: string | string[];
+  token?: string;
 };

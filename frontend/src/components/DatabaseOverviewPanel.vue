@@ -28,8 +28,9 @@
     >
       <template
         v-if="
-          database.instance.engine != 'CLICKHOUSE' &&
-          database.instance.engine != 'SNOWFLAKE'
+          database.instance.engine !== 'CLICKHOUSE' &&
+          database.instance.engine !== 'SNOWFLAKE' &&
+          database.instance.engine !== 'MONGODB'
         "
       >
         <div class="col-span-1 col-start-1">
@@ -40,14 +41,18 @@
                 : $t("db.character-set")
             }}
           </dt>
-          <dd class="mt-1 text-sm text-main">{{ database.characterSet }}</dd>
+          <dd class="mt-1 text-sm text-main">
+            {{ databaseSchemaMetadata.characterSet }}
+          </dd>
         </div>
 
         <div class="col-span-1">
           <dt class="text-sm font-medium text-control-light">
             {{ $t("db.collation") }}
           </dt>
-          <dd class="mt-1 text-sm text-main">{{ database.collation }}</dd>
+          <dd class="mt-1 text-sm text-main">
+            {{ databaseSchemaMetadata.collation }}
+          </dd>
         </div>
       </template>
 
@@ -68,42 +73,57 @@
           {{ humanizeTs(database.lastSuccessfulSyncTs) }}
         </dd>
       </div>
-
-      <div v-if="!isPostgres" class="col-span-1 col-start-1">
-        <dt class="text-sm font-medium text-control-light">
-          {{ $t("common.created-at") }}
-        </dt>
-        <dd class="mt-1 text-sm text-main">
-          {{ humanizeTs(database.createdTs) }}
-        </dd>
-      </div>
-
-      <div v-if="!isPostgres" class="col-span-1">
-        <dt class="text-sm font-medium text-control-light">
-          {{ $t("common.updated-at") }}
-        </dt>
-        <dd class="mt-1 text-sm text-main">
-          {{ humanizeTs(database.updatedTs) }}
-        </dd>
-      </div>
     </dl>
 
     <div class="pt-6">
-      <div class="text-lg leading-6 font-medium text-main mb-4">
-        {{ $t("db.tables") }}
+      <div
+        v-if="hasSchemaProperty"
+        class="flex flex-row justify-start items-center mb-4"
+      >
+        <span class="text-lg leading-6 font-medium text-main mr-2">Schema</span>
+        <BBSelect
+          class="!w-auto min-w-[12rem]"
+          :selected-item="state.selectedSchemaName"
+          :item-list="schemaNameList"
+          :placeholder="$t('database.schema.select')"
+          :show-prefix-item="true"
+          @select-item="(schema: string) => state.selectedSchemaName = schema"
+        >
+          <template #menuItem="{ item: schema }">
+            {{ schema }}
+          </template>
+        </BBSelect>
       </div>
-      <TableTable :database-engine="databaseEngine" :table-list="tableList" />
 
-      <div class="mt-6 text-lg leading-6 font-medium text-main mb-4">
-        {{ $t("db.views") }}
-      </div>
-      <ViewTable :view-list="viewList" />
-
-      <template v-if="database.instance.engine == 'POSTGRES'">
-        <div class="mt-6 text-lg leading-6 font-medium text-main mb-4">
-          {{ $t("db.extensions") }}
+      <template v-if="databaseEngine !== 'REDIS'">
+        <div class="text-lg leading-6 font-medium text-main mb-4">
+          <span v-if="databaseEngine === 'MONGODB'">{{
+            $t("db.collections")
+          }}</span>
+          <span v-else>{{ $t("db.tables") }}</span>
         </div>
-        <DBExtensionTable :db-extension-list="dbExtensionList" />
+
+        <TableTable
+          :database="database"
+          :schema-name="state.selectedSchemaName"
+          :table-list="tableList"
+        />
+
+        <div class="mt-6 text-lg leading-6 font-medium text-main mb-4">
+          {{ $t("db.views") }}
+        </div>
+        <ViewTable
+          :database="database"
+          :schema-name="state.selectedSchemaName"
+          :view-list="viewList"
+        />
+
+        <template v-if="database.instance.engine == 'POSTGRES'">
+          <div class="mt-6 text-lg leading-6 font-medium text-main mb-4">
+            {{ $t("db.extensions") }}
+          </div>
+          <DBExtensionTable :db-extension-list="dbExtensionList" />
+        </template>
       </template>
     </div>
 
@@ -199,21 +219,14 @@
   </div>
 </template>
 
-<script lang="ts">
-import {
-  computed,
-  reactive,
-  watchEffect,
-  PropType,
-  defineComponent,
-} from "vue";
-import { useRouter } from "vue-router";
+<script lang="ts" setup>
+import { computed, reactive, watchEffect, PropType } from "vue";
 import AnomalyTable from "../components/AnomalyTable.vue";
 import DataSourceTable from "../components/DataSourceTable.vue";
 import DataSourceConnectionPanel from "../components/DataSourceConnectionPanel.vue";
 import TableTable from "../components/TableTable.vue";
 import ViewTable from "../components/ViewTable.vue";
-import { hasWorkspacePermission, timezoneString, instanceSlug } from "../utils";
+import { hasWorkspacePermission } from "../utils";
 import {
   Anomaly,
   Database,
@@ -221,201 +234,182 @@ import {
   DataSourcePatch,
   EngineType,
 } from "../types";
-import { cloneDeep, isEqual } from "lodash-es";
+import { cloneDeep, head, isEqual } from "lodash-es";
 import { BBTableSectionDataSource } from "../bbkit/types";
 import {
   featureToRef,
   useCurrentUser,
   useDataSourceStore,
-  useTableStore,
-  useViewStore,
-  useDBExtensionStore,
   useAnomalyList,
+  useDBSchemaStore,
 } from "@/store";
 
 interface LocalState {
+  selectedSchemaName: string;
   editingDataSource?: DataSource;
 }
 
-export default defineComponent({
-  name: "DatabaseOverviewPanel",
-  components: {
-    AnomalyTable,
-    DataSourceConnectionPanel,
-    DataSourceTable,
-    TableTable,
-    ViewTable,
-  },
-  props: {
-    database: {
-      required: true,
-      type: Object as PropType<Database>,
-    },
-  },
-  setup(props) {
-    const router = useRouter();
-    const dataSourceStore = useDataSourceStore();
-
-    const state = reactive<LocalState>({});
-
-    const currentUser = useCurrentUser();
-    const tableStore = useTableStore();
-    const viewStore = useViewStore();
-    const dbExtensionStore = useDBExtensionStore();
-
-    const databaseEngine = props.database.instance.engine as EngineType;
-    const isPostgres = computed(() => databaseEngine === "POSTGRES");
-
-    const prepareTableList = () => {
-      tableStore.fetchTableListByDatabaseId(props.database.id);
-    };
-
-    watchEffect(prepareTableList);
-
-    const prepareViewList = () => {
-      viewStore.fetchViewListByDatabaseId(props.database.id);
-    };
-
-    watchEffect(prepareViewList);
-
-    const prepareDBExtensionList = () => {
-      dbExtensionStore.fetchdbExtensionListByDatabaseId(props.database.id);
-    };
-
-    watchEffect(prepareDBExtensionList);
-
-    const anomalyList = useAnomalyList(
-      computed(() => ({ databaseId: props.database.id }))
-    );
-
-    const anomalySectionList = computed(
-      (): BBTableSectionDataSource<Anomaly>[] => {
-        const list: BBTableSectionDataSource<Anomaly>[] = [];
-        if (anomalyList.value.length > 0) {
-          list.push({
-            title: props.database.name,
-            list: anomalyList.value,
-          });
-        }
-        return list;
-      }
-    );
-
-    const hasDataSourceFeature = featureToRef("bb.feature.data-source");
-
-    const tableList = computed(() => {
-      return tableStore.getTableListByDatabaseId(props.database.id);
-    });
-
-    const viewList = computed(() => {
-      return viewStore.getViewListByDatabaseId(props.database.id);
-    });
-
-    const dbExtensionList = computed(() => {
-      return dbExtensionStore.getDBExtensionListByDatabaseId(props.database.id);
-    });
-
-    const allowConfigInstance = computed(() => {
-      return hasWorkspacePermission(
-        "bb.permission.workspace.manage-instance",
-        currentUser.value.role
-      );
-    });
-
-    const allowViewDataSource = computed(() => {
-      if (allowConfigInstance.value) {
-        return true;
-      }
-
-      for (const member of props.database.project.memberList) {
-        if (member.principal.id == currentUser.value.id) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-
-    const dataSourceList = computed(() => {
-      return props.database.dataSourceList;
-    });
-
-    const readWriteDataSourceList = computed(() => {
-      return dataSourceList.value.filter((dataSource: DataSource) => {
-        return dataSource.type == "RW";
-      });
-    });
-
-    const readonlyDataSourceList = computed(() => {
-      return dataSourceList.value.filter((dataSource: DataSource) => {
-        return dataSource.type == "RO";
-      });
-    });
-
-    const isEditingDataSource = (dataSource: DataSource) => {
-      return (
-        state.editingDataSource && state.editingDataSource.id == dataSource.id
-      );
-    };
-
-    const allowSaveDataSource = computed(() => {
-      for (const dataSource of dataSourceList.value) {
-        if (dataSource.id == state.editingDataSource!.id) {
-          return !isEqual(dataSource, state.editingDataSource);
-        }
-      }
-      return false;
-    });
-
-    const editDataSource = (dataSource: DataSource) => {
-      state.editingDataSource = cloneDeep(dataSource);
-    };
-
-    const cancelEditDataSource = () => {
-      state.editingDataSource = undefined;
-    };
-
-    const saveEditDataSource = () => {
-      const dataSourcePatch = {
-        username: state.editingDataSource?.username,
-        password: state.editingDataSource?.password,
-      } as DataSourcePatch;
-      dataSourceStore
-        .patchDataSource({
-          databaseId: state.editingDataSource?.databaseId as number,
-          dataSourceId: state.editingDataSource?.id as number,
-          dataSource: dataSourcePatch,
-        })
-        .then(() => {
-          state.editingDataSource = undefined;
-        });
-    };
-
-    const configInstance = () => {
-      router.push(`/instance/${instanceSlug(props.database.instance)}`);
-    };
-
-    return {
-      timezoneString,
-      state,
-      anomalySectionList,
-      tableList,
-      viewList,
-      dbExtensionList,
-      hasDataSourceFeature,
-      allowConfigInstance,
-      allowViewDataSource,
-      readWriteDataSourceList,
-      readonlyDataSourceList,
-      isEditingDataSource,
-      allowSaveDataSource,
-      editDataSource,
-      cancelEditDataSource,
-      saveEditDataSource,
-      configInstance,
-      databaseEngine,
-      isPostgres,
-    };
+const props = defineProps({
+  database: {
+    required: true,
+    type: Object as PropType<Database>,
   },
 });
+
+const dataSourceStore = useDataSourceStore();
+
+const state = reactive<LocalState>({
+  selectedSchemaName: "",
+});
+
+const currentUser = useCurrentUser();
+const dbSchemaStore = useDBSchemaStore();
+
+const databaseEngine = computed(() => {
+  return props.database.instance.engine as EngineType;
+});
+
+const hasSchemaProperty = computed(() => {
+  return (
+    databaseEngine.value === "POSTGRES" || databaseEngine.value === "SNOWFLAKE"
+  );
+});
+
+const prepareDatabaseMetadata = async () => {
+  await dbSchemaStore.getOrFetchDatabaseMetadataById(props.database.id);
+  if (hasSchemaProperty.value && schemaList.value.length > 0) {
+    state.selectedSchemaName = head(schemaList.value)?.name || "";
+  }
+};
+
+watchEffect(prepareDatabaseMetadata);
+
+const anomalyList = useAnomalyList(
+  computed(() => ({ databaseId: props.database.id }))
+);
+
+const anomalySectionList = computed((): BBTableSectionDataSource<Anomaly>[] => {
+  const list: BBTableSectionDataSource<Anomaly>[] = [];
+  if (anomalyList.value.length > 0) {
+    list.push({
+      title: props.database.name,
+      list: anomalyList.value,
+    });
+  }
+  return list;
+});
+
+const hasDataSourceFeature = featureToRef("bb.feature.data-source");
+
+const schemaList = computed(() => {
+  return dbSchemaStore.getSchemaListByDatabaseId(props.database.id);
+});
+
+const schemaNameList = computed(() => {
+  return schemaList.value.map((schema) => schema.name);
+});
+
+const databaseSchemaMetadata = computed(() => {
+  return dbSchemaStore.getDatabaseMetadataByDatabaseId(props.database.id);
+});
+
+const tableList = computed(() => {
+  if (hasSchemaProperty.value) {
+    return (
+      schemaList.value.find(
+        (schema) => schema.name === state.selectedSchemaName
+      )?.tables || []
+    );
+  }
+  return dbSchemaStore.getTableListByDatabaseId(props.database.id);
+});
+
+const viewList = computed(() => {
+  if (hasSchemaProperty.value) {
+    return (
+      schemaList.value.find(
+        (schema) => schema.name === state.selectedSchemaName
+      )?.views || []
+    );
+  }
+  return dbSchemaStore.getViewListByDatabaseId(props.database.id);
+});
+
+const dbExtensionList = computed(() => {
+  return dbSchemaStore.getExtensionListByDatabaseId(props.database.id);
+});
+
+const allowConfigInstance = computed(() => {
+  return hasWorkspacePermission(
+    "bb.permission.workspace.manage-instance",
+    currentUser.value.role
+  );
+});
+
+const allowViewDataSource = computed(() => {
+  if (allowConfigInstance.value) {
+    return true;
+  }
+
+  for (const member of props.database.project.memberList) {
+    if (member.principal.id == currentUser.value.id) {
+      return true;
+    }
+  }
+
+  return false;
+});
+
+const dataSourceList = computed(() => {
+  return props.database.dataSourceList;
+});
+
+const readWriteDataSourceList = computed(() => {
+  return dataSourceList.value.filter((dataSource: DataSource) => {
+    return dataSource.type == "RW";
+  });
+});
+
+const readonlyDataSourceList = computed(() => {
+  return dataSourceList.value.filter((dataSource: DataSource) => {
+    return dataSource.type == "RO";
+  });
+});
+
+const isEditingDataSource = (dataSource: DataSource) => {
+  return state.editingDataSource && state.editingDataSource.id == dataSource.id;
+};
+
+const allowSaveDataSource = computed(() => {
+  for (const dataSource of dataSourceList.value) {
+    if (dataSource.id == state.editingDataSource!.id) {
+      return !isEqual(dataSource, state.editingDataSource);
+    }
+  }
+  return false;
+});
+
+const editDataSource = (dataSource: DataSource) => {
+  state.editingDataSource = cloneDeep(dataSource);
+};
+
+const cancelEditDataSource = () => {
+  state.editingDataSource = undefined;
+};
+
+const saveEditDataSource = () => {
+  const dataSourcePatch = {
+    username: state.editingDataSource?.username,
+    password: state.editingDataSource?.password,
+  } as DataSourcePatch;
+  dataSourceStore
+    .patchDataSource({
+      databaseId: state.editingDataSource?.databaseId as number,
+      dataSourceId: state.editingDataSource?.id as number,
+      dataSource: dataSourcePatch,
+    })
+    .then(() => {
+      state.editingDataSource = undefined;
+    });
+};
 </script>

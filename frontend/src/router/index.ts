@@ -1,10 +1,12 @@
-import { nextTick } from "vue";
+import { nextTick, ref } from "vue";
 import {
   createRouter,
   createWebHistory,
   RouteLocationNormalized,
   RouteRecordRaw,
 } from "vue-router";
+import { useTitle } from "@vueuse/core";
+
 import BodyLayout from "../layouts/BodyLayout.vue";
 import DashboardLayout from "../layouts/DashboardLayout.vue";
 import DatabaseLayout from "../layouts/DatabaseLayout.vue";
@@ -13,15 +15,6 @@ import SplashLayout from "../layouts/SplashLayout.vue";
 import SQLEditorLayout from "../layouts/SQLEditorLayout.vue";
 import SheetDashboardLayout from "../layouts/SheetDashboardLayout.vue";
 import { t } from "../plugins/i18n";
-import {
-  useAuthStore,
-  useDatabaseStore,
-  useEnvironmentStore,
-  useInstanceStore,
-  useIssueStore,
-  usePrincipalStore,
-  useRouterStore,
-} from "../store";
 import {
   Database,
   DEFAULT_PROJECT_ID,
@@ -32,8 +25,8 @@ import {
   hasProjectPermission,
   hasWorkspacePermission,
   idFromSlug,
+  migrationHistoryIdFromSlug,
 } from "../utils";
-// import PasswordReset from "../views/auth/PasswordReset.vue";
 import Signin from "../views/auth/Signin.vue";
 import Signup from "../views/auth/Signup.vue";
 import DashboardSidebar from "../views/DashboardSidebar.vue";
@@ -45,10 +38,21 @@ import {
   useDataSourceStore,
   useSQLReviewStore,
   useProjectStore,
-  useTableStore,
-  useSQLEditorStore,
   useSheetStore,
+  useAuthStore,
+  useDatabaseStore,
+  useEnvironmentStore,
+  useInstanceStore,
+  usePrincipalStore,
+  useRouterStore,
+  useDBSchemaStore,
+  useConnectionTreeStore,
+  useOnboardingStateStore,
+  useTabStore,
+  useIdentityProviderStore,
+  useCurrentUser,
 } from "@/store";
+import { useConversationStore } from "@/plugins/ai/store";
 
 const HOME_MODULE = "workspace.home";
 const AUTH_MODULE = "auth";
@@ -57,6 +61,7 @@ const SIGNUP_MODULE = "auth.signup";
 const ACTIVATE_MODULE = "auth.activate";
 const PASSWORD_RESET_MODULE = "auth.password.reset";
 const PASSWORD_FORGOT_MODULE = "auth.password.forgot";
+const SQL_EDITOR_HOME_MODULE = "sql-editor.home";
 
 const routes: Array<RouteRecordRaw> = [
   {
@@ -109,6 +114,11 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import("../views/OAuthCallback.vue"),
   },
   {
+    path: "/oidc/callback",
+    name: "oidc-callback",
+    component: () => import("../views/OAuthCallback.vue"),
+  },
+  {
     path: "/",
     component: DashboardLayout,
     children: [
@@ -130,10 +140,7 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.data.update",
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
-                      // "quickaction.bb.database.troubleshoot",
                       "quickaction.bb.instance.create",
-                      "quickaction.bb.project.create",
-                      "quickaction.bb.user.manage",
                     ]
                   : [
                       "quickaction.bb.database.schema.update",
@@ -141,8 +148,6 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
                       "quickaction.bb.instance.create",
-                      "quickaction.bb.project.create",
-                      "quickaction.bb.user.manage",
                     ];
                 const dbaList: QuickActionType[] = hasDBAWorkflowFeature
                   ? [
@@ -150,9 +155,7 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.data.update",
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
-                      // "quickaction.bb.database.troubleshoot",
                       "quickaction.bb.instance.create",
-                      "quickaction.bb.project.create",
                     ]
                   : [
                       "quickaction.bb.database.schema.update",
@@ -160,21 +163,18 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
                       "quickaction.bb.instance.create",
-                      "quickaction.bb.project.create",
                     ];
                 const developerList: QuickActionType[] = hasDBAWorkflowFeature
                   ? [
                       "quickaction.bb.database.schema.update",
                       "quickaction.bb.database.data.update",
                       "quickaction.bb.database.schema.sync",
-                      "quickaction.bb.project.create",
                     ]
                   : [
                       "quickaction.bb.database.schema.update",
                       "quickaction.bb.database.data.update",
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
-                      "quickaction.bb.project.create",
                     ];
                 return new Map([
                   ["OWNER", ownerList],
@@ -275,7 +275,7 @@ const routes: Array<RouteRecordRaw> = [
             },
             components: {
               content: () => import("../views/ProfileDashboard.vue"),
-              leftSidebar: DashboardSidebar,
+              leftSidebar: () => import("../views/SettingSidebar.vue"),
             },
             props: { content: true },
           },
@@ -298,6 +298,15 @@ const routes: Array<RouteRecordRaw> = [
                 meta: { title: () => t("settings.sidebar.profile") },
                 component: () => import("../views/ProfileDashboard.vue"),
                 alias: "profile",
+                props: true,
+              },
+              {
+                path: "profile/two-factor",
+                name: "setting.profile.two-factor",
+                meta: {
+                  title: () => t("two-factor.self"),
+                },
+                component: () => import("../views/TwoFactorSetup.vue"),
                 props: true,
               },
               {
@@ -346,6 +355,35 @@ const routes: Array<RouteRecordRaw> = [
                 props: true,
               },
               {
+                path: "sso",
+                name: "setting.workspace.sso",
+                meta: { title: () => t("settings.sidebar.sso") },
+                component: () => import("../views/SettingWorkspaceSSO.vue"),
+              },
+              {
+                path: "sso/new",
+                name: "setting.workspace.sso.create",
+                meta: { title: () => t("settings.sidebar.sso") },
+                component: () =>
+                  import("../views/SettingWorkspaceSSODetail.vue"),
+              },
+              {
+                path: "sso/:ssoName",
+                name: "setting.workspace.sso.detail",
+                meta: {
+                  title: (route: RouteLocationNormalized) => {
+                    const name = route.params.ssoName as string;
+                    return (
+                      useIdentityProviderStore().getIdentityProviderByName(name)
+                        ?.title || t("settings.sidebar.sso")
+                    );
+                  },
+                },
+                component: () =>
+                  import("../views/SettingWorkspaceSSODetail.vue"),
+                props: true,
+              },
+              {
                 path: "sensitive-data",
                 name: "setting.workspace.sensitive-data",
                 meta: { title: () => t("settings.sidebar.sensitive-data") },
@@ -362,23 +400,23 @@ const routes: Array<RouteRecordRaw> = [
                 props: true,
               },
               {
-                path: "version-control",
-                name: "setting.workspace.version-control",
-                meta: { title: () => t("settings.sidebar.version-control") },
+                path: "gitops",
+                name: "setting.workspace.gitops",
+                meta: { title: () => t("settings.sidebar.gitops") },
                 component: () => import("../views/SettingWorkspaceVCS.vue"),
                 props: true,
               },
               {
-                path: "version-control/new",
-                name: "setting.workspace.version-control.create",
+                path: "gitops/new",
+                name: "setting.workspace.gitops.create",
                 meta: { title: () => t("repository.add-git-provider") },
                 component: () =>
                   import("../views/SettingWorkspaceVCSCreate.vue"),
                 props: true,
               },
               {
-                path: "version-control/:vcsSlug",
-                name: "setting.workspace.version-control.detail",
+                path: "gitops/:vcsSlug",
+                name: "setting.workspace.gitops.detail",
                 meta: {
                   title: (route: RouteLocationNormalized) => {
                     const slug = route.params.vcsSlug as string;
@@ -440,6 +478,16 @@ const routes: Array<RouteRecordRaw> = [
                 },
                 component: () =>
                   import("../views/SettingWorkspaceSQLReviewDetail.vue"),
+                props: true,
+              },
+              {
+                path: "audit-log",
+                name: "setting.workspace.audit-log",
+                meta: {
+                  title: () => t("settings.sidebar.audit-log"),
+                },
+                component: () =>
+                  import("../views/SettingWorkspaceAuditLog.vue"),
                 props: true,
               },
               {
@@ -549,14 +597,14 @@ const routes: Array<RouteRecordRaw> = [
                 if (project.rowStatus == "NORMAL") {
                   const actionList: string[] = [];
 
-                  const currentUser = useAuthStore().currentUser;
+                  const currentUser = useCurrentUser();
                   let allowAlterSchemaOrChangeData = false;
                   let allowCreateDB = false;
                   let allowTransferDB = false;
                   if (
                     hasWorkspacePermission(
                       "bb.permission.workspace.manage-instance",
-                      currentUser.role
+                      currentUser.value.role
                     )
                   ) {
                     allowAlterSchemaOrChangeData = true;
@@ -564,7 +612,7 @@ const routes: Array<RouteRecordRaw> = [
                     allowTransferDB = true;
                   } else {
                     const memberOfProject = project.memberList.find(
-                      (m) => m.principal.id === currentUser.id
+                      (m) => m.principal.id === currentUser.value.id
                     );
                     if (memberOfProject) {
                       allowAlterSchemaOrChangeData = hasProjectPermission(
@@ -772,7 +820,12 @@ const routes: Array<RouteRecordRaw> = [
                 name: "workspace.database.table.detail",
                 meta: {
                   title: (route: RouteLocationNormalized) => {
-                    return `${t("db.tables")} - ${route.params.tableName}`;
+                    const schemaName = route.query.schema?.toString() || "";
+                    let tableName = route.params.tableName;
+                    if (schemaName) {
+                      tableName = `"${schemaName}"."${tableName}"`;
+                    }
+                    return `${t("db.tables")} - ${tableName}`;
                   },
                   allowBookmark: true,
                 },
@@ -787,7 +840,7 @@ const routes: Array<RouteRecordRaw> = [
                     const slug = route.params.migrationHistorySlug as string;
                     const migrationHistory =
                       useInstanceStore().getMigrationHistoryById(
-                        idFromSlug(slug)
+                        migrationHistoryIdFromSlug(slug)
                       );
                     return migrationHistory?.version ?? "";
                   },
@@ -830,15 +883,8 @@ const routes: Array<RouteRecordRaw> = [
             path: "issue/:issueSlug",
             name: "workspace.issue.detail",
             meta: {
-              title: (route: RouteLocationNormalized) => {
-                const slug = route.params.issueSlug as string;
-                if (slug.toLowerCase() == "new") {
-                  return t("issue.new-issue");
-                }
-                const issue = useIssueStore().getIssueById(idFromSlug(slug));
-                return issue.name;
-              },
               allowBookmark: true,
+              overrideTitle: true,
             },
             components: {
               content: () => import("../views/IssueDetail.vue"),
@@ -857,7 +903,7 @@ const routes: Array<RouteRecordRaw> = [
     children: [
       {
         path: "",
-        name: "sql-editor.home",
+        name: SQL_EDITOR_HOME_MODULE,
         meta: { title: () => "SQL Editor" },
         component: () => import("../views/sql-editor/SQLEditorPage.vue"),
         props: true,
@@ -937,9 +983,9 @@ router.beforeEach((to, from, next) => {
 
   const authStore = useAuthStore();
   const databaseStore = useDatabaseStore();
+  const dbSchemaStore = useDBSchemaStore();
   const environmentStore = useEnvironmentStore();
   const instanceStore = useInstanceStore();
-  const issueStore = useIssueStore();
   const routerStore = useRouterStore();
   const projectWebhookStore = useProjectWebhookStore();
   const projectStore = useProjectStore();
@@ -955,12 +1001,14 @@ router.beforeEach((to, from, next) => {
     routerStore.setBackPath(from.fullPath);
   }
 
-  // OAuth callback route is a relay to receive the OAuth callback and dispatch the corresponding OAuth event. It's called in the following scenarios:
-  // - Login via OAuth
+  // SSO callback routes are relayes to handle the IdP callback and dispatch the subsequent events.
+  // They are called in the following scenarios:
+  // - Login via OAuth / OIDC
   // - Setup VCS provider
   // - Setup GitOps workflow in a project
-  if (to.name === "oauth-callback") {
+  if (to.name === "oauth-callback" || to.name === "oidc-callback") {
     next();
+    return;
   }
 
   if (
@@ -970,6 +1018,8 @@ router.beforeEach((to, from, next) => {
     to.name === PASSWORD_RESET_MODULE ||
     to.name === PASSWORD_FORGOT_MODULE
   ) {
+    useTabStore().reset();
+    useConversationStore().reset();
     if (isLoggedIn) {
       if (typeof to.query.redirect === "string") {
         location.replace(to.query.redirect);
@@ -1016,13 +1066,56 @@ router.beforeEach((to, from, next) => {
     return;
   }
 
-  const currentUser = authStore.currentUser;
+  if (to.name === SQL_EDITOR_HOME_MODULE) {
+    const onboardingStateStore = useOnboardingStateStore();
+    if (onboardingStateStore.getStateByKey("sql-editor")) {
+      // Open the "Sample Sheet" when the first time onboarding SQL Editor
+      onboardingStateStore.consume("sql-editor");
+      next({
+        path: `/sql-editor/sheet/sample-sheet-101`,
+        replace: true,
+      });
+      return;
+    }
+  }
 
-  if (to.name?.toString().startsWith("setting.workspace.version-control")) {
+  const currentUser = useCurrentUser();
+
+  if (to.name?.toString().startsWith("setting.workspace.im-integration")) {
+    if (
+      !hasWorkspacePermission(
+        "bb.permission.workspace.manage-im-integration",
+        currentUser.value.role
+      )
+    ) {
+      next({
+        name: "error.403",
+        replace: false,
+      });
+      return;
+    }
+  }
+
+  if (to.name?.toString().startsWith("setting.workspace.sso")) {
+    if (
+      !hasWorkspacePermission(
+        "bb.permission.workspace.manage-sso",
+        currentUser.value.role
+      )
+    ) {
+      next({
+        name: "error.403",
+        replace: false,
+      });
+      return;
+    }
+  }
+
+  if (to.name?.toString().startsWith("setting.workspace.gitops")) {
     if (
       !hasWorkspacePermission(
         "bb.permission.workspace.manage-vcs-provider",
-        currentUser.role
+        currentUser.value.role
       )
     ) {
       next({
@@ -1037,7 +1130,22 @@ router.beforeEach((to, from, next) => {
     if (
       !hasWorkspacePermission(
         "bb.permission.workspace.manage-project",
-        currentUser.role
+        currentUser.value.role
+      )
+    ) {
+      next({
+        name: "error.403",
+        replace: false,
+      });
+      return;
+    }
+  }
+
+  if (to.name?.toString().startsWith("setting.workspace.audit-log")) {
+    if (
+      !hasWorkspacePermission(
+        "bb.permission.workspace.audit-log",
+        currentUser.value.role
       )
     ) {
       next({
@@ -1050,7 +1158,10 @@ router.beforeEach((to, from, next) => {
 
   if (to.name?.toString().startsWith("setting.workspace.debug-log")) {
     if (
-      !hasWorkspacePermission("bb.permission.workspace.debug", currentUser.role)
+      !hasWorkspacePermission(
+        "bb.permission.workspace.debug-log",
+        currentUser.value.role
+      )
     ) {
       next({
         name: "error.403",
@@ -1064,7 +1175,7 @@ router.beforeEach((to, from, next) => {
     if (
       !hasWorkspacePermission(
         "bb.permission.workspace.manage-instance",
-        currentUser.role
+        currentUser.value.role
       )
     ) {
       next({
@@ -1080,7 +1191,7 @@ router.beforeEach((to, from, next) => {
       !hasFeature("bb.feature.data-source") ||
       !hasWorkspacePermission(
         "bb.permission.workspace.manage-instance",
-        currentUser.role
+        currentUser.value.role
       )
     ) {
       next({
@@ -1107,7 +1218,7 @@ router.beforeEach((to, from, next) => {
     to.name === "sql-editor.home" ||
     to.name?.toString().startsWith("sheets") ||
     (to.name?.toString().startsWith("setting") &&
-      to.name?.toString() != "setting.workspace.version-control.detail" &&
+      to.name?.toString() != "setting.workspace.gitops.detail" &&
       to.name?.toString() != "setting.workspace.sql-review.detail")
   ) {
     next();
@@ -1129,7 +1240,6 @@ router.beforeEach((to, from, next) => {
   const issueSlug = routerSlug.issueSlug;
   const instanceSlug = routerSlug.instanceSlug;
   const databaseSlug = routerSlug.databaseSlug;
-  const tableName = routerSlug.tableName;
   const dataSourceSlug = routerSlug.dataSourceSlug;
   const migrationHistorySlug = routerSlug.migrationHistorySlug;
   const vcsSlug = routerSlug.vcsSlug;
@@ -1204,62 +1314,9 @@ router.beforeEach((to, from, next) => {
   }
 
   if (issueSlug) {
-    if (issueSlug.toLowerCase() == "new") {
-      // For preparing the database if user visits creating issue url directly.
-      // It's horrible to fetchDatabaseById one-by-one when query.databaseList
-      // is big (100+ sometimes)
-      // So we are fetching databaseList by project since that's better cached.
-      const prepare = async () => {
-        if (to.query.project) {
-          // If we found query.project, we can directly fetchDatabaseListByProjectId
-          const projectId = to.query.project as string;
-          await databaseStore.fetchDatabaseListByProjectId(
-            parseInt(projectId, 10)
-          );
-        } else {
-          // Otherwise, we don't have the projectId (very rare to see, theoretically)
-          // so we need to fetch the first database in databaseList by id,
-          // and see what project it belongs.
-          const databaseIdList = (to.query.databaseList as string)
-            .split(",")
-            .map((str) => parseInt(str, 10));
-          if (databaseIdList.length > 0) {
-            const firstDB = await databaseStore.getOrFetchDatabaseById(
-              databaseIdList[0]
-            );
-            if (databaseIdList.length > 1) {
-              // If we have more than one databases in the list
-              // fetch the rest of databases by projectId
-              await databaseStore.fetchDatabaseListByProjectId(
-                firstDB.project.id
-              );
-            }
-          }
-        }
-      };
-      prepare()
-        .then(() => next())
-        .catch((error) => {
-          next({
-            name: "error.404",
-            replace: false,
-          });
-          throw error;
-        });
-      return;
-    }
-    issueStore
-      .fetchIssueById(idFromSlug(issueSlug))
-      .then(() => {
-        next();
-      })
-      .catch((error) => {
-        next({
-          name: "error.404",
-          replace: false,
-        });
-        throw error;
-      });
+    // We've moved the preparation data fetch jobs into IssueDetail page
+    // so just next() here.
+    next();
     return;
   }
 
@@ -1271,57 +1328,46 @@ router.beforeEach((to, from, next) => {
     databaseStore
       .fetchDatabaseById(idFromSlug(databaseSlug))
       .then((database: Database) => {
-        if (!tableName && !dataSourceSlug && !migrationHistorySlug) {
-          next();
-        } else if (tableName) {
-          useTableStore()
-            .fetchTableByDatabaseIdAndTableName({
-              databaseId: database.id,
-              tableName,
-            })
-            .then(() => {
+        dbSchemaStore
+          .getOrFetchDatabaseMetadataById(database.id, true)
+          .then(() => {
+            if (!dataSourceSlug && !migrationHistorySlug) {
               next();
-            })
-            .catch((error) => {
-              next({
-                name: "error.404",
-                replace: false,
-              });
-              throw error;
-            });
-        } else if (dataSourceSlug) {
-          useDataSourceStore()
-            .fetchDataSourceById({
-              dataSourceId: idFromSlug(dataSourceSlug),
-              databaseId: database.id,
-            })
-            .then(() => {
-              next();
-            })
-            .catch((error) => {
-              next({
-                name: "error.404",
-                replace: false,
-              });
-              throw error;
-            });
-        } else if (migrationHistorySlug) {
-          instanceStore
-            .fetchMigrationHistoryById({
-              instanceId: database.instance.id,
-              migrationHistoryId: idFromSlug(migrationHistorySlug),
-            })
-            .then(() => {
-              next();
-            })
-            .catch((error) => {
-              next({
-                name: "error.404",
-                replace: false,
-              });
-              throw error;
-            });
-        }
+            } else if (dataSourceSlug) {
+              useDataSourceStore()
+                .fetchDataSourceById({
+                  dataSourceId: idFromSlug(dataSourceSlug),
+                  databaseId: database.id,
+                })
+                .then(() => {
+                  next();
+                })
+                .catch((error) => {
+                  next({
+                    name: "error.404",
+                    replace: false,
+                  });
+                  throw error;
+                });
+            } else if (migrationHistorySlug) {
+              instanceStore
+                .fetchMigrationHistoryById({
+                  instanceId: database.instance.id,
+                  migrationHistoryId:
+                    migrationHistoryIdFromSlug(migrationHistorySlug),
+                })
+                .then(() => {
+                  next();
+                })
+                .catch((error) => {
+                  next({
+                    name: "error.404",
+                    replace: false,
+                  });
+                  throw error;
+                });
+            }
+          });
       })
       .catch((error) => {
         next({
@@ -1396,13 +1442,13 @@ router.beforeEach((to, from, next) => {
     const databaseId = idFromSlug(databaseSlug);
     if (Number.isNaN(databaseId)) {
       // Connected to instance
-      useSQLEditorStore()
+      useConnectionTreeStore()
         .fetchConnectionByInstanceId(instanceId)
         .then(() => next())
         .catch(() => next());
     } else {
       // Connected to db
-      useSQLEditorStore()
+      useConnectionTreeStore()
         .fetchConnectionByInstanceIdAndDatabaseId(instanceId, databaseId)
         .then(() => next())
         .catch(() => next());
@@ -1416,13 +1462,20 @@ router.beforeEach((to, from, next) => {
   });
 });
 
+const DEFAULT_DOCUMENT_TITLE = "Bytebase";
+const title = ref(DEFAULT_DOCUMENT_TITLE);
+useTitle(title);
+
 router.afterEach((to /*, from */) => {
   // Needs to use nextTick otherwise title will still be the one from the previous route.
   nextTick(() => {
+    if (to.meta.overrideTitle) {
+      return;
+    }
     if (to.meta.title) {
       document.title = to.meta.title(to);
     } else {
-      document.title = "Bytebase";
+      document.title = DEFAULT_DOCUMENT_TITLE;
     }
   });
 });

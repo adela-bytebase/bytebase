@@ -10,21 +10,22 @@ import {
   VCSPatch,
   empty,
   EMPTY_ID,
+  VCSUIType,
 } from "@/types";
-import { getPrincipalFromIncludedList } from "./principal";
 
 function convert(vcs: ResourceObject, includedList: ResourceObject[]): VCS {
+  let uiType: VCSUIType = "GITLAB_SELF_HOST";
+  if (vcs.attributes.type == "GITLAB") {
+    if (vcs.attributes.instanceUrl == "https://gitlab.com") {
+      uiType = "GITLAB_COM";
+    }
+  } else if (vcs.attributes.type == "GITHUB") {
+    uiType = "GITHUB_COM";
+  }
   return {
-    ...(vcs.attributes as Omit<VCS, "id" | "creator" | "updater">),
+    ...(vcs.attributes as Omit<VCS, "id">),
     id: parseInt(vcs.id),
-    creator: getPrincipalFromIncludedList(
-      vcs.relationships!.creator.data,
-      includedList
-    ),
-    updater: getPrincipalFromIncludedList(
-      vcs.relationships!.updater.data,
-      includedList
-    ),
+    uiType,
   };
 }
 
@@ -73,7 +74,7 @@ export const useVCSStore = defineStore("vcs", {
           return convert(vcs, data.included);
         })
         .sort((a: VCS, b: VCS) => {
-          return b.createdTs - a.createdTs;
+          return b.id - a.id;
         });
 
       this.setVCSList(vcsList);

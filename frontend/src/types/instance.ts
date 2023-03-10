@@ -1,8 +1,13 @@
 import { DataSource } from ".";
 import { RowStatus } from "./common";
 import { Environment } from "./environment";
-import { EnvironmentId, InstanceId, MigrationHistoryId } from "./id";
-import { Principal } from "./principal";
+import {
+  EnvironmentId,
+  InstanceId,
+  MigrationHistoryId,
+  ResourceId,
+} from "./id";
+import { Engine } from "./proto/v1/common";
 import { VCSPushEvent } from "./vcs";
 
 export type EngineType =
@@ -11,7 +16,34 @@ export type EngineType =
   | "POSTGRES"
   | "SNOWFLAKE"
   | "TIDB"
-  | "MONGODB";
+  | "MONGODB"
+  | "SPANNER"
+  | "REDIS"
+  | "ORACLE";
+
+export function convertEngineType(type: EngineType): Engine {
+  switch (type) {
+    case "CLICKHOUSE":
+      return Engine.CLICKHOUSE;
+    case "MYSQL":
+      return Engine.MYSQL;
+    case "POSTGRES":
+      return Engine.POSTGRES;
+    case "SNOWFLAKE":
+      return Engine.SNOWFLAKE;
+    case "TIDB":
+      return Engine.TIDB;
+    case "MONGODB":
+      return Engine.MONGODB;
+    case "SPANNER":
+      return Engine.SPANNER;
+    case "REDIS":
+      return Engine.REDIS;
+    case "ORACLE":
+      return Engine.ORACLE;
+  }
+  return Engine.ENGINE_UNSPECIFIED;
+}
 
 export function defaultCharset(type: EngineType): string {
   switch (type) {
@@ -25,6 +57,12 @@ export function defaultCharset(type: EngineType): string {
       return "UTF8";
     case "MONGODB":
       return "";
+    case "SPANNER":
+      return "";
+    case "REDIS":
+      return "";
+    case "ORACLE":
+      return "UTF8";
   }
 }
 
@@ -42,6 +80,12 @@ export function engineName(type: EngineType): string {
       return "TiDB";
     case "MONGODB":
       return "MongoDB";
+    case "SPANNER":
+      return "Spanner";
+    case "REDIS":
+      return "Redis";
+    case "ORACLE":
+      return "Oracle";
   }
 }
 
@@ -60,36 +104,37 @@ export function defaultCollation(type: EngineType): string {
       return "";
     case "MONGODB":
       return "";
+    case "SPANNER":
+      return "";
+    case "REDIS":
+      return "";
+    case "ORACLE":
+      return "BINARY_CI";
   }
 }
 
 export type Instance = {
   id: InstanceId;
+  resourceId: string;
+  rowStatus: RowStatus;
 
   // Related fields
   environment: Environment;
   // An instance must have a admin data source, maybe a read-only data source.
   dataSourceList: DataSource[];
 
-  // Standard fields
-  creator: Principal;
-  createdTs: number;
-  updater: Principal;
-  updatedTs: number;
-  rowStatus: RowStatus;
-
   // Domain specific fields
   name: string;
   engine: EngineType;
   engineVersion: string;
   externalLink?: string;
-  database: string;
-  host: string;
-  port?: string;
   srv: boolean;
+  authenticationDatabase: string;
 };
 
 export type InstanceCreate = {
+  resourceId: ResourceId;
+
   // Related fields
   environmentId: EnvironmentId;
 
@@ -108,6 +153,11 @@ export type InstanceCreate = {
   sslKey?: string;
   // DNS SRV record is only used for MongoDB.
   srv: boolean;
+  // For MongoDB, the auth database is used to authenticate the user.
+  authenticationDatabase: string;
+  // sid and serviceName are used for Oracle database. Required one of them.
+  sid: string;
+  serviceName: string;
 };
 
 export type InstancePatch = {
@@ -117,9 +167,6 @@ export type InstancePatch = {
   // Domain specific fields
   name?: string;
   externalLink?: string;
-  host?: string;
-  port?: string;
-  database?: string;
 };
 
 export type MigrationSchemaStatus = "UNKNOWN" | "OK" | "NOT_EXIST";

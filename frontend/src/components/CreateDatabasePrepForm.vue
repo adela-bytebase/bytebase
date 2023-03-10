@@ -16,45 +16,16 @@
         />
       </div>
 
-      <!-- Providing a preview of generated database name in template mode -->
-      <div v-if="isDbNameTemplateMode" class="w-full">
-        <label for="name" class="textlabel">
-          {{ $t("create-db.generated-database-name") }}
-          <NTooltip trigger="hover" placement="top">
-            <template #trigger>
-              <heroicons-outline:question-mark-circle
-                class="w-4 h-4 inline-block"
-              />
-            </template>
-            <div class="whitespace-nowrap">
-              {{
-                $t("create-db.db-name-generated-by-template", {
-                  template: project.dbNameTemplate,
-                })
-              }}
-            </div>
-          </NTooltip>
-        </label>
-        <input
-          id="name"
-          disabled
-          name="name"
-          type="text"
-          class="textfield mt-1 w-full"
-          :value="generatedDatabaseName"
-        />
-      </div>
-
       <div class="w-full">
         <label for="name" class="textlabel">
           {{ $t("create-db.new-database-name") }}
           <span class="text-red-600">*</span>
         </label>
         <input
-          id="name"
+          id="databaseName"
           v-model="state.databaseName"
           required
-          name="name"
+          name="databaseName"
           type="text"
           class="textfield mt-1 w-full"
         />
@@ -65,17 +36,36 @@
             </template>
           </i18n-t>
         </span>
+        <DatabaseNameTemplateTips
+          v-if="isDbNameTemplateMode"
+          :project="project"
+          :name="state.databaseName"
+          :label-list="state.labelList"
+        />
+      </div>
+
+      <div v-if="selectedInstance.engine == 'MONGODB'" class="w-full">
+        <label for="name" class="textlabel">
+          {{ $t("create-db.new-collection-name") }}
+          <span class="text-red-600">*</span>
+        </label>
+        <input
+          id="tableName"
+          v-model="state.tableName"
+          required
+          name="tableName"
+          type="text"
+          class="textfield mt-1 w-full"
+        />
       </div>
 
       <div v-if="selectedInstance.engine == 'CLICKHOUSE'" class="w-full">
         <label for="name" class="textlabel">
           {{ $t("create-db.cluster") }}
-          <span class="text-red-600">*</span>
         </label>
         <input
           id="name"
           v-model="state.cluster"
-          required
           name="cluster"
           type="text"
           class="textfield mt-1 w-full"
@@ -117,15 +107,15 @@
           </label>
         </div>
         <div class="flex flex-row space-x-2 items-center">
-          <!-- eslint-disable vue/attribute-hyphenation -->
           <InstanceSelect
             id="instance"
             class="mt-1"
             name="instance"
             required
             :disabled="!allowEditInstance"
-            :selectedId="state.instanceId"
-            :environmentId="state.environmentId"
+            :selected-id="state.instanceId"
+            :environment-id="state.environmentId"
+            :filter="instanceHasCreateDatabase"
             @select-instance-id="selectInstance"
           />
         </div>
@@ -140,8 +130,8 @@
           id="instance-user"
           class="mt-1"
           name="instance-user"
-          :instanceId="state.instanceId"
-          :selectedId="state.instanceUserId"
+          :instance-id="state.instanceId"
+          :selected-id="state.instanceUserId"
           @select="selectInstanceUser"
         />
       </div>
@@ -155,12 +145,7 @@
         filter="optional"
       />
 
-      <template
-        v-if="
-          selectedInstance.engine != 'CLICKHOUSE' &&
-          selectedInstance.engine != 'SNOWFLAKE'
-        "
-      >
+      <template v-if="showCollationAndCharacterSet">
         <div class="w-full">
           <label for="charset" class="textlabel">
             {{
@@ -253,11 +238,15 @@ import {
   watchEffect,
   defineComponent,
   ref,
+  toRef,
 } from "vue";
 import { useRouter } from "vue-router";
 import { isEmpty } from "lodash-es";
-import { NTooltip } from "naive-ui";
-import { DatabaseLabelForm } from "./CreateDatabasePrepForm/";
+import {
+  DatabaseLabelForm,
+  DatabaseNameTemplateTips,
+  useDBNameTemplateInputState,
+} from "./CreateDatabasePrepForm/";
 import InstanceSelect from "../components/InstanceSelect.vue";
 import EnvironmentSelect from "../components/EnvironmentSelect.vue";
 import ProjectSelect from "../components/ProjectSelect.vue";
@@ -283,8 +272,8 @@ import {
   PITRContext,
 } from "../types";
 import {
-  buildDatabaseNameByTemplateAndLabelList,
   hasWorkspacePermission,
+  instanceHasCreateDatabase,
   issueSlug,
 } from "../utils";
 import { useEventListener } from "@vueuse/core";
@@ -304,6 +293,7 @@ interface LocalState {
   instanceUserId?: InstanceUserId;
   labelList: DatabaseLabel[];
   databaseName: string;
+  tableName: string;
   characterSet: string;
   collation: string;
   cluster: string;
@@ -315,13 +305,13 @@ interface LocalState {
 export default defineComponent({
   name: "CreateDatabasePrepForm",
   components: {
-    NTooltip,
     InstanceSelect,
     EnvironmentSelect,
     ProjectSelect,
     MemberSelect,
     InstanceEngineIcon,
     DatabaseLabelForm,
+    DatabaseNameTemplateTips,
   },
   props: {
     projectId: {
@@ -378,6 +368,7 @@ export default defineComponent({
       environmentId: props.environmentId,
       instanceId: props.instanceId,
       labelList: [],
+      tableName: "",
       characterSet: "",
       collation: "",
       cluster: "",
@@ -407,22 +398,10 @@ export default defineComponent({
     const isDbNameTemplateMode = computed((): boolean => {
       if (project.value.id === UNKNOWN_ID) return false;
 
+      if (project.value.tenantMode !== "TENANT") return false;
+
       // true if dbNameTemplate is not empty
       return !!project.value.dbNameTemplate;
-    });
-
-    const generatedDatabaseName = computed((): string => {
-      if (!isDbNameTemplateMode.value) {
-        // don't modify anything if we are not in template mode
-        return state.databaseName;
-      }
-
-      return buildDatabaseNameByTemplateAndLabelList(
-        project.value.dbNameTemplate,
-        state.databaseName,
-        state.labelList,
-        true // keepEmpty: true to keep non-selected values as original placeholders
-      );
     });
 
     const allowCreate = computed(() => {
@@ -464,6 +443,18 @@ export default defineComponent({
         : (unknown("INSTANCE") as Instance);
     });
 
+    const showCollationAndCharacterSet = computed((): boolean => {
+      const instance = selectedInstance.value;
+      if (instance.id === UNKNOWN_ID) {
+        return true;
+      }
+      return (
+        instance.engine !== "MONGODB" &&
+        instance.engine !== "CLICKHOUSE" &&
+        instance.engine !== "SNOWFLAKE"
+      );
+    });
+
     const requireDatabaseOwnerName = computed((): boolean => {
       const instance = selectedInstance.value;
       if (instance.id === UNKNOWN_ID) {
@@ -478,6 +469,11 @@ export default defineComponent({
       }
 
       return state.instanceUserId !== undefined;
+    });
+
+    useDBNameTemplateInputState(project, {
+      databaseName: toRef(state, "databaseName"),
+      labels: toRef(state, "labelList"),
     });
 
     const selectProject = (projectId: ProjectId) => {
@@ -511,9 +507,8 @@ export default defineComponent({
 
       let newIssue: IssueCreate;
 
-      const databaseName = isDbNameTemplateMode.value
-        ? generatedDatabaseName.value
-        : state.databaseName;
+      const databaseName = state.databaseName;
+      const tableName = state.tableName;
       const instanceId = state.instanceId as InstanceId;
       let owner = "";
       if (requireDatabaseOwnerName.value && state.instanceUserId) {
@@ -536,6 +531,7 @@ export default defineComponent({
       const createDatabaseContext: CreateDatabaseContext = {
         instanceId: instanceId,
         databaseName: databaseName,
+        tableName: tableName,
         owner,
         characterSet:
           state.characterSet || defaultCharset(selectedInstance.value.engine),
@@ -606,8 +602,8 @@ export default defineComponent({
       const index = labelList.findIndex((label) => label.key === key);
       if (envId) {
         const env = useEnvironmentStore().getEnvironmentById(envId);
-        if (index >= 0) labelList[index].value = env.name;
-        else labelList.unshift({ key, value: env.name });
+        if (index >= 0) labelList[index].value = env.resourceId;
+        else labelList.unshift({ key, value: env.resourceId });
       } else {
         if (index >= 0) labelList.splice(index, 1);
       }
@@ -621,15 +617,16 @@ export default defineComponent({
       project,
       isTenantProject,
       isDbNameTemplateMode,
-      generatedDatabaseName,
       labelForm,
       allowCreate,
       allowEditProject,
       allowEditEnvironment,
       allowEditInstance,
       selectedInstance,
+      showCollationAndCharacterSet,
       requireDatabaseOwnerName,
       showAssigneeSelect,
+      instanceHasCreateDatabase,
       selectProject,
       selectEnvironment,
       selectInstance,

@@ -1,72 +1,74 @@
 <template>
   <div class="w-full mt-4 space-y-4">
+    <FeatureAttention
+      v-if="!hasSensitiveDataFeature"
+      feature="bb.feature.sensitive-data"
+      :description="$t('subscription.features.bb-feature-sensitive-data.desc')"
+    />
+
     <div class="textinfolabel">
       {{ $t("settings.sensitive-data.description") }}
     </div>
 
-    <BBTable
+    <BBGrid
+      v-if="hasSensitiveDataFeature"
       :column-list="COLUMN_LIST"
       :data-source="state.sensitiveColumnList"
-      :show-header="true"
-      :left-bordered="true"
-      :right-bordered="true"
-      :row-clickable="false"
+      class="border"
+      @click-row="clickRow"
     >
-      <template #body="{ rowData: item }: { rowData: SensitiveColumn }">
-        <BBTableCell :left-padding="4" class="w-[15%]">
+      <template #item="{ item }: { item: SensitiveColumn }">
+        <div class="bb-grid-cell">
           {{ item.column }}
-        </BBTableCell>
-        <BBTableCell class="w-[15%]">
-          {{ item.table }}
-        </BBTableCell>
-        <BBTableCell class="w-[15%]">
-          <div class="flex items-center space-x-2">
-            <span>{{ item.database.name }}</span>
-          </div>
-        </BBTableCell>
-        <BBTableCell class="w-[15%]">
-          <div class="flex flex-row items-center space-x-1">
-            <InstanceEngineIcon :instance="item.database.instance" />
-            <span class="flex-1 whitespace-pre-wrap">
-              {{ instanceName(item.database.instance) }}
-            </span>
-          </div>
-        </BBTableCell>
-        <BBTableCell class="w-[10%]">
-          <div class="flex items-center">
-            {{ environmentName(item.database.instance.environment) }}
-            <ProtectedEnvironmentIcon
-              class="ml-1"
-              :environment="item.database.instance.environment"
-            />
-          </div>
-        </BBTableCell>
-        <BBTableCell class="w-[15%]">
+        </div>
+        <div class="bb-grid-cell">
+          {{ item.schema ? `${item.schema}.${item.table}` : item.table }}
+        </div>
+        <div class="bb-grid-cell">
+          {{ item.database.name }}
+        </div>
+        <div class="bb-grid-cell gap-x-1">
+          <InstanceEngineIcon :instance="item.database.instance" />
+          <span class="flex-1 whitespace-pre-wrap">
+            {{ instanceName(item.database.instance) }}
+          </span>
+        </div>
+        <div class="bb-grid-cell">
+          {{ environmentName(item.database.instance.environment) }}
+          <ProductionEnvironmentIcon
+            class="ml-1 w-4 h-4"
+            :environment="item.database.instance.environment"
+          />
+        </div>
+        <div class="bb-grid-cell">
           {{ projectName(item.database.project) }}
-        </BBTableCell>
-        <BBTableCell>
-          {{ humanizeTs(item.policy.updatedTs) }}
-        </BBTableCell>
-        <BBTableCell>
-          <div class="flex items-center justify-center">
-            <NPopconfirm @positive-click="removeSensitiveColumn(item)">
-              <template #trigger>
-                <button
-                  :disabled="!allowAdmin"
-                  class="w-5 h-5 p-0.5 bg-white hover:bg-control-bg-hover rounded cursor-pointer disabled:cursor-not-allowed disabled:hover:bg-white disabled:text-gray-400"
-                >
-                  <heroicons-outline:trash />
-                </button>
-              </template>
+        </div>
+        <div class="bb-grid-cell justify-center !px-2">
+          <NPopconfirm @positive-click="removeSensitiveColumn(item)">
+            <template #trigger>
+              <button
+                :disabled="!allowAdmin"
+                class="w-5 h-5 p-0.5 bg-white hover:bg-control-bg-hover rounded cursor-pointer disabled:cursor-not-allowed disabled:hover:bg-white disabled:text-gray-400"
+                @click.stop=""
+              >
+                <heroicons-outline:trash />
+              </button>
+            </template>
 
-              <div class="whitespace-nowrap">
-                {{ $t("settings.sensitive-data.remove-sensitive-column-tips") }}
-              </div>
-            </NPopconfirm>
-          </div>
-        </BBTableCell>
+            <div class="whitespace-nowrap">
+              {{ $t("settings.sensitive-data.remove-sensitive-column-tips") }}
+            </div>
+          </NPopconfirm>
+        </div>
       </template>
-    </BBTable>
+    </BBGrid>
+
+    <template v-else>
+      <BBGrid :column-list="COLUMN_LIST" :data-source="[]" class="border" />
+      <div class="w-full h-full flex flex-col items-center justify-center">
+        <img src="../assets/illustration/no-data.webp" class="max-h-[30vh]" />
+      </div>
+    </template>
   </div>
 
   <FeatureModal
@@ -77,9 +79,11 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive, watchEffect } from "vue";
+import { computed, reactive, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { NPopconfirm } from "naive-ui";
+import { uniq } from "lodash-es";
+import { useRouter } from "vue-router";
 
 import {
   featureToRef,
@@ -89,12 +93,14 @@ import {
   usePolicyStore,
 } from "@/store";
 import { Database, Policy, SensitiveDataPolicyPayload } from "@/types";
-import { BBTableColumn } from "@/bbkit/types";
-import { hasWorkspacePermission } from "@/utils";
+import { BBGridColumn } from "@/bbkit/types";
+import { databaseSlug, hasWorkspacePermission } from "@/utils";
+import { BBGrid } from "@/bbkit";
 
 type SensitiveColumn = {
   database: Database;
   policy: Policy;
+  schema: string;
   table: string;
   column: string;
 };
@@ -105,6 +111,7 @@ interface LocalState {
 }
 
 const { t } = useI18n();
+const router = useRouter();
 const state = reactive<LocalState>({
   showFeatureModal: false,
   isLoading: false,
@@ -121,15 +128,23 @@ const allowAdmin = computed(() => {
   );
 });
 
-const policyList = usePolicyListByResourceTypeAndPolicyType(
-  computed(() => ({
-    resourceType: "database",
-    policyType: "bb.policy.sensitive-data",
-  }))
-);
+const policyList = usePolicyListByResourceTypeAndPolicyType({
+  resourceType: "database",
+  policyType: "bb.policy.sensitive-data",
+});
 
 const updateList = async () => {
   state.isLoading = true;
+  const distinctDatabaseIdList = uniq(
+    policyList.value.map((policy) => policy.resourceId)
+  );
+  // Fetch or get all needed databases
+  await Promise.all(
+    distinctDatabaseIdList.map((databaseId) =>
+      databaseStore.getOrFetchDatabaseById(databaseId)
+    )
+  );
+
   const sensitiveColumnList: SensitiveColumn[] = [];
   for (let i = 0; i < policyList.value.length; i++) {
     const policy = policyList.value[i];
@@ -139,15 +154,15 @@ const updateList = async () => {
     const database = await databaseStore.getOrFetchDatabaseById(databaseId);
 
     for (let j = 0; j < payload.sensitiveDataList.length; j++) {
-      const { table, column } = payload.sensitiveDataList[j];
-      sensitiveColumnList.push({ database, policy, table, column });
+      const { schema, table, column } = payload.sensitiveDataList[j];
+      sensitiveColumnList.push({ database, policy, schema, table, column });
     }
   }
   state.sensitiveColumnList = sensitiveColumnList;
   state.isLoading = false;
 };
 
-watchEffect(updateList);
+watch(policyList, updateList, { immediate: true });
 
 const removeSensitiveColumn = (sensitiveColumn: SensitiveColumn) => {
   if (!hasSensitiveDataFeature.value) {
@@ -182,33 +197,52 @@ const removeSensitiveColumn = (sensitiveColumn: SensitiveColumn) => {
   updateList();
 };
 
-const COLUMN_LIST = computed((): BBTableColumn[] => [
+const COLUMN_LIST = computed((): BBGridColumn[] => [
   {
     title: t("database.column"),
+    width: "minmax(auto, 1fr)",
   },
   {
     title: t("common.table"),
+    width: "minmax(auto, 1fr)",
   },
   {
     title: t("common.database"),
+    width: "minmax(auto, 1fr)",
   },
   {
     title: t("common.instance"),
+    width: "minmax(auto, 1fr)",
   },
   {
     title: t("common.environment"),
+    width: "minmax(auto, 1fr)",
   },
   {
     title: t("common.project"),
-  },
-  {
-    title: t("common.updated-at"),
-    nowrap: true,
+    width: "minmax(auto, 1fr)",
   },
   {
     title: t("common.operation"),
-    center: true,
-    nowrap: true,
+    width: "minmax(auto, 6rem)",
+    class: "justify-center !px-2",
   },
 ]);
+
+const clickRow = (
+  item: SensitiveColumn,
+  section: number,
+  row: number,
+  e: MouseEvent
+) => {
+  let url = `/db/${databaseSlug(item.database)}/table/${item.table}`;
+  if (item.schema != "") {
+    url += `?schema=${item.schema}`;
+  }
+  if (e.ctrlKey || e.metaKey) {
+    window.open(url, "_blank");
+  } else {
+    router.push(url);
+  }
+};
 </script>

@@ -1,24 +1,17 @@
+import { computed, unref } from "vue";
 import { defineStore } from "pinia";
 import axios from "axios";
-import { ResourceObject, SettingState } from "@/types";
+import { MaybeRef, ResourceObject, SettingState } from "@/types";
 import { Setting, SettingName } from "@/types/setting";
-import { getPrincipalFromIncludedList } from "./principal";
+import { WorkspaceProfileSetting } from "@/types/proto/store/setting";
 
 function convert(
   setting: ResourceObject,
   includedList: ResourceObject[]
 ): Setting {
   return {
-    ...(setting.attributes as Omit<Setting, "id" | "creator" | "updater">),
+    ...(setting.attributes as Omit<Setting, "id">),
     id: parseInt(setting.id),
-    creator: getPrincipalFromIncludedList(
-      setting.relationships!.creator.data,
-      includedList
-    ),
-    updater: getPrincipalFromIncludedList(
-      setting.relationships!.updater.data,
-      includedList
-    ),
   };
 }
 
@@ -26,6 +19,16 @@ export const useSettingStore = defineStore("setting", {
   state: (): SettingState => ({
     settingByName: new Map(),
   }),
+  getters: {
+    workspaceSetting(state): WorkspaceProfileSetting | undefined {
+      const setting = state.settingByName.get("bb.workspace.profile");
+      if (!setting || !setting.value) {
+        return;
+      }
+
+      return WorkspaceProfileSetting.fromJSON(JSON.parse(setting.value));
+    },
+  },
   actions: {
     getSettingByName(name: SettingName) {
       return this.settingByName.get(name);
@@ -74,3 +77,11 @@ export const useSettingStore = defineStore("setting", {
     },
   },
 });
+
+export const useSettingByName = (name: MaybeRef<SettingName>) => {
+  const store = useSettingStore();
+
+  return computed(() => {
+    return store.getSettingByName(unref(name));
+  });
+};

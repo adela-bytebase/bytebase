@@ -10,7 +10,6 @@
     <template #header>
       <BBTableHeaderCell class="table-cell" :title="columnList[0].title" />
       <BBTableHeaderCell class="table-cell" :title="columnList[1].title" />
-      <BBTableHeaderCell class="table-cell" :title="columnList[2].title" />
     </template>
     <template #body="{ rowData: project }">
       <BBTableCell :left-padding="4" class="table-cell text-gray-500 w-[30%]">
@@ -31,16 +30,13 @@
           <div v-if="project.workflowType === 'VCS'" class="tooltip-wrapper">
             <heroicons-outline:collection class="ml-1 w-4 h-4 text-control" />
             <span class="tooltip whitespace-nowrap">
-              {{ $t("database.version-control-enabled") }}
+              {{ $t("database.gitops-enabled") }}
             </span>
           </div>
         </span>
       </BBTableCell>
       <BBTableCell class="truncate">
         {{ projectName(project) }}
-      </BBTableCell>
-      <BBTableCell class="hidden md:table-cell md:w-[15%]">
-        {{ humanizeTs(project.createdTs) }}
       </BBTableCell>
     </template>
   </BBTable>
@@ -75,9 +71,6 @@ export default defineComponent({
       },
       {
         title: t("project.table.name"),
-      },
-      {
-        title: t("project.table.created-at"),
       },
     ]);
 

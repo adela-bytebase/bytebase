@@ -34,20 +34,29 @@
                 {{ $t(`subscription.plan.${plan.title}.desc`) }}
               </p>
 
-              <p class="mt-4 flex items-baseline text-gray-900 text-xl">
-                <span v-if="plan.pricePrefix" class="text-xl 2xl:text-3xl">
-                  {{ plan.pricePrefix }}&nbsp;</span
-                >
-                <span class="text-4xl">
-                  ${{ plan.pricePerInstancePerMonth }}
+              <p
+                class="mt-4 flex items-baseline text-gray-900 text-xl space-x-2"
+              >
+                <span v-if="plan.pricePrefix" class="text-3xl">
+                  {{ plan.pricePrefix }}
                 </span>
-                {{ plan.priceUnit }}
+                <span
+                  :class="[
+                    'font-bold',
+                    plan.type == PlanType.ENTERPRISE ? 'text-3xl' : 'text-4xl',
+                  ]"
+                >
+                  {{ plan.pricing }}
+                </span>
+                {{ plan.priceSuffix }}
               </p>
 
-              <div class="text-gray-400">
-                {{ $t("subscription.per-instance") }}
-              </div>
-              <div class="text-gray-400">
+              <div
+                :class="[
+                  'text-gray-600 h-12',
+                  plan.type == PlanType.TEAM ? 'font-bold' : '',
+                ]"
+              >
                 {{ $t(`subscription.${plan.title}-price-intro`) }}
               </div>
 
@@ -86,7 +95,7 @@
         </template>
       </i18n-t>
     </div>
-    <table class="w-full h-px table-fixed mb-16">
+    <table class="w-full table-fixed mb-16 border-l border-r border-b">
       <caption class="sr-only">
         Feature comparison
       </caption>
@@ -94,7 +103,7 @@
         <template v-for="section in FEATURE_SECTIONS" :key="section.type">
           <tr>
             <th
-              class="bg-gray-50 py-3 pl-6 text-sm font-medium text-gray-900 text-left"
+              class="bg-gray-50 py-3 pl-6 text-base font-medium text-gray-900 text-left"
               colspan="4"
               scope="colgroup"
             >
@@ -128,7 +137,7 @@
       <tfoot>
         <tr class="border-t border-gray-200">
           <th class="sr-only" scope="row">Choose your plan</th>
-          <td v-for="plan in plans" :key="plan.type" class="pt-5 px-6">
+          <td v-for="plan in plans" :key="plan.type" class="py-5 px-6">
             <button
               v-if="!plan.isFreePlan"
               class="block w-full bg-gray-800 border border-gray-800 rounded-md py-2 text-lg font-semibold text-white text-center hover:bg-gray-900"
@@ -162,14 +171,27 @@
           {{ $t(`subscription.plan.${plan.title}.desc`) }}
         </p>
 
-        <p class="mt-4 flex items-baseline text-gray-900 text-xl">
-          <span class="text-4xl"> ${{ plan.pricePerInstancePerMonth }} </span>
-          &nbsp;
-          {{ $t("subscription.per-instance") }}
-          {{ $t("subscription.per-month") }}
+        <p class="mt-4 flex items-baseline text-gray-900 text-xl space-x-2">
+          <span v-if="plan.pricePrefix" class="text-3xl">
+            {{ plan.pricePrefix }}
+          </span>
+          <span
+            :class="[
+              'font-bold',
+              plan.type == PlanType.ENTERPRISE ? 'text-3xl' : 'text-4xl',
+            ]"
+          >
+            {{ plan.pricing }}
+          </span>
+          {{ plan.priceSuffix }}
         </p>
 
-        <div class="text-gray-400">
+        <div
+          :class="[
+            'text-gray-600',
+            plan.type == PlanType.TEAM ? 'font-bold' : '',
+          ]"
+        >
           {{ $t(`subscription.${plan.title}-price-intro`) }}
         </div>
 
@@ -206,11 +228,11 @@
         <caption class="sr-only">
           Feature comparison
         </caption>
-        <tbody class="border-t border-gray-200 divide-y divide-gray-200">
+        <tbody class="border border-gray-200 divide-y divide-gray-200">
           <template v-for="section in FEATURE_SECTIONS" :key="section.type">
             <tr>
               <th
-                class="bg-gray-50 py-3 pl-6 text-sm font-medium text-gray-900 text-left"
+                class="bg-gray-50 py-3 pl-6 text-base font-medium text-gray-900 text-left"
                 scope="colgroup"
               >
                 {{ $t(`subscription.feature-sections.${section.type}.title`) }}
@@ -295,11 +317,16 @@ const plans = computed((): LocalPlan[] => {
     isAvailable: plan.type === PlanType.TEAM,
     isFreePlan: plan.type === PlanType.FREE,
     label: t(`subscription.plan.${plan.title}.label`),
-    pricePrefix:
-      plan.type === PlanType.ENTERPRISE ? t("subscription.start-from") : "",
-    priceUnit:
+    pricing:
       plan.type === PlanType.ENTERPRISE
-        ? t("subscription.price-unit-for-enterprise")
+        ? t("subscription.contact-us")
+        : `$${plan.unitPrice}`,
+    pricePrefix: plan.type === PlanType.TEAM ? t("subscription.start-at") : "",
+    priceSuffix:
+      plan.type === PlanType.TEAM
+        ? t("subscription.price-unit-for-team")
+        : plan.type === PlanType.ENTERPRISE
+        ? ""
         : t("subscription.per-month"),
   }));
 });
@@ -323,12 +350,12 @@ const onButtonClick = (plan: Plan) => {
       return;
     }
     window.open(
-      "https://bytebase.com/pricing?source=console.subscription",
+      "https://hub.bytebase.com/subscription?source=console.subscription",
       "__blank"
     );
   } else if (plan.type === PlanType.ENTERPRISE) {
     window.open(
-      "mailto:support@bytebase.com?subject=Request for enterprise plan"
+      "mailto:support@bytebase.com?subject=Request for enterprise plan&body=Hi Bytebase team,%0D%0A%0D%0AI would like to request for an enterprise plan. Please contact me at [your email].%0D%0A%0D%0AThanks"
     );
   } else {
     window.open("https://bytebase.com/docs?source=console", "_self");

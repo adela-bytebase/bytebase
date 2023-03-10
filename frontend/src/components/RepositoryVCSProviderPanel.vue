@@ -23,9 +23,9 @@
     <template v-if="canManageVCSProvider">
       <i18n-t keypath="repository.choose-git-provider-visit-workspace">
         <template #workspace>
-          <router-link class="normal-link" to="/setting/version-control"
+          <router-link class="normal-link" to="/setting/gitops"
             >{{ $t("common.workspace") }} -
-            {{ $t("common.version-control") }}</router-link
+            {{ $t("common.gitops") }}</router-link
           >
         </template>
       </i18n-t>
@@ -105,7 +105,7 @@ const selectVCS = (vcs: VCS) => {
   emit("set-vcs", vcs);
 
   let authorizeUrl = `${vcs.instanceUrl}/oauth/authorize`;
-  if (vcs.type == "GITHUB_COM") {
+  if (vcs.type == "GITHUB") {
     authorizeUrl = `https://github.com/login/oauth/authorize`;
   }
   openWindowForOAuth(

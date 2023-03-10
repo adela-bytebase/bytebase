@@ -16,25 +16,32 @@ import {
   useInstanceStore,
   pushNotification,
   usePolicyStore,
+  useConnectionTreeStore,
+  useSettingStore,
 } from "@/store";
-import type { Instance, Database, Connection, ConnectionAtom } from "@/types";
+import {
+  Database,
+  Connection,
+  ConnectionAtom,
+  ConnectionTreeMode,
+  CoreTabInfo,
+  TabMode,
+} from "@/types";
 import { ConnectionTreeState, UNKNOWN_ID, DEFAULT_PROJECT_ID } from "@/types";
 import {
   emptyConnection,
   idFromSlug,
-  mapConnectionAtom,
   sheetSlug as makeSheetSlug,
   connectionSlug as makeConnectionSlug,
   isSheetReadable,
-  isSameConnection,
-  isTempTab,
   isDatabaseAccessible,
-  isInstanceAccessible,
+  getDefaultTabNameFromConnection,
+  isSimilarTab,
+  hasWorkspacePermission,
 } from "@/utils";
 import { useI18n } from "vue-i18n";
 
 type LocalState = {
-  instanceList: Instance[];
   databaseList: Database[];
 };
 
@@ -43,7 +50,6 @@ const router = useRouter();
 const { t } = useI18n();
 
 const state = reactive<LocalState>({
-  instanceList: [],
   databaseList: [],
 });
 
@@ -52,10 +58,19 @@ const instanceStore = useInstanceStore();
 const databaseStore = useDatabaseStore();
 const policyStore = usePolicyStore();
 const sqlEditorStore = useSQLEditorStore();
+const connectionTreeStore = useConnectionTreeStore();
 const tabStore = useTabStore();
 const sheetStore = useSheetStore();
 
-const prepareAccessibleConnectionByProject = async () => {
+const prepareAccessControlPolicy = async () => {
+  connectionTreeStore.accessControlPolicyList =
+    await policyStore.fetchPolicyListByResourceTypeAndPolicyType(
+      "database",
+      "bb.policy.access-control"
+    );
+};
+
+const prepareAccessibleDatabaseList = async () => {
   // It will also be called when user logout
   if (currentUser.value.id === UNKNOWN_ID) {
     return;
@@ -68,57 +83,98 @@ const prepareAccessibleConnectionByProject = async () => {
     await databaseStore.fetchDatabaseList({
       syncStatus: "OK",
     })
-  ).filter((db) => db.project.id !== DEFAULT_PROJECT_ID);
-  state.instanceList = uniqBy(
-    databaseList.map((db) => db.instance),
-    (instance) => instance.id
+  ).filter((db) =>
+    isDatabaseAccessible(
+      db,
+      connectionTreeStore.accessControlPolicyList,
+      currentUser.value
+    )
   );
   state.databaseList = databaseList;
 };
 
-const prepareSQLEditorContext = async () => {
-  sqlEditorStore.accessControlPolicyList =
-    await policyStore.fetchPolicyListByResourceTypeAndPolicyType(
-      "database",
-      "bb.policy.access-control"
+const prepareConnectionTree = async () => {
+  if (connectionTreeStore.tree.mode === ConnectionTreeMode.INSTANCE) {
+    if (
+      !hasWorkspacePermission(
+        "bb.permission.workspace.manage-database",
+        currentUser.value.role
+      )
+    ) {
+      connectionTreeStore.tree.mode = ConnectionTreeMode.PROJECT;
+      return;
+    }
+    const { databaseList } = state;
+    const instanceList = uniqBy(
+      databaseList.map((db) => db.instance),
+      (instance) => instance.id
+    );
+    const connectionTree = instanceList.map((instance) => {
+      const node = connectionTreeStore.mapAtom(instance, "instance", 0);
+      return node;
+    });
+
+    for (const instance of instanceList) {
+      const instanceItem = connectionTree.find(
+        (item: ConnectionAtom) => item.id === instance.id
+      )!;
+
+      instanceItem.children = databaseList
+        .filter((db) => db.instance.id === instance.id)
+        .map((db) => {
+          const node = connectionTreeStore.mapAtom(db, "database", instance.id);
+          node.disabled = !isDatabaseAccessible(
+            db,
+            connectionTreeStore.accessControlPolicyList,
+            currentUser.value
+          );
+          if (node.disabled) {
+            // If a database node is not accessible
+            // it's not expandable either.
+            node.isLeaf = true;
+          }
+          return node;
+        });
+    }
+    connectionTreeStore.tree.data = connectionTree;
+  } else {
+    const databaseList = state.databaseList.filter((db) => {
+      return db.project.id !== DEFAULT_PROJECT_ID;
+    });
+    const projectList = uniqBy(
+      databaseList.map((db) => db.project),
+      (project) => project.id
     );
 
-  let connectionTree: ConnectionAtom[] = [];
+    const projectAtomList = projectList.map((project) => {
+      const node = connectionTreeStore.mapAtom(project, "project", 0);
+      return node;
+    });
 
-  const { instanceList, databaseList } = state;
-  const instanceMapper = mapConnectionAtom("instance", 0);
-  connectionTree = instanceList.map((instance) => {
-    const node = instanceMapper(instance);
-    if (!isInstanceAccessible(instance, currentUser.value)) {
-      node.disabled = true;
-    }
-    return node;
-  });
+    projectAtomList.forEach((projectAtom) => {
+      projectAtom.children = databaseList
+        .filter((db) => db.project.id === projectAtom.id)
+        .map((db) => {
+          const node = connectionTreeStore.mapAtom(
+            db,
+            "database",
+            projectAtom.id
+          );
+          node.disabled = !isDatabaseAccessible(
+            db,
+            connectionTreeStore.accessControlPolicyList,
+            currentUser.value
+          );
+          if (node.disabled) {
+            // If a database node is not accessible
+            // it's not expandable either.
+            node.isLeaf = true;
+          }
+          return node;
+        });
+    });
 
-  for (const instance of instanceList) {
-    const instanceItem = connectionTree.find(
-      (item: ConnectionAtom) => item.id === instance.id
-    )!;
-
-    const databaseMapper = mapConnectionAtom("database", instance.id);
-    instanceItem.children = databaseList
-      .filter((db) => db.instance.id === instance.id)
-      .map((db) => {
-        const node = databaseMapper(db);
-        node.disabled = !isDatabaseAccessible(
-          db,
-          sqlEditorStore.accessControlPolicyList,
-          currentUser.value
-        );
-        if (node.disabled) {
-          // If a database node is not accessible
-          // it's not expandable either.
-          node.isLeaf = true;
-        }
-        return node;
-      });
-
-    sqlEditorStore.connectionTree.data = connectionTree;
+    connectionTreeStore.tree.data = projectAtomList;
   }
 
   // Won't fetch tableList for every database here.
@@ -189,41 +245,45 @@ const prepareConnectionSlug = async () => {
     return false;
   }
 
-  const maybeOpenNewTab = (connection: Connection) => {
+  const connect = (connection: Connection) => {
     const tab = tabStore.currentTab;
     if (tab.sheetId) {
       // Don't touch a saved sheet.
       tabStore.selectOrAddTempTab();
       return;
     }
-    if (isTempTab(tab)) {
-      // Override current tab if it's a temp tab.
+    const target: CoreTabInfo = {
+      connection,
+      mode: TabMode.ReadOnly,
+    };
+
+    if (isSimilarTab(target, tabStore.currentTab)) {
+      // Don't go further if the connection doesn't change.
       return;
     }
-    if (isSameConnection(tab.connection, connection)) {
-      // Stay on current tab if its connection and target connection are equal.
-      return;
-    }
-    // Select or add a temp tab otherwise.
-    tabStore.selectOrAddTempTab();
+    const name = getDefaultTabNameFromConnection(target.connection);
+    tabStore.selectOrAddSimilarTab(
+      target,
+      /* beside */ false,
+      /* defaultTabName */ name
+    );
+    tabStore.updateCurrentTab(target);
   };
 
   if (Number.isNaN(databaseId)) {
     // connected to instance
-    const connection = await sqlEditorStore.fetchConnectionByInstanceId(
+    const connection = await connectionTreeStore.fetchConnectionByInstanceId(
       instanceId
     );
-    maybeOpenNewTab(connection);
-    tabStore.updateCurrentTab({ connection });
+    connect(connection);
   } else {
     // connected to db
     const connection =
-      await sqlEditorStore.fetchConnectionByInstanceIdAndDatabaseId(
+      await connectionTreeStore.fetchConnectionByInstanceIdAndDatabaseId(
         instanceId,
         databaseId
       );
-    maybeOpenNewTab(connection);
-    tabStore.updateCurrentTab({ connection });
+    connect(connection);
   }
   return true;
 };
@@ -309,18 +369,22 @@ const syncURLWithConnection = () => {
 };
 
 onMounted(async () => {
-  if (sqlEditorStore.connectionTree.state === ConnectionTreeState.UNSET) {
-    sqlEditorStore.connectionTree.state = ConnectionTreeState.LOADING;
-    await prepareAccessibleConnectionByProject();
-    await prepareSQLEditorContext();
-    sqlEditorStore.connectionTree.state = ConnectionTreeState.LOADED;
+  if (connectionTreeStore.tree.state === ConnectionTreeState.UNSET) {
+    connectionTreeStore.tree.state = ConnectionTreeState.LOADING;
+    await prepareAccessControlPolicy();
+    await prepareAccessibleDatabaseList();
+    connectionTreeStore.tree.state = ConnectionTreeState.LOADED;
   }
+
+  watch(() => connectionTreeStore.tree.mode, prepareConnectionTree, {
+    immediate: true,
+  });
 
   watch(currentUser, (user) => {
     if (user.id === UNKNOWN_ID) {
       // Cleanup when user signed out
-      sqlEditorStore.connectionTree.data = [];
-      sqlEditorStore.connectionTree.state = ConnectionTreeState.UNSET;
+      connectionTreeStore.tree.data = [];
+      connectionTreeStore.tree.state = ConnectionTreeState.UNSET;
 
       tabStore.reset();
     }
@@ -329,6 +393,7 @@ onMounted(async () => {
   await setConnectionFromQuery();
   await sqlEditorStore.fetchQueryHistoryList();
   await useDebugStore().fetchDebug();
+  await useSettingStore().fetchSetting();
 
   syncURLWithConnection();
 });

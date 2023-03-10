@@ -1,4 +1,12 @@
-import { Environment, Instance } from "../types";
+import { computed, unref } from "vue";
+import {
+  EngineType,
+  Environment,
+  Instance,
+  Language,
+  languageOfEngine,
+  MaybeRef,
+} from "../types";
 
 export function instanceName(instance: Instance) {
   let name = instance.name;
@@ -32,3 +40,71 @@ export function sortInstanceList(
     return bEnvIndex - aEnvIndex;
   });
 }
+
+export const useInstanceEditorLanguage = (
+  instance: MaybeRef<Instance | undefined>
+) => {
+  return computed((): Language => {
+    return languageOfEngine(unref(instance)?.engine);
+  });
+};
+
+export const isValidSpannerHost = (host: string) => {
+  const RE =
+    /^projects\/(?<PROJECT_ID>(?:[a-z]|[-.:]|[0-9])+)\/instances\/(?<INSTANCE_ID>(?:[a-z]|[-]|[0-9])+)$/;
+  return RE.test(host);
+};
+
+export const instanceHasAlterSchema = (instance: Instance): boolean => {
+  const { engine } = instance;
+  if (engine === "MONGODB") return false;
+  if (engine === "REDIS") return false;
+  return true;
+};
+
+export const instanceHasBackupRestore = (instance: Instance): boolean => {
+  const { engine } = instance;
+  if (engine === "MONGODB") return false;
+  if (engine === "REDIS") return false;
+  if (engine === "SPANNER") return false;
+  return true;
+};
+
+export const instanceHasReadonlyMode = (instance: Instance): boolean => {
+  const { engine } = instance;
+  if (engine === "MONGODB") return false;
+  if (engine === "REDIS") return false;
+  return true;
+};
+
+export const instanceHasCreateDatabase = (instance: Instance): boolean => {
+  const { engine } = instance;
+  if (engine === "REDIS") return false;
+  return true;
+};
+
+export const instanceHasStructuredQueryResult = (
+  instance: Instance
+): boolean => {
+  const { engine } = instance;
+  if (engine === "MONGODB") return false;
+  if (engine === "REDIS") return false;
+  return true;
+};
+
+export const instanceHasSSL = (
+  instanceOrEngine: Instance | EngineType
+): boolean => {
+  const engine =
+    typeof instanceOrEngine === "string"
+      ? instanceOrEngine
+      : instanceOrEngine.engine;
+  return [
+    "CLICKHOUSE",
+    "MYSQL",
+    "TIDB",
+    "POSTGRES",
+    "REDIS",
+    "ORACLE",
+  ].includes(engine);
+};

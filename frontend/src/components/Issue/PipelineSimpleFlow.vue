@@ -1,10 +1,7 @@
 <template>
   <div class="pipeline-standard-flow divide-y">
-    <PipelineStageList>
-      <template #task-name-of-stage="{ stage }">
-        {{ taskNameOfStage(stage) }}
-      </template>
-    </PipelineStageList>
+    <PipelineStageList />
+
     <div v-if="shouldShowTaskBar" class="relative">
       <div
         ref="taskBar"
@@ -16,24 +13,25 @@
       >
         <template v-for="(task, i) in taskList" :key="i">
           <div
-            class="task px-2 py-1 cursor-pointer border rounded lg:flex-1 flex justify-between items-center overflow-hidden"
+            class="task px-2 py-1 cursor-pointer border rounded lg:flex-1 justify-between items-center overflow-hidden"
             :class="taskClass(task)"
             @click="onClickTask(task, i)"
           >
-            <div class="flex-1">
-              <div class="flex items-center pb-1">
+            <div class="flex items-center pb-1">
+              <div class="flex items-center flex-1 gap-x-1">
                 <TaskStatusIcon
                   :create="create"
                   :active="isActiveTask(task)"
                   :status="task.status"
+                  :task="task"
                   class="transform scale-75"
                 />
-                <heroicons-solid:arrow-narrow-right
-                  v-if="isActiveTask(task)"
-                  class="name w-5 h-5"
-                />
-                <div class="name">
-                  {{ databaseForTask(task).name }}
+                <div class="name flex-1 space-x-1 overflow-x-hidden">
+                  <heroicons-solid:arrow-narrow-right
+                    v-if="isActiveTask(task)"
+                    class="w-5 h-5 inline-block"
+                  />
+                  <span>{{ databaseForTask(task).name }}</span>
                   <span
                     v-if="schemaVersionForTask(task)"
                     class="schema-version"
@@ -42,19 +40,16 @@
                   </span>
                 </div>
               </div>
-              <div class="flex items-center justify-between px-1 py-1">
-                <div class="flex flex-1 items-center whitespace-pre-wrap">
-                  <InstanceEngineIcon
-                    :instance="databaseForTask(task).instance"
-                  />
-                  <span
-                    class="flex-1 ml-2 overflow-x-hidden whitespace-pre-wrap"
-                  >
-                    {{ instanceName(databaseForTask(task).instance) }}
-                  </span>
-
-                  <TaskMarkAsDoneButton :task="(task as Task)" />
-                </div>
+              <TaskExtraActionsButton :task="(task as Task)" />
+            </div>
+            <div class="flex items-center justify-between px-1 py-1">
+              <div class="flex flex-1 items-center whitespace-pre-wrap">
+                <InstanceEngineIcon
+                  :instance="databaseForTask(task).instance"
+                />
+                <span class="flex-1 ml-2 overflow-x-hidden whitespace-pre-wrap">
+                  {{ instanceName(databaseForTask(task).instance) }}
+                </span>
               </div>
             </div>
           </div>
@@ -78,9 +73,9 @@ import {
   TaskDatabaseCreatePayload,
   unknown,
 } from "@/types";
-import { activeTaskInStage, taskSlug } from "@/utils";
+import { taskSlug } from "@/utils";
 import { useIssueLogic } from "./logic";
-import TaskMarkAsDoneButton from "./TaskMarkAsDoneButton.vue";
+import TaskExtraActionsButton from "./TaskExtraActionsButton.vue";
 import { useVerticalScrollState } from "@/composables/useScrollState";
 
 const {
@@ -96,20 +91,6 @@ const databaseStore = useDatabaseStore();
 
 const taskBar = ref<HTMLDivElement>();
 const taskBarScrollState = useVerticalScrollState(taskBar, 192);
-
-const taskNameOfStage = (stage: Stage | StageCreate) => {
-  if (create.value) {
-    return stage.taskList[0].status;
-  }
-  const activeTask = activeTaskInStage(stage as Stage);
-  const { taskList } = stage as Stage;
-  for (let i = 0; i < stage.taskList.length; i++) {
-    if (taskList[i].id == activeTask.id) {
-      return `${activeTask.name} (${i + 1}/${stage.taskList.length})`;
-    }
-  }
-  return activeTask.name;
-};
 
 const pipeline = computed(() => issue.value.pipeline!);
 
@@ -212,10 +193,10 @@ const onClickTask = (task: Task | TaskCreate, index: number) => {
   @apply border-info;
 }
 .task .name {
-  @apply ml-1 overflow-x-hidden whitespace-nowrap overflow-ellipsis;
+  @apply whitespace-pre-wrap break-all;
 }
 .task .schema-version {
-  @apply ml-1 text-sm;
+  @apply text-sm;
 }
 .task.active .name {
   @apply font-bold;

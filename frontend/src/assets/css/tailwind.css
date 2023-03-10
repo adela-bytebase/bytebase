@@ -80,6 +80,26 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .bb-grid {
+    @apply grid border-block-border;
+  }
+  .bb-grid-row {
+    @apply contents;
+  }
+  .bb-grid-header-cell {
+    @apply flex items-center bg-gray-50 p-2 text-left text-xs font-medium text-gray-500 tracking-wider;
+    @apply first:pl-4 last:pr-4;
+  }
+  .bb-grid-cell {
+    @apply border-t border-block-border flex items-center text-sm leading-5 p-2 whitespace-pre-wrap break-all;
+    @apply first:pl-4 last:pr-4;
+  }
+  .bb-grid-row.clickable:hover > .bb-grid-cell {
+    @apply cursor-pointer bg-gray-100;
+  }
+}
+
 .btn-primary {
   @apply select-none inline-flex border border-transparent rounded-md text-accent-text bg-accent hover:bg-accent-hover disabled:bg-accent disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm leading-5 font-medium focus:ring-control focus:outline-none focus-visible:ring-2 focus:ring-offset-2;
 }
@@ -200,6 +220,10 @@
   @apply cursor-pointer text-blue-600 hover:underline hover:text-blue-800 focus:outline-none;
 }
 
+.light-link {
+  @apply cursor-pointer text-blue-400 hover:underline hover:text-blue-200 focus:outline-none;
+}
+
 .icon-link {
   @apply cursor-pointer text-control hover:bg-link-hover focus:outline-none;
 }
@@ -217,7 +241,11 @@
 }
 
 .tooltip-left {
-  @apply invisible absolute -top-1 right-6  px-2 py-1 rounded bg-black bg-opacity-75 text-white;
+  @apply invisible absolute -top-1 right-6 px-2 py-1 rounded bg-black bg-opacity-75 text-white;
+}
+
+.tooltip-top {
+  @apply invisible absolute !-top-1 !left-1/2 !-translate-x-1/2 px-2 py-1 rounded bg-black bg-opacity-75 text-white;
 }
 
 .tooltip-wrapper:hover .tooltip,
@@ -290,6 +318,15 @@
 .fade-slow-enter-from,
 .fade-slow-leave-to {
   @apply opacity-0;
+}
+
+.slide-up-enter-active,
+.slide-up-leave-active {
+  @apply transition-transform ease-in-out duration-150;
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+  @apply translate-y-full;
 }
 
 @keyframes thumb-up {

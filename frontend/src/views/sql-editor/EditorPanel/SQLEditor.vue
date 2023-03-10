@@ -6,6 +6,7 @@
       ref="editorRef"
       v-model:value="sqlCode"
       class="w-full h-full"
+      :language="selectedLanguage"
       :dialect="selectedDialect"
       :readonly="readonly"
       @change="handleChange"
@@ -24,12 +25,20 @@ import {
   useTabStore,
   useSQLEditorStore,
   useDatabaseStore,
-  useTableStore,
   useSheetStore,
   useInstanceById,
+  useDBSchemaStore,
 } from "@/store";
 import MonacoEditor from "@/components/MonacoEditor/MonacoEditor.vue";
-import type { ExecuteConfig, ExecuteOption, SQLDialect } from "@/types";
+import {
+  Database,
+  dialectOfEngine,
+  ExecuteConfig,
+  ExecuteOption,
+  SQLDialect,
+} from "@/types";
+import { TableMetadata } from "@/types/proto/store/database";
+import { useInstanceEditorLanguage } from "@/utils";
 
 const emit = defineEmits<{
   (e: "save-sheet", content?: string): void;
@@ -44,7 +53,7 @@ const emit = defineEmits<{
 const instanceStore = useInstanceStore();
 const tabStore = useTabStore();
 const databaseStore = useDatabaseStore();
-const tableStore = useTableStore();
+const dbSchemaStore = useDBSchemaStore();
 const sqlEditorStore = useSQLEditorStore();
 const sheetStore = useSheetStore();
 
@@ -57,12 +66,10 @@ const selectedInstance = useInstanceById(
 const selectedInstanceEngine = computed(() => {
   return instanceStore.formatEngine(selectedInstance.value);
 });
+const selectedLanguage = useInstanceEditorLanguage(selectedInstance);
 const selectedDialect = computed((): SQLDialect => {
-  const engine = selectedInstanceEngine.value;
-  if (engine === "PostgreSQL") {
-    return "postgresql";
-  }
-  return "mysql";
+  const engine = selectedInstance.value.engine;
+  return dialectOfEngine(engine);
 });
 const readonly = computed(() => sheetStore.isReadOnly);
 const currentTabId = computed(() => tabStore.currentTabId);
@@ -154,14 +161,18 @@ const handleEditorReady = async () => {
 
   watchEffect(() => {
     if (selectedInstance.value) {
+      const databaseMap: Map<Database, TableMetadata[]> = new Map();
       const databaseList = databaseStore.getDatabaseListByInstanceId(
         selectedInstance.value.id
       );
-      const tableList = databaseList
-        .map((item) => tableStore.getTableListByDatabaseId(item.id))
-        .flat();
-
-      editorRef.value?.setEditorAutoCompletionContext(databaseList, tableList);
+      // Only provide auto-complete context for those opened database.
+      for (const database of databaseList) {
+        const tableList = dbSchemaStore.getTableListByDatabaseId(database.id);
+        if (tableList.length > 0) {
+          databaseMap.set(database, tableList);
+        }
+      }
+      editorRef.value?.setEditorAutoCompletionContext(databaseMap);
     }
   });
 };

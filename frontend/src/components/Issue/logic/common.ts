@@ -1,5 +1,5 @@
 import { computed } from "vue";
-import { cloneDeep } from "lodash-es";
+import { cloneDeep, isUndefined } from "lodash-es";
 import { useRoute } from "vue-router";
 import formatSQL from "@/components/MonacoEditor/sqlFormatter";
 import {
@@ -15,7 +15,6 @@ import {
   IssueCreate,
   IssuePatch,
   IssueType,
-  SQLDialect,
   Task,
   TaskCreate,
   TaskDatabaseCreatePayload,
@@ -30,9 +29,14 @@ import {
   MigrationType,
   TaskDatabaseSchemaBaselinePayload,
   DatabaseId,
+  TaskDatabaseSchemaUpdateGhostSyncPayload,
+  SheetId,
+  MigrationContext,
+  dialectOfEngine,
 } from "@/types";
 import { useIssueLogic } from "./index";
-import { isDev, taskCheckRunSummary } from "@/utils";
+import { isDev, isTaskTriggeredByVCS, taskCheckRunSummary } from "@/utils";
+import { maybeApplyRollbackParams } from "@/plugins/issue/logic/initialize/standard";
 
 export const useCommonLogic = () => {
   const { create, issue, selectedTask, createIssue, onStatusChanged } =
@@ -86,7 +90,9 @@ export const useCommonLogic = () => {
 
   const initialTaskListStatement = () => {
     if (create.value) {
-      const taskList = flattenTaskList<TaskCreate>(issue.value);
+      const taskList = flattenTaskList<TaskCreate>(issue.value).filter((task) =>
+        TaskTypeWithStatement.includes(task.type)
+      );
       const databaseStatementMap = new Map<DatabaseId, string>();
       // route.query.databaseList is comma-splitted databaseId list
       // e.g. databaseList=7002,7006,7014
@@ -142,28 +148,19 @@ export const useCommonLogic = () => {
     // if not creating, we are allowed to edit sql statement only when:
     // 1. issue.status is OPEN
     // 2. AND currentUser is the creator
-    // 3. AND workflowType is UI
     if (issueEntity.status !== "OPEN") {
       return false;
     }
     if (issueEntity.creator.id !== currentUser.value.id) {
-      return false;
-    }
-    if (issueEntity.project.workflowType !== "UI") {
+      if (isTaskTriggeredByVCS(selectedTask.value as Task)) {
+        // If an issue is triggered by VCS, its creator will be 1 (SYSTEM_BOT_ID)
+        // We should "Allow" current user to edit the statement (via VCS).
+        return true;
+      }
       return false;
     }
 
     return isTaskEditable(selectedTask.value as Task);
-  });
-
-  const selectedStatement = computed((): string => {
-    const task = selectedTask.value;
-    if (create.value) {
-      return (task as TaskCreate).statement;
-    }
-
-    // Extract statement from different types of payloads
-    return statementOfTask(task as Task) || "";
   });
 
   const updateStatement = (
@@ -187,48 +184,43 @@ export const useCommonLogic = () => {
     }
   };
 
-  const applyStatementToOtherTasks = (statement: string) => {
-    const taskList = flattenTaskList<TaskCreate>(issue.value);
-
-    for (const task of taskList) {
-      if (TaskTypeWithStatement.includes(task.type)) {
-        task.statement = statement;
-      }
-    }
-  };
-
-  const allowApplyStatementToOtherTasks = computed(() => {
+  const updateSheetId = (sheetId: SheetId | undefined) => {
     if (!create.value) {
-      return false;
+      return;
     }
-    const taskList = flattenTaskList<TaskCreate>(issue.value);
-    // Allowed when more than one tasks need SQL statement.
-    const count = taskList.filter((task) =>
-      TaskTypeWithStatement.includes(task.type)
-    ).length;
 
-    return count > 1;
-  });
+    const task = selectedTask.value as TaskCreate;
+    task.sheetId = sheetId;
+  };
 
   const doCreate = () => {
     const issueCreate = cloneDeep(issue.value as IssueCreate);
     // for standard issue pipeline (1 * 1 or M * 1)
     // copy user edited tasks back to issue.createContext
-    const taskList = flattenTaskList<TaskCreate>(issueCreate);
-    const detailList: MigrationDetail[] = taskList.map((task) => {
-      const db = databaseStore.getDatabaseById(task.databaseId!);
-      return {
-        migrationType: getMigrationTypeFromTask(task),
-        databaseId: task.databaseId!,
-        databaseName: "", // Only `databaseId` is needed in standard pipeline.
-        statement: maybeFormatStatementOnSave(task.statement, db),
-        earliestAllowedTs: task.earliestAllowedTs,
+    const taskCreateList = flattenTaskList<TaskCreate>(issueCreate);
+    const detailList: MigrationDetail[] = taskCreateList.map((taskCreate) => {
+      const db = databaseStore.getDatabaseById(taskCreate.databaseId!);
+      const migrationDetail: MigrationDetail = {
+        migrationType: getMigrationTypeFromTask(taskCreate),
+        databaseId: taskCreate.databaseId,
+        statement: maybeFormatStatementOnSave(taskCreate.statement, db),
+        sheetId: taskCreate.sheetId,
+        earliestAllowedTs: taskCreate.earliestAllowedTs,
+        rollbackEnabled: taskCreate.rollbackEnabled,
       };
+      // If task already has sheet id, we do not need to save statement.
+      if (!isUndefined(taskCreate.sheetId)) {
+        migrationDetail.statement = "";
+      }
+      return migrationDetail;
     });
 
-    issueCreate.createContext = {
-      detailList: detailList,
+    const createContext: MigrationContext = {
+      detailList,
     };
+    maybeApplyRollbackParams(createContext, route);
+
+    issueCreate.createContext = createContext;
 
     createIssue(issueCreate);
   };
@@ -237,11 +229,9 @@ export const useCommonLogic = () => {
     patchIssue,
     patchTask,
     allowEditStatement,
-    selectedStatement,
     initialTaskListStatement,
     updateStatement,
-    allowApplyStatementToOtherTasks,
-    applyStatementToOtherTasks,
+    updateSheetId,
     doCreate,
   };
 };
@@ -261,11 +251,19 @@ const getMigrationTypeFromTask = (task: Task | TaskCreate) => {
 export const TaskTypeWithStatement: TaskType[] = [
   "bb.task.general",
   "bb.task.database.create",
+  "bb.task.database.data.update",
   "bb.task.database.schema.baseline",
   "bb.task.database.schema.update",
   "bb.task.database.schema.update-sdl",
   "bb.task.database.schema.update.ghost.sync",
+];
+
+// TaskTypeWithSheetId should be a subset of TaskTypeWithStatement.
+export const TaskTypeWithSheetId: TaskType[] = [
   "bb.task.database.data.update",
+  "bb.task.database.schema.update",
+  "bb.task.database.schema.update-sdl",
+  "bb.task.database.schema.update.ghost.sync",
 ];
 
 export const IssueTypeWithStatement: IssueType[] = [
@@ -294,11 +292,7 @@ export const maybeFormatStatementOnSave = (
     return statement;
   }
 
-  // Default to use mysql dialect but use postgresql dialect if needed
-  let dialect: SQLDialect = "mysql";
-  if (database && database.instance.engine === "POSTGRES") {
-    dialect = "postgresql";
-  }
+  const dialect = dialectOfEngine(database?.instance.engine);
 
   const result = formatSQL(statement, dialect);
   if (!result.error) {
@@ -316,7 +310,7 @@ export const errorAssertion = () => {
   }
 };
 
-const statementOfTask = (task: Task) => {
+export const statementOfTask = (task: Task) => {
   switch (task.type) {
     case "bb.task.general":
       return ((task as Task).payload as TaskGeneralPayload).statement || "";
@@ -349,6 +343,38 @@ const statementOfTask = (task: Task) => {
     case "bb.task.database.schema.update.ghost.sync":
     case "bb.task.database.schema.update.ghost.cutover":
       return ""; // should never reach here
+  }
+};
+
+export const sheetIdOfTask = (task: Task) => {
+  switch (task.type) {
+    case "bb.task.database.create":
+      return (
+        ((task as Task).payload as TaskDatabaseCreatePayload).sheetId ||
+        undefined
+      );
+    case "bb.task.database.schema.update":
+      return (
+        ((task as Task).payload as TaskDatabaseSchemaUpdatePayload).sheetId ||
+        undefined
+      );
+    case "bb.task.database.schema.update-sdl":
+      return (
+        ((task as Task).payload as TaskDatabaseSchemaUpdateSDLPayload)
+          .sheetId || undefined
+      );
+    case "bb.task.database.data.update":
+      return (
+        ((task as Task).payload as TaskDatabaseDataUpdatePayload).sheetId ||
+        undefined
+      );
+    case "bb.task.database.schema.update.ghost.sync":
+      return (
+        ((task as Task).payload as TaskDatabaseSchemaUpdateGhostSyncPayload)
+          .sheetId || undefined
+      );
+    default:
+      return undefined;
   }
 };
 

@@ -4,7 +4,7 @@
       <i18n-t keypath="repository.setup-wizard-guide">
         <template #guide>
           <a
-            href="https://bytebase.com/docs/vcs-integration/enable-version-control-workflow?source=console"
+            href="https://bytebase.com/docs/vcs-integration/enable-gitops-workflow?source=console"
             target="_blank"
             class="normal-link"
           >
@@ -158,10 +158,10 @@ const DEFAULT_SCHEMA_PATH_TEMPLATE = "{{ENV_NAME}}/.{{DB_NAME}}##LATEST.sql";
 const DEFAULT_SHEET_PATH_TEMPLATE =
   "script/{{ENV_NAME}}##{{DB_NAME}}##{{NAME}}.sql";
 
-// For tenant mode projects, {{ENV_NAME}} is not supported.
+// For tenant mode projects, {{ENV_NAME}} and {{DB_NAME}} is not supported.
 const DEFAULT_TENANT_MODE_FILE_PATH_TEMPLATE =
-  "{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql";
-const DEFAULT_TENANT_MODE_SCHEMA_PATH_TEMPLATE = ".{{DB_NAME}}##LATEST.sql";
+  "{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql";
+const DEFAULT_TENANT_MODE_SCHEMA_PATH_TEMPLATE = ".LATEST.sql";
 const DEFAULT_TENANT_MODE_SHEET_PATH_TEMPLATE = "script/{{NAME}}.sql";
 
 const CHOOSE_PROVIDER_STEP = 0;
@@ -307,7 +307,7 @@ export default defineComponent({
 
       const createFunc = async () => {
         let externalId = state.config.repositoryInfo.externalId;
-        if (state.config.vcs.type == "GITHUB_COM") {
+        if (state.config.vcs.type == "GITHUB") {
           externalId = state.config.repositoryInfo.fullPath;
         }
 
@@ -377,7 +377,7 @@ export default defineComponent({
         params: {
           projectSlug: projectSlug(props.project),
         },
-        hash: "#version-control",
+        hash: "#gitops",
       });
     };
 

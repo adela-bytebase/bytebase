@@ -2,16 +2,16 @@
   <div class="md:flex md:items-center md:justify-between">
     <div class="flex-1 min-w-0">
       <div class="flex flex-col">
-        <div class="flex items-center">
-          <div>
+        <div class="flex items-center gap-x-2">
+          <div v-if="!create">
             <IssueStatusIcon
-              v-if="!create"
               :issue-status="issue.status"
               :task-status="activeTask(issue.pipeline).status"
             />
           </div>
           <BBTextField
-            class="ml-2 my-0.5 w-full text-lg font-bold truncate"
+            class="my-px px-2 flex-1 text-lg font-bold truncate"
+            :class="[create && '-ml-2']"
             :disabled="!allowEditNameAndDescription"
             :required="true"
             :focus-on-mount="create"
@@ -20,6 +20,10 @@
             :placeholder="'Issue name'"
             @end-editing="(text: string) => trySaveName(text)"
           />
+
+          <div class="mt-4 flex space-x-3 md:mt-0 md:ml-4">
+            <slot />
+          </div>
         </div>
         <div v-if="!create">
           <i18n-t
@@ -52,30 +56,28 @@
               `${vcsBranch}@${pushEvent.repositoryFullPath}`
             }}</a>
 
-            <i18n-t keypath="issue.commit-by-at" tag="span">
+            <i18n-t
+              v-if="commit && commit.id && commit.url"
+              keypath="issue.commit-by-at"
+              tag="span"
+            >
               <template #id>
-                <a
-                  :href="pushEvent.fileCommit.url"
-                  target="_blank"
-                  class="normal-link"
-                  >{{ pushEvent.fileCommit.id.substring(0, 7) }}:</a
+                <a :href="commit.url" target="_blank" class="normal-link"
+                  >{{ commit.id.substring(0, 7) }}:</a
                 >
               </template>
               <template #title>
-                <span class="text-main">{{ pushEvent.fileCommit.title }}</span>
+                <span class="text-main">{{ commit.title }}</span>
               </template>
               <template #author>{{ pushEvent.authorName }}</template>
               <template #time>{{
-                dayjs(pushEvent.fileCommit.createdTs * 1000).format("LLL")
+                dayjs(commit.createdTs * 1000).format("LLL")
               }}</template>
             </i18n-t>
           </p>
-          <IssueRollbackFromTips />
         </div>
+        <IssueRollbackFromTips />
       </div>
-    </div>
-    <div class="mt-4 flex space-x-3 md:mt-0 md:ml-4">
-      <slot />
     </div>
   </div>
 </template>
@@ -92,6 +94,7 @@ import {
   VCSPushEvent,
 } from "@/types";
 import { useExtraIssueLogic, useIssueLogic } from "./logic";
+import { head } from "lodash-es";
 
 interface LocalState {
   editing: boolean;
@@ -128,6 +131,13 @@ const pushEvent = computed((): VCSPushEvent | undefined => {
   return undefined;
 });
 
+const commit = computed(() => {
+  // Use commits[0] for new format
+  // Use fileCommit for legacy data (if possible)
+  // Use undefined otherwise
+  return head(pushEvent.value?.commits) ?? pushEvent.value?.fileCommit;
+});
+
 const vcsBranch = computed((): string => {
   if (pushEvent.value) {
     return pushEvent.value.ref.replace(/^refs\/heads\//g, "");
@@ -137,9 +147,9 @@ const vcsBranch = computed((): string => {
 
 const vcsBranchUrl = computed((): string => {
   if (pushEvent.value) {
-    if (pushEvent.value.vcsType == "GITLAB_SELF_HOST") {
+    if (pushEvent.value.vcsType == "GITLAB") {
       return `${pushEvent.value.repositoryUrl}/-/tree/${vcsBranch.value}`;
-    } else if (pushEvent.value.vcsType == "GITHUB_COM") {
+    } else if (pushEvent.value.vcsType == "GITHUB") {
       return `${pushEvent.value.repositoryUrl}/tree/${vcsBranch.value}`;
     }
   }

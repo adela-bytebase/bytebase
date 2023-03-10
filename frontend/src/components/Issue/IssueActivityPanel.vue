@@ -113,6 +113,15 @@
                     </div>
                   </div>
                 </template>
+                <template v-else-if="actionIcon(item.activity) == 'skip'">
+                  <div class="relative pl-1">
+                    <div
+                      class="w-6 h-6 bg-gray-200 rounded-full ring-4 ring-white flex items-center justify-center"
+                    >
+                      <SkipIcon class="w-5 h-5 text-gray-500" />
+                    </div>
+                  </div>
+                </template>
                 <template v-else-if="actionIcon(item.activity) == 'commit'">
                   <div class="relative pl-0.5">
                     <div
@@ -337,11 +346,13 @@ import {
 import { useRoute } from "vue-router";
 import PrincipalAvatar from "../PrincipalAvatar.vue";
 import HumanizeTs from "../misc/HumanizeTs.vue";
+import { SkipIcon } from "../Icon";
 import type {
   Issue,
   Activity,
   ActivityIssueFieldUpdatePayload,
   ActivityTaskStatusUpdatePayload,
+  ActivityStageStatusUpdatePayload,
   ActivityCreate,
   IssueSubscriber,
   ActivityTaskFileCommitPayload,
@@ -354,7 +365,6 @@ import { IssueBuiltinFieldId } from "@/plugins";
 import { useI18n } from "vue-i18n";
 import {
   useCurrentUser,
-  useUIStateStore,
   useIssueSubscriberStore,
   useActivityStore,
 } from "@/store";
@@ -384,6 +394,7 @@ type ActionIconType =
   | "cancel"
   | "fail"
   | "complete"
+  | "skip"
   | "commit";
 
 type DistinctActivity = {
@@ -491,11 +502,6 @@ const doCreateComment = (comment: string, clear = true) => {
     comment,
   };
   activityStore.createActivity(createActivity).then(() => {
-    useUIStateStore().saveIntroStateByKey({
-      key: "comment.create",
-      newState: true,
-    });
-
     if (clear) {
       newComment.value = "";
       nextTick(() => sizeToFit(newCommentTextArea.value));
@@ -601,13 +607,27 @@ const actionIcon = (activity: Activity): ActionIconType => {
         return "run";
       }
       case "DONE": {
-        return "complete";
+        if (payload.oldStatus === "RUNNING") {
+          return "complete";
+        } else {
+          return "skip";
+        }
       }
       case "FAILED": {
         return "fail";
       }
       case "PENDING_APPROVAL": {
         return "avatar"; // stale approval dismissed.
+      }
+    }
+  } else if (activity.type == "bb.pipeline.stage.status.update") {
+    const payload = activity.payload as ActivityStageStatusUpdatePayload;
+    switch (payload.stageStatusUpdateType) {
+      case "BEGIN": {
+        return "run";
+      }
+      case "END": {
+        return "complete";
       }
     }
   } else if (activity.type == "bb.pipeline.task.file.commit") {
@@ -627,6 +647,9 @@ const actionSubjectPrefix = (activity: Activity): string => {
   if (activity.creator.id == SYSTEM_BOT_ID) {
     if (activity.type == "bb.pipeline.task.status.update") {
       return `${t("activity.subject-prefix.task")} `;
+    }
+    if (activity.type == "bb.pipeline.stage.status.update") {
+      return `${t("activity.subject-prefix.stage")}`;
     }
   }
   return "";
@@ -651,6 +674,17 @@ const actionSubject = (activity: Activity): ActionSubject => {
         };
       }
     }
+    if (activity.type == "bb.pipeline.stage.status.update") {
+      const payload = activity.payload as ActivityStageStatusUpdatePayload;
+      const link = `/issue/${issueSlug(
+        issue.value.name,
+        issue.value.id
+      )}?stage=${payload.stageId}`;
+      return {
+        name: `${payload.stageName}`,
+        link,
+      };
+    }
   }
   return {
     name: activity.creator.name,
@@ -660,6 +694,8 @@ const actionSubject = (activity: Activity): ActionSubject => {
 
 const fileCommitActivityUrl = (activity: Activity) => {
   const payload = activity.payload as ActivityTaskFileCommitPayload;
+  if (payload.vcsInstanceUrl.includes("https://github.com"))
+    return `${payload.vcsInstanceUrl}/${payload.repositoryFullPath}/commit/${payload.commitId}`;
   return `${payload.vcsInstanceUrl}/${payload.repositoryFullPath}/-/commit/${payload.commitId}`;
 };
 

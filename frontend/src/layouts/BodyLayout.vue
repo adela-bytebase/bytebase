@@ -27,7 +27,7 @@
           </div>
           <router-link
             to="/archive"
-            class="outline-item group flex items-center px-4 pt-4 pb-2"
+            class="outline-item group flex items-center px-4 py-2"
           >
             <heroicons-outline:archive class="w-5 h-5 mr-2" />
             {{ $t("common.archive") }}
@@ -35,10 +35,17 @@
           <div
             class="flex-shrink-0 flex border-t border-block-border px-3 py-2"
           >
+            <div
+              v-if="isDemo"
+              class="text-sm flex whitespace-nowrap text-accent"
+            >
+              <heroicons-outline:presentation-chart-bar class="w-5 h-5 mr-1" />
+              {{ $t("common.demo-mode") }}
+            </div>
             <router-link
-              v-if="!isFreePlan"
+              v-else-if="!isFreePlan"
               to="/setting/subscription"
-              exact-active-class
+              exact-active-class=""
               class="text-sm flex"
             >
               {{ $t(currentPlan) }}
@@ -51,7 +58,16 @@
               <heroicons-solid:sparkles class="w-5 h-5" />
               {{ $t(currentPlan) }}
             </div>
-            <div class="text-sm ml-auto text-control-light tooltip-wrapper">
+            <div
+              class="text-sm flex items-center gap-x-1 ml-auto tooltip-wrapper"
+              :class="
+                canUpgrade
+                  ? 'text-success cursor-pointer'
+                  : 'text-control-light cursor-default'
+              "
+              @click="state.showReleaseModal = canUpgrade"
+            >
+              <heroicons-outline:volume-up v-if="canUpgrade" class="h-4 w-4" />
               {{ version }}
               <span v-if="gitCommit" class="tooltip"
                 >Git hash {{ gitCommit }}</span
@@ -70,29 +86,33 @@
       class="hidden md:flex md:flex-shrink-0"
       data-label="bb-dashboard-static-sidebar"
     >
-      <div class="flex flex-col w-52">
+      <div class="flex flex-col w-52 bg-control-bg">
         <!-- Sidebar component, swap this element with another sidebar if you like -->
         <div class="flex-1 flex flex-col py-2 overflow-y-auto">
           <router-view name="leftSidebar" />
         </div>
         <router-link
           to="/archive"
-          class="outline-item group flex items-center px-4 pt-4 pb-2"
+          class="outline-item group flex items-center px-4 py-2"
         >
           <heroicons-outline:archive class="w-5 h-5 mr-2" />
           {{ $t("common.archive") }}
         </router-link>
         <div
           v-if="showQuickstart"
-          class="flex-shrink-0 flex justify-center border-t border-block-border py-2"
+          class="flex-shrink-0 flex justify-center border-t border-block-border"
         >
           <Quickstart />
         </div>
         <div class="flex-shrink-0 flex border-t border-block-border px-3 py-2">
+          <div v-if="isDemo" class="text-sm flex whitespace-nowrap text-accent">
+            <heroicons-outline:presentation-chart-bar class="w-5 h-5 mr-1" />
+            {{ $t("common.demo-mode") }}
+          </div>
           <router-link
-            v-if="!isFreePlan"
+            v-else-if="!isFreePlan"
             to="/setting/subscription"
-            exact-active-class
+            exact-active-class=""
             class="text-sm flex whitespace-nowrap mr-1"
           >
             {{ $t(currentPlan) }}
@@ -106,12 +126,22 @@
             {{ $t(currentPlan) }}
           </div>
           <div
-            class="text-sm ml-auto text-control-light tooltip-wrapper whitespace-nowrap truncate"
+            class="text-xs flex items-center gap-x-1 ml-auto tooltip-wrapper whitespace-nowrap"
+            :class="
+              canUpgrade
+                ? 'text-success cursor-pointer'
+                : 'text-control-light cursor-default'
+            "
+            @click="state.showReleaseModal = canUpgrade"
           >
+            <heroicons-outline:volume-up v-if="canUpgrade" class="h-4 w-4" />
             {{ version }}
-            <span v-if="gitCommit" class="tooltip"
-              >Git hash {{ gitCommit }}</span
-            >
+            <span v-if="canUpgrade" class="tooltip whitespace-nowrap">
+              {{ $t("settings.release.new-version-available") }}
+            </span>
+            <span v-else-if="gitCommit" class="tooltip">
+              Git hash {{ gitCommit }}
+            </span>
           </div>
         </div>
       </div>
@@ -120,6 +150,15 @@
       class="flex flex-col min-w-0 flex-1 border-l border-r border-block-border"
       data-label="bb-main-body-wrapper"
     >
+      <nav
+        class="bg-white border-b border-block-border"
+        data-label="bb-dashboard-header"
+      >
+        <div class="max-w-full mx-auto">
+          <DashboardHeader />
+        </div>
+      </nav>
+
       <!-- Static sidebar for mobile -->
       <aside class="md:hidden">
         <div
@@ -141,13 +180,31 @@
           </div>
         </div>
       </aside>
+
       <div class="w-full mx-auto md:flex">
         <div class="md:min-w-0 md:flex-1">
           <div v-if="showBreadcrumb" class="hidden md:block px-4 pt-4">
             <Breadcrumb />
           </div>
-          <div v-if="quickActionList.length > 0" class="mx-4 mt-4">
-            <QuickActionPanel :quick-action-list="quickActionList" />
+          <div class="flex items-start flex-wrap px-4 gap-x-4">
+            <div v-if="quickActionList.length > 0" class="flex-1 mt-4">
+              <QuickActionPanel :quick-action-list="quickActionList" />
+            </div>
+            <div
+              v-if="route.name === 'workspace.home'"
+              class="mt-8 hidden md:flex"
+            >
+              <a
+                href="/sql-editor"
+                target="_blank"
+                class="btn-normal items-center !px-4 !text-base"
+              >
+                <heroicons-solid:terminal class="text-accent w-6 h-6 mr-2" />
+                <span class="whitespace-nowrap">{{
+                  $t("sql-editor.self")
+                }}</span>
+              </a>
+            </div>
           </div>
         </div>
       </div>
@@ -166,11 +223,17 @@
     v-if="state.showTrialModal"
     @cancel="state.showTrialModal = false"
   />
+  <ReleaseRemindModal
+    v-if="state.showReleaseModal"
+    @cancel="state.showReleaseModal = false"
+  />
 </template>
 
 <script lang="ts">
 import { computed, defineComponent, reactive } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
+import { storeToRefs } from "pinia";
+import DashboardHeader from "@/views/DashboardHeader.vue";
 import Breadcrumb from "../components/Breadcrumb.vue";
 import Quickstart from "../components/Quickstart.vue";
 import QuickActionPanel from "../components/QuickActionPanel.vue";
@@ -187,11 +250,13 @@ import {
 interface LocalState {
   showMobileOverlay: boolean;
   showTrialModal: boolean;
+  showReleaseModal: boolean;
 }
 
 export default defineComponent({
   name: "BodyLayout",
   components: {
+    DashboardHeader,
     Breadcrumb,
     Quickstart,
     QuickActionPanel,
@@ -200,11 +265,23 @@ export default defineComponent({
     const actuatorStore = useActuatorStore();
     const subscriptionStore = useSubscriptionStore();
     const uiStateStore = useUIStateStore();
+    const route = useRoute();
     const router = useRouter();
 
     const state = reactive<LocalState>({
       showMobileOverlay: false,
       showTrialModal: false,
+      showReleaseModal: false,
+    });
+
+    const { isDemo } = storeToRefs(actuatorStore);
+
+    actuatorStore.tryToRemindRelease().then((openRemindModal) => {
+      state.showReleaseModal = openRemindModal;
+    });
+
+    const canUpgrade = computed(() => {
+      return actuatorStore.hasNewRelease;
     });
 
     const currentUser = useCurrentUser();
@@ -259,9 +336,7 @@ export default defineComponent({
 
     const showQuickstart = computed(() => {
       // Do not show quickstart in demo mode since we don't expect user to alter the data
-      return (
-        !actuatorStore.isDemo && !uiStateStore.getIntroStateByKey("hidden")
-      );
+      return !isDemo.value && !uiStateStore.getIntroStateByKey("hidden");
     });
 
     const version = computed(() => {
@@ -295,6 +370,7 @@ export default defineComponent({
 
     return {
       state,
+      route,
       quickActionList,
       showBreadcrumb,
       showQuickstart,
@@ -302,6 +378,8 @@ export default defineComponent({
       gitCommit,
       currentPlan,
       isFreePlan,
+      canUpgrade,
+      isDemo,
     };
   },
 });

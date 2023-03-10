@@ -7,7 +7,7 @@
       <div
         v-for="tab in tabList"
         :key="tab.id"
-        class="tab-container px-1 pl-2 py-2 rounded w-40 flex flex-row justify-between items-center shrink-0 border border-transparent cursor-pointer"
+        class="relative px-1 pl-2 py-2 rounded w-40 flex flex-row justify-between items-center shrink-0 border border-transparent cursor-pointer"
         :class="[
           `tab-${tab.id}`,
           tab.id === currentTab?.id && 'bg-white border-gray-200',
@@ -37,18 +37,22 @@
             @click.stop.prevent="handleCloseTab(tab)"
           />
         </span>
+        <div
+          v-if="tab.id === currentTab?.id"
+          class="absolute -bottom-px left-0 w-full h-[3px] bg-accent rounded"
+        ></div>
       </div>
     </div>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { isEqual } from "lodash-es";
 import { NEllipsis } from "naive-ui";
 import { computed, nextTick, ref, watch } from "vue";
 import scrollIntoView from "scroll-into-view-if-needed";
 import { useSchemaEditorStore } from "@/store";
 import { TabContext, SchemaEditorTabType } from "@/types";
+import { isTableChanged } from "./utils/table";
 
 const editorStore = useSchemaEditorStore();
 const tabsContainerRef = ref();
@@ -89,11 +93,7 @@ const getTabComputedClassList = (tab: TabContext) => {
       return ["text-green-700"];
     }
 
-    const originTable = editorStore.originTableList.find(
-      (item) =>
-        item.databaseId === table.databaseId && item.oldName === table.oldName
-    );
-    if (!isEqual(originTable, table)) {
+    if (isTableChanged(tab.databaseId, tab.schemaId, tab.tableId)) {
       return ["text-yellow-700"];
     }
   }
@@ -108,7 +108,12 @@ const getTabName = (tab: TabContext) => {
     );
     return `${database?.name || "unknown database"}`;
   } else if (tab.type === SchemaEditorTabType.TabForTable) {
-    return `${tab.tableName}`;
+    const table = editorStore.getTable(
+      tab.databaseId,
+      tab.schemaId,
+      tab.tableId
+    );
+    return `${table?.name || ""}`;
   } else {
     // Should never reach here.
     return "unknown structure";
@@ -123,9 +128,3 @@ const handleCloseTab = (tab: TabContext) => {
   editorStore.closeTab(tab.id);
 };
 </script>
-
-<style scoped>
-.tab-container:hover > .tab-close-button {
-  @apply flex;
-}
-</style>

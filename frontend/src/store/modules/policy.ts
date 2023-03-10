@@ -3,11 +3,13 @@ import { computed, Ref, unref, watchEffect } from "vue";
 import axios from "axios";
 import {
   DatabaseId,
+  EMPTY_ID,
   EnvironmentId,
   MaybeRef,
   PolicyState,
   ResourceIdentifier,
   ResourceObject,
+  ResourceType,
   unknown,
   UNKNOWN_ID,
 } from "@/types";
@@ -19,7 +21,6 @@ import {
   PolicyUpsert,
   SensitiveDataPolicyPayload,
 } from "@/types/policy";
-import { getPrincipalFromIncludedList } from "./principal";
 import { useEnvironmentStore } from "./environment";
 import { useCurrentUser } from "./auth";
 
@@ -56,22 +57,19 @@ function convert(
   const environment = convertEnvironment(policy, includedList);
 
   const result = {
-    ...(policy.attributes as Omit<
-      Policy,
-      "id" | "environment" | "payload" | "creator" | "updater"
-    >),
+    ...(policy.attributes as Omit<Policy, "id" | "environment" | "payload">),
     id: parseInt(policy.id),
-    creator: getPrincipalFromIncludedList(
-      policy.relationships!.creator.data,
-      includedList
-    ),
-    updater: getPrincipalFromIncludedList(
-      policy.relationships!.updater.data,
-      includedList
-    ),
     environment,
     payload: JSON.parse((policy.attributes.payload as string) || "{}"),
   };
+
+  // [GET]/api/policy/database/${databaseId}?type=${type} sometimes
+  // accidentally returns empty object with resourceId={databaseId} when the
+  // policy entity doesn't exist.
+  // So we need to rewrite the resourceId here to improve robustness.
+  if (result.id === UNKNOWN_ID) result.resourceId = UNKNOWN_ID;
+  if (result.id === EMPTY_ID) result.resourceId = EMPTY_ID;
+
   if (result.type === "bb.policy.pipeline-approval") {
     const payload = result.payload as PipelineApprovalPolicyPayload;
     if (!payload.assigneeGroupList) {
@@ -127,6 +125,18 @@ export const usePolicyStore = defineStore("policy", {
     async fetchPolicyListByType(type: PolicyType): Promise<Policy[]> {
       const data: { data: ResourceObject[]; included: ResourceObject[] } = (
         await axios.get(`/api/policy?type=${type}`)
+      ).data;
+
+      return data.data.map((d) => convert(d, data.included));
+    },
+    async fetchPolicyListByTypeAndResourceType(
+      type: PolicyType,
+      resourceType: ResourceType
+    ): Promise<Policy[]> {
+      const data: { data: ResourceObject[]; included: ResourceObject[] } = (
+        await axios.get(
+          `/api/policy?type=${type}&resourceType=${resourceType.toLowerCase()}`
+        )
       ).data;
 
       return data.data.map((d) => convert(d, data.included));

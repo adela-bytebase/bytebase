@@ -16,14 +16,11 @@ import {
 } from "@/types";
 import { randomString } from "@/utils";
 import { useAuthStore } from "./auth";
+import { getUserNameWithUserId } from "./user";
 
 function convert(principal: ResourceObject): Principal {
   return {
     id: parseInt(principal.id),
-    creatorId: principal.attributes.creatorId as PrincipalId,
-    createdTs: principal.attributes.createdTs as number,
-    updaterId: principal.attributes.updaterId as PrincipalId,
-    updatedTs: principal.attributes.updatedTs as number,
     type: principal.attributes.type as PrincipalType,
     name: principal.attributes.name as string,
     email: principal.attributes.email as string,
@@ -116,7 +113,7 @@ export const usePrincipalStore = defineStore("principal", {
               type: "PrincipalCreate",
               attributes: {
                 name: newPrincipal.name,
-                email: newPrincipal.email,
+                email: newPrincipal.email.toLowerCase(),
                 password: randomString(),
                 type: newPrincipal.type,
               },
@@ -149,7 +146,9 @@ export const usePrincipalStore = defineStore("principal", {
 
       this.upsertPrincipalInList(updatedPrincipal);
 
-      useAuthStore().refreshUserIfNeeded(updatedPrincipal.id);
+      await useAuthStore().refreshUserIfNeeded(
+        getUserNameWithUserId(updatedPrincipal.id as number)
+      );
 
       return updatedPrincipal;
     },

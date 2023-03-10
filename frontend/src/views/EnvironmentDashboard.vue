@@ -12,7 +12,7 @@
       >
         <div class="flex items-center">
           {{ item.title }}
-          <ProtectedEnvironmentIcon :environment="item.data!" class="ml-1" />
+          <ProductionEnvironmentIcon :environment="item.data!" class="ml-1" />
         </div>
       </template>
 
@@ -53,7 +53,7 @@
   >
     <EnvironmentForm
       :create="true"
-      :environment="DEFAULT_NEW_ENVIRONMENT"
+      :environment="getEnvironmentCreate()"
       :approval-policy="(DEFAULT_NEW_APPROVAL_POLICY as any)"
       :backup-policy="(DEFAULT_NEW_BACKUP_PLAN_POLICY as any)"
       :environment-tier-policy="(DEFAULT_NEW_ENVIRONMENT_TIER_POLICY as any)"
@@ -72,8 +72,7 @@
 <script lang="ts" setup>
 import { onMounted, computed, reactive, watch } from "vue";
 import { useRouter } from "vue-router";
-import { isEqual } from "lodash-es";
-import { array_swap } from "../utils";
+import { arraySwap } from "../utils";
 import EnvironmentDetail from "../views/EnvironmentDetail.vue";
 import EnvironmentForm from "../components/EnvironmentForm.vue";
 import type {
@@ -81,7 +80,9 @@ import type {
   EnvironmentCreate,
   Policy,
   PolicyUpsert,
+  PipelineApprovalPolicyPayload,
   BackupPlanPolicyPayload,
+  EnvironmentTierPolicyPayload,
 } from "../types";
 import {
   DefaultApprovalPolicy,
@@ -97,11 +98,9 @@ import {
   useEnvironmentStore,
   useEnvironmentList,
 } from "@/store";
-import ProtectedEnvironmentIcon from "../components/Environment/ProtectedEnvironmentIcon.vue";
-
-const DEFAULT_NEW_ENVIRONMENT: EnvironmentCreate = {
-  name: "New Env",
-};
+import ProductionEnvironmentIcon from "../components/Environment/ProductionEnvironmentIcon.vue";
+import { useEnvironmentV1Store } from "@/store/modules/v1/environment";
+import { environmentTierFromJSON } from "@/types/proto/v1/environment_service";
 
 // The default value should be consistent with the GetDefaultPolicy from the backend.
 const DEFAULT_NEW_APPROVAL_POLICY: PolicyUpsert = {
@@ -115,6 +114,7 @@ const DEFAULT_NEW_APPROVAL_POLICY: PolicyUpsert = {
 const DEFAULT_NEW_BACKUP_PLAN_POLICY: PolicyUpsert = {
   payload: {
     schedule: DefaultSchedulePolicy,
+    retentionPeriodTs: 0,
   },
 };
 
@@ -135,6 +135,7 @@ interface LocalState {
 }
 
 const environmentStore = useEnvironmentStore();
+const environmentV1Store = useEnvironmentV1Store();
 const uiStateStore = useUIStateStore();
 const policyStore = usePolicyStore();
 const router = useRouter();
@@ -215,19 +216,27 @@ const tabItemList = computed((): BBTabItem[] => {
   return [];
 });
 
+const getEnvironmentCreate = (): EnvironmentCreate => {
+  return {
+    name: "",
+    resourceId: "",
+  };
+};
+
 const createEnvironment = () => {
   stopReorder();
   state.showCreateModal = true;
 };
 
-const doCreate = (
+const doCreate = async (
   newEnvironment: EnvironmentCreate,
   approvalPolicy: Policy,
   backupPolicy: Policy,
   environmentTierPolicy: Policy
 ) => {
   if (
-    !isEqual(approvalPolicy, DEFAULT_NEW_APPROVAL_POLICY) &&
+    (approvalPolicy.payload as PipelineApprovalPolicyPayload).value ===
+      "MANUAL_APPROVAL_NEVER" &&
     !hasFeature("bb.feature.approval-policy")
   ) {
     state.missingRequiredFeature = "bb.feature.approval-policy";
@@ -242,30 +251,53 @@ const doCreate = (
     return;
   }
 
-  environmentStore
-    .createEnvironment(newEnvironment)
-    .then((environment: Environment) => {
-      Promise.all([
-        policyStore.upsertPolicyByEnvironmentAndType({
-          environmentId: environment.id,
-          type: "bb.policy.pipeline-approval",
-          policyUpsert: { payload: approvalPolicy.payload },
-        }),
-        policyStore.upsertPolicyByEnvironmentAndType({
-          environmentId: environment.id,
-          type: "bb.policy.backup-plan",
-          policyUpsert: { payload: backupPolicy.payload },
-        }),
-        policyStore.upsertPolicyByEnvironmentAndType({
-          environmentId: environment.id,
-          type: "bb.policy.environment-tier",
-          policyUpsert: { payload: environmentTierPolicy.payload },
-        }),
-      ]).then(() => {
-        state.showCreateModal = false;
-        selectEnvironment(environmentList.value.length - 1);
-      });
-    });
+  const environmentTierPayload =
+    environmentTierPolicy.payload as EnvironmentTierPolicyPayload;
+  const environment = await environmentV1Store.createEnvironment({
+    name: newEnvironment.resourceId,
+    title: newEnvironment.name,
+    order: environmentList.value.length,
+    tier: environmentTierFromJSON(environmentTierPayload.environmentTier),
+  });
+  // After creating with v1 store, we need to fetch the latest data in old store.
+  // TODO(steven): using grpc store.
+  await environmentStore.fetchEnvironmentList();
+
+  const requests = [
+    policyStore.upsertPolicyByEnvironmentAndType({
+      environmentId: environment.uid,
+      type: "bb.policy.pipeline-approval",
+      policyUpsert: { payload: approvalPolicy.payload },
+    }),
+    policyStore.upsertPolicyByEnvironmentAndType({
+      environmentId: environment.uid,
+      type: "bb.policy.backup-plan",
+      policyUpsert: { payload: backupPolicy.payload },
+    }),
+    policyStore.upsertPolicyByEnvironmentAndType({
+      environmentId: environment.uid,
+      type: "bb.policy.environment-tier",
+      policyUpsert: { payload: environmentTierPayload },
+    }),
+    policyStore.upsertPolicyByEnvironmentAndType({
+      environmentId: environment.uid,
+      type: "bb.policy.access-control",
+      policyUpsert: {
+        inheritFromParent: false,
+        payload: {
+          disallowRuleList: [
+            {
+              fullDatabase:
+                environmentTierPayload.environmentTier === "PROTECTED",
+            },
+          ],
+        },
+      },
+    }),
+  ];
+  await Promise.all(requests);
+  state.showCreateModal = false;
+  selectEnvironment(environment.order);
 };
 
 const startReorder = () => {
@@ -279,7 +311,7 @@ const stopReorder = () => {
 };
 
 const reorderEnvironment = (sourceIndex: number, targetIndex: number) => {
-  array_swap(state.reorderedEnvironmentList, sourceIndex, targetIndex);
+  arraySwap(state.reorderedEnvironmentList, sourceIndex, targetIndex);
   selectEnvironment(targetIndex);
 };
 

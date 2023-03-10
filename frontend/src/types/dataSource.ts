@@ -16,6 +16,10 @@ export type DataSourceType = "ADMIN" | "RW" | "RO";
 // DataSourceOptions is the options for a data source.
 export type DataSourceOptions = {
   srv: boolean;
+  authenticationDatabase: string;
+  // sid and serviceName are used for Oracle database. Required one of them.
+  sid: string;
+  serviceName: string;
 };
 
 export type DataSource = {
@@ -25,25 +29,18 @@ export type DataSource = {
   databaseId: DatabaseId;
   instanceId: InstanceId;
 
-  // Standard fields
-  creator: Principal;
-  createdTs: number;
-  updater: Principal;
-  updatedTs: number;
-
   // Domain specific fields
   name: string;
   type: DataSourceType;
   // In mysql, username can be empty which means anonymous user
-  username?: string;
+  username: string;
   password?: string;
   sslCa?: string;
   sslCert?: string;
   sslKey?: string;
-
-  // hostOverride and portOverride are only used for read-only data sources for user's read-replica instances.
-  hostOverride: string;
-  portOverride: string;
+  host: string;
+  port: string;
+  database: string;
 
   options: DataSourceOptions;
   // UI-only fields
@@ -58,13 +55,15 @@ export type DataSourceCreate = {
   // Domain specific fields
   name: string;
   type: DataSourceType;
-  username?: string;
+  username: string;
   password?: string;
   sslCa?: string;
   sslCert?: string;
   sslKey?: string;
-  hostOverride: string;
-  portOverride: string;
+  host: string;
+  port: string;
+  database: string;
+  options: DataSourceOptions;
 };
 
 export type DataSourcePatch = {
@@ -76,8 +75,9 @@ export type DataSourcePatch = {
   sslCa?: string;
   sslCert?: string;
   sslKey?: string;
-  hostOverride?: string;
-  portOverride?: string;
+  host?: string;
+  port?: string;
+  database?: string;
   options?: DataSourceOptions;
 };
 

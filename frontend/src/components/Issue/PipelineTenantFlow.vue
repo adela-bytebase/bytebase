@@ -1,10 +1,6 @@
 <template>
   <div class="divide-y">
-    <PipelineStageList>
-      <template #task-name-of-stage="{ stage }">
-        {{ taskNameOfStage(stage) }}
-      </template>
-    </PipelineStageList>
+    <PipelineStageList />
 
     <div class="relative">
       <div
@@ -22,20 +18,24 @@
           :class="taskClass(task)"
           @click="onClickTask(task, j)"
         >
-          <div class="flex items-center pb-1">
-            <TaskStatusIcon
-              :create="create"
-              :active="isActiveTask(task)"
-              :status="task.status"
-              class="transform scale-75"
-            />
-            <heroicons-solid:arrow-narrow-right
-              v-if="isActiveTask(task)"
-              class="name w-5 h-5"
-            />
-            <div class="name">
-              {{ j + 1 }} - {{ databaseForTask(task).name }}
+          <div class="flex items-center justify-between pb-1">
+            <div class="flex flex-1 items-center gap-x-1">
+              <TaskStatusIcon
+                :create="create"
+                :active="isActiveTask(task)"
+                :status="task.status"
+                :task="task"
+                class="transform scale-75"
+              />
+              <div class="name flex-1 space-x-1 overflow-x-hidden">
+                <heroicons-solid:arrow-narrow-right
+                  v-if="isActiveTask(task)"
+                  class="w-5 h-5 inline-block"
+                />
+                <span>{{ j + 1 }} - {{ databaseForTask(task).name }}</span>
+              </div>
             </div>
+            <TaskExtraActionsButton :task="(task as Task)" />
           </div>
           <div class="flex items-center justify-between px-1 py-1">
             <div class="flex flex-1 items-center whitespace-pre-wrap">
@@ -45,7 +45,6 @@
                 >{{ instanceName(databaseForTask(task).instance) }}</span
               >
             </div>
-            <TaskMarkAsDoneButton :task="(task as Task)" />
           </div>
         </div>
       </div>
@@ -63,9 +62,9 @@ import type {
   TaskCreate,
   Database,
 } from "@/types";
-import { activeTask, activeTaskInStage, taskSlug } from "@/utils";
+import { activeTask, taskSlug } from "@/utils";
 import TaskStatusIcon from "./TaskStatusIcon.vue";
-import TaskMarkAsDoneButton from "./TaskMarkAsDoneButton.vue";
+import TaskExtraActionsButton from "./TaskExtraActionsButton.vue";
 import { useDatabaseStore } from "@/store";
 import { useIssueLogic } from "./logic";
 import { useVerticalScrollState } from "@/composables/useScrollState";
@@ -108,20 +107,6 @@ const selectedStageIdOrIndex = computed(() => {
   );
 });
 
-const taskNameOfStage = (stage: Stage | StageCreate) => {
-  if (create.value) {
-    return stage.taskList[0].status;
-  }
-  const activeTask = activeTaskInStage(stage as Stage);
-  const { taskList } = stage as Stage;
-  for (let i = 0; i < stage.taskList.length; i++) {
-    if (taskList[i].id == activeTask.id) {
-      return `${activeTask.name} (${i + 1}/${stage.taskList.length})`;
-    }
-  }
-  return activeTask.name;
-};
-
 const taskClass = (task: Task | TaskCreate) => {
   const classes: string[] = [];
   if (isSelectedTask(task)) classes.push("selected");
@@ -146,7 +131,7 @@ const onClickTask = (task: Task | TaskCreate, index: number) => {
   @apply border-info;
 }
 .task .name {
-  @apply ml-1 overflow-x-hidden whitespace-nowrap overflow-ellipsis;
+  @apply whitespace-pre-wrap break-all;
 }
 .task.active .name {
   @apply font-bold;

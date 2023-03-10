@@ -1,48 +1,86 @@
 <template>
-  <div class="grid auto-rows-auto w-full h-full overflow-y-auto">
-    <div
-      class="pt-3 pl-1 w-full flex justify-start items-center border-b border-b-gray-300"
-    >
-      <span
-        class="-mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none"
-        :class="
-          state.selectedTab === 'table-list' &&
-          'bg-white border-gray-300 text-gray-800'
-        "
-        @click="handleChangeTab('table-list')"
-        >{{ $t("schema-editor.table-list") }}</span
-      >
-      <span
-        class="hidden -mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none"
-        :class="
-          state.selectedTab === 'er-diagram' &&
-          'bg-white border-gray-300 text-gray-800'
-        "
-        @click="handleChangeTab('er-diagram')"
-        >ER Diagram</span
-      >
-      <span
-        class="-mb-px px-3 leading-9 rounded-t-md text-sm text-gray-500 border border-b-0 border-transparent cursor-pointer select-none"
-        :class="
-          state.selectedTab === 'raw-sql' &&
-          'bg-white border-gray-300 text-gray-800'
-        "
-        @click="handleChangeTab('raw-sql')"
-        >{{ $t("schema-editor.raw-sql") }}</span
-      >
+  <div class="flex flex-col w-full h-full overflow-y-auto">
+    <div class="py-2 w-full flex flex-row justify-between items-center">
+      <div>
+        <div
+          v-if="state.selectedSubtab === 'table-list'"
+          class="w-full flex justify-between items-center space-x-2"
+        >
+          <div class="flex flex-row justify-start items-center">
+            <div
+              v-if="shouldShowSchemaSelector"
+              class="ml-2 flex flex-row justify-start items-center mr-3 text-sm"
+            >
+              <span class="mr-1">Schema:</span>
+              <n-select
+                v-model:value="state.selectedSchemaId"
+                class="min-w-[8rem]"
+                :options="schemaSelectorOptionList"
+              />
+            </div>
+            <button
+              class="flex flex-row justify-center items-center border px-3 py-1 leading-6 rounded text-sm hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="!allowCreateTable"
+              @click="handleCreateNewTable"
+            >
+              <heroicons-outline:plus class="w-4 h-auto mr-1 text-gray-400" />
+              {{ $t("schema-editor.actions.create-table") }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-end items-center">
+        <NInput
+          v-if="state.selectedSubtab === 'table-list'"
+          v-model:value="searchPattern"
+          class="!w-48 mr-3"
+          :placeholder="$t('schema-editor.search-table')"
+        >
+          <template #prefix>
+            <heroicons-outline:search class="w-4 h-auto text-gray-300" />
+          </template>
+        </NInput>
+        <div
+          class="flex flex-row justify-end items-center bg-gray-100 p-1 rounded"
+        >
+          <button
+            class="px-2 leading-7 text-sm text-gray-500 cursor-pointer select-none rounded flex justify-center items-center"
+            :class="
+              state.selectedSubtab === 'table-list' &&
+              'bg-gray-200 text-gray-800'
+            "
+            @click="handleChangeTab('table-list')"
+          >
+            <heroicons-outline:queue-list class="inline w-4 h-auto mr-1" />
+            {{ $t("schema-editor.tables") }}
+          </button>
+          <button
+            class="px-2 leading-7 text-sm text-gray-500 cursor-pointer select-none rounded flex justify-center items-center"
+            :class="
+              state.selectedSubtab === 'raw-sql' && 'bg-gray-200 text-gray-800'
+            "
+            @click="handleChangeTab('raw-sql')"
+          >
+            <heroicons-outline:clipboard class="inline w-4 h-auto mr-1" />
+            {{ $t("schema-editor.raw-sql") }}
+          </button>
+          <button
+            class="px-2 leading-7 text-sm text-gray-500 cursor-pointer select-none rounded flex justify-center items-center"
+            :class="
+              state.selectedSubtab === 'schema-diagram' &&
+              'bg-gray-200 text-gray-800'
+            "
+            @click="handleChangeTab('schema-diagram')"
+          >
+            <SchemaDiagramIcon class="mr-1" />
+            {{ $t("schema-diagram.self") }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- List view -->
-    <template v-if="state.selectedTab === 'table-list'">
-      <div class="py-2 w-full flex justify-between items-center space-x-2">
-        <button
-          class="flex flex-row justify-center items-center border px-3 py-1 leading-6 rounded text-sm hover:bg-gray-100"
-          @click="handleCreateNewTable"
-        >
-          <heroicons-outline:plus class="w-4 h-auto mr-1 text-gray-400" />
-          {{ $t("schema-editor.actions.create-table") }}
-        </button>
-      </div>
+    <template v-if="state.selectedSubtab === 'table-list'">
       <!-- table list -->
       <div
         class="w-full h-auto grid auto-rows-auto border-y relative overflow-y-auto"
@@ -62,8 +100,8 @@
         <!-- table body -->
         <div class="w-full">
           <div
-            v-for="(table, index) in tableList"
-            :key="`${index}-${table.newName}`"
+            v-for="(table, index) in shownTableList"
+            :key="`${index}-${table.name}`"
             class="grid grid-cols-[repeat(6,_minmax(0,_1fr))_32px] text-sm even:bg-gray-50"
             :class="
               isDroppedTable(table) && 'text-red-700 !bg-red-50 opacity-70'
@@ -74,7 +112,7 @@
                 class="w-full cursor-pointer leading-6 my-2 hover:text-accent"
               >
                 <span @click="handleTableItemClick(table)">
-                  {{ table.newName }}
+                  {{ table.name }}
                 </span>
               </NEllipsis>
             </div>
@@ -117,11 +155,8 @@
         </div>
       </div>
     </template>
-    <template v-else-if="state.selectedTab === 'er-diagram'">
-      <!-- TODO: ER diagram placeholder -->
-    </template>
     <div
-      v-else-if="state.selectedTab === 'raw-sql'"
+      v-else-if="state.selectedSubtab === 'raw-sql'"
       class="w-full h-full overflow-y-auto"
     >
       <div
@@ -142,62 +177,141 @@
         </div>
       </template>
     </div>
+    <template v-else-if="state.selectedSubtab === 'schema-diagram'">
+      <SchemaDiagram
+        :key="currentTab.databaseId"
+        :database="database"
+        :database-metadata="databaseMetadata"
+        :schema-status="schemaStatus"
+        :table-status="tableStatus"
+        :column-status="columnStatus"
+        :editable="true"
+        @edit-table="tryEditTable"
+        @edit-column="tryEditColumn"
+      />
+    </template>
   </div>
 
   <TableNameModal
     v-if="state.tableNameModalContext !== undefined"
     :database-id="state.tableNameModalContext.databaseId"
+    :schema-id="state.tableNameModalContext.schemaId"
     :table-name="state.tableNameModalContext.tableName"
     @close="state.tableNameModalContext = undefined"
   />
 </template>
 
 <script lang="ts" setup>
+import { head } from "lodash-es";
 import { NEllipsis } from "naive-ui";
-import { computed, reactive, watch } from "vue";
+import scrollIntoView from "scroll-into-view-if-needed";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   generateUniqueTabId,
-  useDatabaseStore,
   useNotificationStore,
   useSchemaEditorStore,
 } from "@/store";
-import { DatabaseId, DatabaseTabContext, SchemaEditorTabType } from "@/types";
+import {
+  DatabaseId,
+  DatabaseTabContext,
+  DatabaseSchema,
+  SchemaEditorTabType,
+  DatabaseEdit,
+} from "@/types";
 import { Table } from "@/types/schemaEditor/atomType";
 import { bytesToString } from "@/utils";
+import {
+  checkHasSchemaChanges,
+  diffSchema,
+  mergeDiffResults,
+} from "@/utils/schemaEditor/diffSchema";
 import HighlightCodeBlock from "@/components/HighlightCodeBlock";
 import TableNameModal from "../Modals/TableNameModal.vue";
-import { diffTableList } from "@/utils/schemaEditor/diffTable";
+import { SchemaDiagram, SchemaDiagramIcon } from "@/components/SchemaDiagram";
+import { useMetadataForDiagram } from "../utils/useMetadataForDiagram";
+import {
+  ColumnMetadata,
+  SchemaMetadata,
+  TableMetadata,
+} from "@/types/proto/store/database";
 
-type TabType = "table-list" | "er-diagram" | "raw-sql";
+type SubtabType = "table-list" | "schema-diagram" | "raw-sql";
 
 interface LocalState {
-  selectedTab: TabType;
+  selectedSubtab: SubtabType;
+  selectedSchemaId: string;
   isFetchingDDL: boolean;
   statement: string;
   tableNameModalContext?: {
     databaseId: DatabaseId;
+    schemaId: string;
     tableName: string | undefined;
   };
 }
 
 const { t } = useI18n();
 const editorStore = useSchemaEditorStore();
-const databaseStore = useDatabaseStore();
 const notificationStore = useNotificationStore();
+const searchPattern = ref("");
+const currentTab = computed(() => editorStore.currentTab as DatabaseTabContext);
 const state = reactive<LocalState>({
-  selectedTab: "table-list",
+  selectedSubtab:
+    (currentTab.value.selectedSubtab as SubtabType) || "table-list",
+  selectedSchemaId: "",
   isFetchingDDL: false,
   statement: "",
 });
-const currentTab = editorStore.currentTab as DatabaseTabContext;
-const database = databaseStore.getDatabaseById(currentTab.databaseId);
-
-const tableList = computed(() => {
-  return editorStore.tableList.filter(
-    (table) => table.databaseId === currentTab.databaseId
+const databaseSchema = computed(() => {
+  return editorStore.databaseSchemaById.get(
+    currentTab.value.databaseId
+  ) as DatabaseSchema;
+});
+const database = databaseSchema.value.database;
+const databaseEngine = database.instance.engine;
+const schemaList = computed(() => {
+  return databaseSchema.value.schemaList;
+});
+const selectedSchema = computed(() => {
+  return schemaList.value.find(
+    (schema) => schema.id === state.selectedSchemaId
   );
 });
+const tableList = computed(() => {
+  return selectedSchema.value?.tableList ?? [];
+});
+const shownTableList = computed(() => {
+  return tableList.value.filter((table) =>
+    table.name.includes(searchPattern.value.trim())
+  );
+});
+
+const shouldShowSchemaSelector = computed(() => {
+  return databaseEngine === "POSTGRES";
+});
+
+const allowCreateTable = computed(() => {
+  if (databaseEngine === "POSTGRES") {
+    return (
+      schemaList.value.length > 0 &&
+      selectedSchema.value &&
+      selectedSchema.value.status !== "dropped"
+    );
+  }
+  return true;
+});
+
+const schemaSelectorOptionList = computed(() => {
+  const optionList = [];
+  for (const schema of schemaList.value) {
+    optionList.push({
+      label: schema.name,
+      value: schema.id,
+    });
+  }
+  return optionList;
+});
+
 const tableHeaderList = computed(() => {
   return [
     {
@@ -228,48 +342,84 @@ const tableHeaderList = computed(() => {
 });
 
 watch(
-  () => state.selectedTab,
+  [() => currentTab.value, () => schemaList],
+  () => {
+    const schemaIdList = schemaList.value.map((schema) => schema.id);
+    if (
+      currentTab.value &&
+      currentTab.value.selectedSchemaId &&
+      schemaIdList.includes(currentTab.value.selectedSchemaId)
+    ) {
+      state.selectedSchemaId = currentTab.value.selectedSchemaId;
+    } else {
+      state.selectedSchemaId = head(schemaIdList) || "";
+    }
+  },
+  {
+    immediate: true,
+    deep: true,
+  }
+);
+
+watch(
+  () => state.selectedSubtab,
   async () => {
-    if (state.selectedTab === "raw-sql") {
+    currentTab.value.selectedSubtab = state.selectedSubtab;
+    if (state.selectedSubtab === "raw-sql") {
       state.isFetchingDDL = true;
-      const originTableList = editorStore.originTableList.filter(
-        (table) => table.databaseId === database.id
-      );
-      const updatedTableList =
-        await editorStore.getOrFetchTableListByDatabaseId(database.id);
-      const diffTableListResult = diffTableList(
-        originTableList,
-        updatedTableList
-      );
-      if (
-        diffTableListResult.createTableList.length > 0 ||
-        diffTableListResult.alterTableList.length > 0 ||
-        diffTableListResult.renameTableList.length > 0 ||
-        diffTableListResult.dropTableList.length > 0
-      ) {
-        const databaseEdit = {
-          databaseId: database.id,
-          ...diffTableListResult,
-        };
-        const databaseEditResult = await editorStore.postDatabaseEdit(
-          databaseEdit
+      const databaseEditList: DatabaseEdit[] = [];
+      for (const schema of databaseSchema.value.schemaList) {
+        const originSchema = databaseSchema.value.originSchemaList.find(
+          (originSchema) => originSchema.id === schema.id
         );
-        if (databaseEditResult.validateResultList.length > 0) {
-          notificationStore.pushNotification({
-            module: "bytebase",
-            style: "CRITICAL",
-            title: "Invalid request",
-            description: databaseEditResult.validateResultList
-              .map((result) => result.message)
-              .join("\n"),
-          });
-          state.statement = "";
-          return;
+        const diffSchemaResult = diffSchema(database.id, originSchema, schema);
+        if (checkHasSchemaChanges(diffSchemaResult)) {
+          const index = databaseEditList.findIndex(
+            (edit) => edit.databaseId === database.id
+          );
+          if (index !== -1) {
+            databaseEditList[index] = {
+              databaseId: database.id,
+              ...mergeDiffResults([diffSchemaResult, databaseEditList[index]]),
+            };
+          } else {
+            databaseEditList.push({
+              databaseId: database.id,
+              ...diffSchemaResult,
+            });
+          }
         }
-        state.statement = databaseEditResult.statement;
+      }
+
+      if (databaseEditList.length > 0) {
+        const statementList: string[] = [];
+        for (const databaseEdit of databaseEditList) {
+          const databaseEditResult = await editorStore.postDatabaseEdit(
+            databaseEdit
+          );
+          if (databaseEditResult.validateResultList.length > 0) {
+            notificationStore.pushNotification({
+              module: "bytebase",
+              style: "CRITICAL",
+              title: "Invalid request",
+              description: databaseEditResult.validateResultList
+                .map((result) => result.message)
+                .join("\n"),
+            });
+            state.statement = "";
+            return;
+          }
+          statementList.push(databaseEditResult.statement);
+        }
+        state.statement = statementList.join("\n");
+      } else {
+        state.statement = "";
       }
       state.isFetchingDDL = false;
     }
+  },
+  {
+    immediate: true,
   }
 );
 
@@ -277,15 +427,21 @@ const isDroppedTable = (table: Table) => {
   return table.status === "dropped";
 };
 
-const handleChangeTab = (tab: TabType) => {
-  state.selectedTab = tab;
+const handleChangeTab = (tab: SubtabType) => {
+  state.selectedSubtab = tab;
 };
 
 const handleCreateNewTable = () => {
-  state.tableNameModalContext = {
-    databaseId: database.id,
-    tableName: undefined,
-  };
+  const selectedSchema = schemaList.value.find(
+    (schema) => schema.id === state.selectedSchemaId
+  );
+  if (selectedSchema) {
+    state.tableNameModalContext = {
+      databaseId: database.id,
+      schemaId: selectedSchema.id,
+      tableName: undefined,
+    };
+  }
 };
 
 const handleTableItemClick = (table: Table) => {
@@ -293,16 +449,63 @@ const handleTableItemClick = (table: Table) => {
     id: generateUniqueTabId(),
     type: SchemaEditorTabType.TabForTable,
     databaseId: database.id,
-    tableName: table.newName,
+    schemaId: state.selectedSchemaId,
+    tableId: table.id,
   });
 };
 
 const handleDropTable = (table: Table) => {
-  editorStore.dropTable(table);
+  editorStore.dropTable(database.id, state.selectedSchemaId, table.id);
 };
 
 const handleRestoreTable = (table: Table) => {
-  editorStore.restoreTable(table);
+  editorStore.restoreTable(database.id, state.selectedSchemaId, table.id);
+};
+
+const {
+  databaseMetadata,
+  schemaStatus,
+  tableStatus,
+  columnStatus,
+  editableSchema,
+  editableTable,
+  editableColumn,
+} = useMetadataForDiagram(databaseSchema);
+
+const tryEditTable = async (
+  schemaMeta: SchemaMetadata,
+  tableMeta: TableMetadata
+) => {
+  const schema = editableSchema(schemaMeta);
+  const table = editableTable(tableMeta);
+  if (schema && table) {
+    state.selectedSchemaId = schema.id;
+    await nextTick();
+    handleTableItemClick(table);
+  }
+};
+
+const tryEditColumn = async (
+  schemaMeta: SchemaMetadata,
+  tableMeta: TableMetadata,
+  columnMeta: ColumnMetadata,
+  target: "name" | "type"
+) => {
+  const schema = editableSchema(schemaMeta);
+  const table = editableTable(tableMeta);
+  const column = editableColumn(columnMeta);
+  if (schema && table && column) {
+    await tryEditTable(schemaMeta, tableMeta);
+    await nextTick();
+    const container = document.querySelector("#table-editor-container");
+    const input = container?.querySelector(
+      `.column-${column.id} .column-${target}-input`
+    ) as HTMLInputElement | undefined;
+    if (input) {
+      input.focus();
+      scrollIntoView(input);
+    }
+  }
 };
 </script>
 

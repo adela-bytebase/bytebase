@@ -1,13 +1,11 @@
+import { RemovableRef } from "@vueuse/core";
 import {
-  AuthProvider,
   DeploymentConfig,
   EnvironmentId,
   MigrationHistoryId,
   Policy,
   PolicyType,
   QueryHistory,
-  View,
-  DBExtension,
   Sheet,
   OnboardingGuideType,
   PolicyResourceType,
@@ -44,19 +42,20 @@ import { Project } from "./project";
 import { ProjectWebhook } from "./projectWebhook";
 import { Repository } from "./repository";
 import { Setting, SettingName } from "./setting";
-import { Table } from "./table";
 import { VCS } from "./vcs";
 import { Label } from "./label";
-import { ConnectionAtom } from "./sqlEditor";
+import { ReleaseInfo } from "./actuator";
 import type { DebugLog } from "@/types/debug";
+import type { AuditLog } from "@/types/auditLog";
+import { DatabaseMetadata } from "./proto/store/database";
 
 export interface ActuatorState {
   serverInfo?: ServerInfo;
+  releaseInfo: RemovableRef<ReleaseInfo>;
 }
 
-export interface AuthState {
-  authProviderList: AuthProvider[];
-  currentUser: Principal;
+export interface AuditLogState {
+  auditLogList: AuditLog[];
 }
 
 export interface SettingState {
@@ -148,16 +147,9 @@ export interface DatabaseState {
   databaseListByProjectId: Map<ProjectId, Database[]>;
 }
 
-export interface TableState {
-  tableListByDatabaseId: Map<DatabaseId, Table[]>;
-}
-
-export interface ViewState {
-  viewListByDatabaseId: Map<DatabaseId, View[]>;
-}
-
-export interface DBExtensionState {
-  dbExtensionListByDatabaseId: Map<DatabaseId, DBExtension[]>;
+export interface DBSchemaState {
+  requestCache: Map<DatabaseId, Promise<DatabaseMetadata>>;
+  databaseMetadataById: Map<DatabaseId, DatabaseMetadata>;
 }
 
 export interface BackupState {
@@ -173,7 +165,7 @@ export interface VCSState {
 }
 
 export interface RepositoryState {
-  // repositoryListByVCSId are used in workspace version control panel, while repositoryByProjectId are used in project version control panel.
+  // repositoryListByVCSId are used in workspace GitOps panel, while repositoryByProjectId are used in project GitOps panel.
   // Because they are used separately, so we don't need to worry about repository inconsistency issue between them.
   repositoryListByVCSId: Map<VCSId, Repository[]>;
   repositoryByProjectId: Map<ProjectId, Repository>;
@@ -194,20 +186,7 @@ export interface LabelState {
   labelList: Label[];
 }
 
-export enum ConnectionTreeState {
-  UNSET,
-  LOADING,
-  LOADED,
-}
-
 export interface SQLEditorState {
-  accessControlPolicyList: Policy[];
-  connectionTree: {
-    data: ConnectionAtom[];
-    state: ConnectionTreeState;
-  };
-  expandedTreeNodeKeys: string[];
-  selectedTable: Table;
   shouldFormatContent: boolean;
   queryHistoryList: QueryHistory[];
   isFetchingQueryHistory: boolean;

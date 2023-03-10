@@ -64,12 +64,13 @@
 import { computed, ComputedRef, defineComponent, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
+import { useTitle } from "@vueuse/core";
+
 import { Bookmark, UNKNOWN_ID, BookmarkCreate, RouteMapList } from "../types";
 import { idFromSlug } from "../utils";
 import {
   useCurrentUser,
   useRouterStore,
-  useUIStateStore,
   useBookmarkStore,
   useDatabaseStore,
   useProjectStore,
@@ -95,6 +96,8 @@ export default defineComponent({
 
     const currentUser = useCurrentUser();
     const projectStore = useProjectStore();
+
+    const documentTitle = useTitle(null, { observe: true });
 
     const routeHelpNameMapList = ref<RouteMapList>([]);
     const helpName = computed(
@@ -123,6 +126,7 @@ export default defineComponent({
     const allowBookmark = computed(() => currentRoute.value.meta.allowBookmark);
 
     const breadcrumbList = computed(() => {
+      const route = currentRoute.value;
       const routeSlug = routerStore.routeSlug(currentRoute.value);
       const environmentSlug = routeSlug.environmentSlug;
       const projectSlug = routeSlug.projectSlug;
@@ -132,8 +136,9 @@ export default defineComponent({
       const tableName = routeSlug.tableName;
       const dataSourceSlug = routeSlug.dataSourceSlug;
       const migrationHistory = routeSlug.migrationHistorySlug;
-      const versionControlSlug = routeSlug.vcsSlug;
+      const vcsSlug = routeSlug.vcsSlug;
       const sqlReviewPolicySlug = routeSlug.sqlReviewPolicySlug;
+      const ssoName = routeSlug.ssoName;
 
       const list: Array<BreadcrumbItem> = [];
       if (environmentSlug) {
@@ -175,31 +180,49 @@ export default defineComponent({
           });
           if (migrationHistory) {
             list.push({
-              name: t("common.migration"),
-              path: `/db/${databaseSlug}#migration-history`,
+              name: t("common.change"),
+              path: `/db/${databaseSlug}#change-history`,
             });
           }
         }
-      } else if (versionControlSlug) {
+      } else if (vcsSlug) {
         list.push({
-          name: t("common.version-control"),
-          path: "/setting/version-control",
+          name: t("common.gitops"),
+          path: "/setting/gitops",
         });
       } else if (sqlReviewPolicySlug) {
         list.push({
           name: t("sql-review.title"),
           path: "/setting/sql-review",
         });
+      } else if (ssoName) {
+        if (route.name !== "setting.workspace.sso.create") {
+          list.push({
+            name: t("settings.sidebar.sso"),
+            path: "/setting/sso",
+          });
+        }
       }
 
-      const { title, overrideBreadcrumb } = currentRoute.value.meta;
+      const {
+        title: routeTitle,
+        overrideTitle,
+        overrideBreadcrumb,
+      } = route.meta;
+
+      // Dynamic title priorities
+      // 1. documentTitle - if (overrideTitle === true)
+      // 2. routeTitle - if (routeTitle !== undefined)
+      // 3. nothing - otherwise
+      const title = overrideTitle
+        ? documentTitle.value ?? ""
+        : routeTitle?.(route) ?? "";
       if (title) {
-        const route = currentRoute.value;
         if (overrideBreadcrumb && overrideBreadcrumb(route)) {
           list.length = 0; // empty the array
         }
         list.push({
-          name: title(route),
+          name: title,
           // Set empty path for the current route to make the link not clickable.
           // We do this because clicking the current route path won't trigger reload and would
           // confuse user since UI won't change while we may have cleared all query parameters.
@@ -218,12 +241,7 @@ export default defineComponent({
           name: breadcrumbList.value[breadcrumbList.value.length - 1].name,
           link: currentRoute.value.path,
         };
-        bookmarkStore.createBookmark(newBookmark).then(() => {
-          useUIStateStore().saveIntroStateByKey({
-            key: "bookmark.create",
-            newState: true,
-          });
-        });
+        bookmarkStore.createBookmark(newBookmark);
       }
     };
 

@@ -16,21 +16,29 @@ import {
   shallowRef,
   PropType,
   onBeforeUnmount,
+  watchEffect,
 } from "vue";
 import type { editor as Editor } from "monaco-editor";
-import { Database, SQLDialect, Table } from "@/types";
+import { Database, Language, SQLDialect } from "@/types";
+import { TableMetadata } from "@/types/proto/store/database";
 import { MonacoHelper, useMonaco } from "./useMonaco";
 import { useLineDecorations } from "./lineDecorations";
 import type { useLanguageClient } from "@sql-lsp/client";
+import type { AdviceOption } from "./types";
+import { useAdvices } from "./plugins/useAdvices";
 
 const props = defineProps({
   value: {
     type: String,
     required: true,
   },
+  language: {
+    type: String as PropType<Language>,
+    default: "sql",
+  },
   dialect: {
     type: String as PropType<SQLDialect>,
-    default: "mysql",
+    default: "MYSQL",
   },
   readonly: {
     type: Boolean,
@@ -39,6 +47,10 @@ const props = defineProps({
   autoFocus: {
     type: Boolean,
     default: true,
+  },
+  advices: {
+    type: Array as PropType<AdviceOption[]>,
+    default: () => [],
   },
   options: {
     type: Object as PropType<Editor.IStandaloneEditorConstructionOptions>,
@@ -68,9 +80,11 @@ const initEditorInstance = () => {
   const { monaco, formatContent, setPositionAtEndOfLine } =
     monacoInstanceRef.value!;
 
-  const model = monaco.editor.createModel(sqlCode.value, "sql");
+  const model = monaco.editor.createModel(sqlCode.value);
   const editorInstance = monaco.editor.create(editorContainerRef.value!, {
     model,
+    // Learn more: https://github.com/microsoft/monaco-editor/issues/311
+    renderValidationDecorations: "on",
     theme: "bb",
     tabSize: 2,
     insertSpaces: true,
@@ -99,22 +113,81 @@ const initEditorInstance = () => {
     ...props.options,
   });
 
-  // add `Format SQL` action into context menu
-  editorInstance.addAction({
-    id: "format-sql",
-    label: "Format SQL",
-    keybindings: [
-      monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
-    ],
-    contextMenuGroupId: "operation",
-    contextMenuOrder: 1,
-    run: () => {
-      if (readOnly.value) {
-        return;
-      }
-      formatContent(editorInstance, dialect.value);
-      nextTick(() => setPositionAtEndOfLine(editorInstance));
-    },
+  const defaultSuggestOption = {
+    ...editorInstance.getOption(monaco.editor.EditorOption.suggest),
+  };
+
+  watchEffect((onCleanup) => {
+    const { language } = props;
+
+    monaco.editor.setModelLanguage(model, language);
+
+    if (props.language === "sql") {
+      editorInstance.updateOptions({
+        suggest: defaultSuggestOption,
+      });
+
+      // add `Format SQL` action into context menu
+      const action = editorInstance.addAction({
+        id: "format-sql",
+        label: "Format SQL",
+        keybindings: [
+          monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+        ],
+        contextMenuGroupId: "operation",
+        contextMenuOrder: 1,
+        run: () => {
+          if (readOnly.value) {
+            return;
+          }
+          formatContent(editorInstance, dialect.value);
+          nextTick(() => setPositionAtEndOfLine(editorInstance));
+        },
+      });
+      onCleanup(() => {
+        action.dispose();
+      });
+    } else {
+      // Disable auto-complete suggestions for javascript language (MongoDB)
+      editorInstance.updateOptions({
+        suggest: {
+          showConstants: false,
+          showFunctions: false,
+          showInterfaces: false,
+          showClasses: false,
+          showConstructors: false,
+          showColors: false,
+          showDeprecated: false,
+          showEnumMembers: false,
+          showEnums: false,
+          showEvents: false,
+          showFields: false,
+          showFiles: false,
+          showFolders: false,
+          showIcons: false,
+          showInlineDetails: false,
+          showIssues: false,
+          showKeywords: false,
+          showMethods: false,
+          showModules: false,
+          showOperators: false,
+          showProperties: false,
+          showReferences: false,
+          showSnippets: false,
+          showStatusBar: false,
+          showStructs: false,
+          showTypeParameters: false,
+          showUnits: false,
+          showUsers: false,
+          showValues: false,
+          showVariables: false,
+          showWords: false,
+        },
+      });
+
+      // When the language is "javascript", we can still use Alt+Shift+F to
+      // format the document (the native feature of monaco-editor).
+    }
   });
 
   // typed something, change the text
@@ -182,6 +255,8 @@ onMounted(async () => {
     editorInstance.focus();
     nextTick(() => setPositionAtEndOfLine(editorInstance));
   }
+
+  useAdvices(editorInstance, toRef(props, "advices"));
 
   isEditorLoaded.value = true;
 
@@ -282,22 +357,23 @@ const formatEditorContent = () => {
 };
 
 const setEditorAutoCompletionContext = (
-  databases: Database[],
-  tables: Table[]
+  databaseMap: Map<Database, TableMetadata[]>
 ) => {
-  languageClientRef.value?.changeSchema({
-    databases: databases.map((db) => ({
-      name: db.name,
-      tables: tables
-        .filter((table) => table.database.id === db.id)
-        .map((table) => ({
-          database: db.name,
-          name: table.name,
-          columns: table.columnList.map((col) => ({
-            name: col.name,
-          })),
+  const databases = [];
+  for (const [database, tableList] of databaseMap) {
+    databases.push({
+      name: database.name,
+      tables: tableList.map((table) => ({
+        database: database.name,
+        name: table.name,
+        columns: table.columns.map((column) => ({
+          name: column.name,
         })),
-    })),
+      })),
+    });
+  }
+  languageClientRef.value?.changeSchema({
+    databases: databases,
   });
 };
 

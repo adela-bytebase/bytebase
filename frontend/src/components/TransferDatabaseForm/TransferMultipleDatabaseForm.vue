@@ -1,10 +1,12 @@
 <template>
-  <div class="px-4 space-y-6 w-208">
+  <div class="px-4 space-y-6 w-[60rem]">
     <slot name="transfer-source-selector" />
 
     <DatabaseTable
+      class="overflow-y-auto"
+      style="max-height: calc(100vh - 400px)"
+      table-class="border"
       :mode="transferSource === 'DEFAULT' ? 'PROJECT_SHORT' : 'ALL_SHORT'"
-      :bordered="true"
       :custom-click="true"
       :database-list="databaseList"
       :show-selection-column="true"
@@ -35,6 +37,7 @@
         />
       </template>
     </DatabaseTable>
+
     <!-- Update button group -->
     <div class="pt-4 border-t border-block-border flex justify-between">
       <div>

@@ -23,7 +23,7 @@
             :tab-item-list="tabItemList"
             :selected-index="state.selectedIndex"
             @select-index="
-              (index) => {
+              (index: number) => {
                 state.selectedIndex = index;
               }
             "
@@ -45,7 +45,10 @@
               {{ $t("common.sync-now") }}
             </button>
             <button
-              v-if="instance.rowStatus == 'NORMAL'"
+              v-if="
+                instance.rowStatus == 'NORMAL' &&
+                instanceHasCreateDatabase(instance)
+              "
               type="button"
               class="btn-primary"
               @click.prevent="createDatabase"
@@ -54,11 +57,21 @@
             </button>
           </div>
         </div>
-        <DatabaseTable
-          v-if="state.selectedIndex == DATABASE_TAB"
-          :mode="'INSTANCE'"
-          :database-list="databaseList"
-        />
+        <div v-if="state.selectedIndex == DATABASE_TAB">
+          <div class="mb-2 pl-4">
+            <BBCheckbox
+              :title="$t('database.show-missing-databases')"
+              :value="state.showMissingDatabases"
+              @toggle="state.showMissingDatabases = $event"
+            />
+          </div>
+          <DatabaseTable
+            mode="INSTANCE"
+            :scroll-on-page-change="false"
+            :show-missing-databases="state.showMissingDatabases"
+            :database-list="databaseList"
+          />
+        </div>
         <InstanceUserTable
           v-else-if="state.selectedIndex == USER_TAB"
           :instance-user-list="instanceUserList"
@@ -108,7 +121,7 @@
     :title="$t('instance.create-migration-schema') + '?'"
     :description="
       $t(
-        'instance.bytebase-relies-on-migration-schema-to-manage-version-control-based-schema-migration-for-databases-belonged-to-this-instance'
+        'instance.bytebase-relies-on-migration-schema-to-manage-gitops-based-schema-migration-for-databases-belonged-to-this-instance'
       )
     "
     :in-progress="state.creatingMigrationSchema"
@@ -140,7 +153,11 @@
 
 <script lang="ts" setup>
 import { computed, reactive, watchEffect } from "vue";
-import { idFromSlug, hasWorkspacePermission } from "../utils";
+import {
+  idFromSlug,
+  hasWorkspacePermission,
+  instanceHasCreateDatabase,
+} from "../utils";
 import ArchiveBanner from "../components/ArchiveBanner.vue";
 import DatabaseTable from "../components/DatabaseTable.vue";
 import DataSourceTable from "../components/DataSourceTable.vue";
@@ -164,6 +181,7 @@ import {
   useInstanceStore,
   useSubscriptionStore,
   useSQLStore,
+  useDBSchemaStore,
 } from "@/store";
 
 const DATABASE_TAB = 0;
@@ -177,6 +195,7 @@ interface LocalState {
   showCreateDatabaseModal: boolean;
   syncingSchema: boolean;
   showFeatureModal: boolean;
+  showMissingDatabases: boolean;
 }
 
 const props = defineProps({
@@ -201,6 +220,7 @@ const state = reactive<LocalState>({
   showCreateDatabaseModal: false,
   syncingSchema: false,
   showFeatureModal: false,
+  showMissingDatabases: false,
 });
 
 const instance = computed((): Instance => {
@@ -233,7 +253,7 @@ const attentionText = computed((): string => {
   if (state.migrationSetupStatus == "NOT_EXIST") {
     return (
       t(
-        "instance.bytebase-relies-on-migration-schema-to-manage-version-control-based-schema-migration-for-databases-belonged-to-this-instance"
+        "instance.bytebase-relies-on-migration-schema-to-manage-gitops-based-schema-migration-for-databases-belonged-to-this-instance"
       ) +
       (hasWorkspacePermission(
         "bb.permission.workspace.manage-instance",
@@ -245,7 +265,7 @@ const attentionText = computed((): string => {
   } else if (state.migrationSetupStatus == "UNKNOWN") {
     return (
       t(
-        "instance.bytebase-relies-on-migration-schema-to-manage-version-control-based-schema-migration-for-databases-belonged-to-this-instance"
+        "instance.bytebase-relies-on-migration-schema-to-manage-gitops-based-schema-migration-for-databases-belonged-to-this-instance"
       ) +
       (hasWorkspacePermission(
         "bb.permission.workspace.manage-instance",
@@ -362,9 +382,8 @@ const doArchive = () => {
 };
 
 const doRestore = () => {
-  const { subscription } = subscriptionStore;
   const instanceList = instanceStore.getInstanceList(["NORMAL"]);
-  if ((subscription?.instanceCount ?? 0) <= instanceList.length) {
+  if (subscriptionStore.instanceCount <= instanceList.length) {
     state.showFeatureModal = true;
     return;
   }
@@ -445,6 +464,16 @@ const syncSchema = () => {
           description: resultSet.error,
         });
       }
+
+      // Clear the db schema metadata cache entities.
+      // So we will re-fetch new values when needed.
+      const dbSchemaStore = useDBSchemaStore();
+      const databaseList = useDatabaseStore().getDatabaseListByInstanceId(
+        instance.value.id
+      );
+      databaseList.forEach((database) =>
+        dbSchemaStore.removeCacheByDatabaseId(database.id)
+      );
     })
     .catch(() => {
       state.syncingSchema = false;

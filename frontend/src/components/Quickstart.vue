@@ -1,14 +1,14 @@
 <template>
-  <div class="space-y-2 w-full pl-4 pr-2">
+  <div class="space-y-2 w-full py-2 pl-4 pr-2 bg-yellow-50">
     <div class="flex flex-row justify-between">
       <div class="outline-title group toplevel flex">
-        {{ $t("common.quickstart") }}
+        🎈 {{ $t("common.quickstart") }}
       </div>
       <button class="btn-icon" @click.prevent="hideQuickstart">
         <heroicons-solid:x class="w-4 h-4" />
       </button>
     </div>
-    <nav class="flex justify-center" aria-label="Progress">
+    <nav class="flex justify-center py-2" aria-label="Progress">
       <ol class="space-y-4 w-full">
         <li v-for="(intro, index) in introList" :key="index">
           <!-- Complete Task -->
@@ -24,7 +24,7 @@
               <span
                 class="flex-shrink-0 relative h-5 w-5 flex items-center justify-center"
               >
-                <template v-if="intro.done">
+                <template v-if="intro.done.value">
                   <!-- Heroicon name: solid/check-circle -->
                   <heroicons-solid:check-circle
                     class="h-full w-full text-success group-hover:text-success-hover"
@@ -46,7 +46,7 @@
               </span>
               <span
                 class="ml-2 text-sm font-medium text-control-light group-hover:text-control-light-hover"
-                :class="intro.done ? 'line-through' : ''"
+                :class="intro.done.value ? 'line-through' : ''"
                 >{{ intro.name }}</span
               >
             </span>
@@ -82,16 +82,9 @@ export default defineComponent({
 
     const introList: IntroItem[] = [
       {
-        name: computed(() => t("quick-start.bookmark-an-issue")),
-        link: "/issue/hello-world-101",
-        done: computed(() =>
-          uiStateStore.getIntroStateByKey("bookmark.create")
-        ),
-      },
-      {
-        name: computed(() => t("quick-start.add-a-comment")),
-        link: "/issue/hello-world-101#activity14001",
-        done: computed(() => uiStateStore.getIntroStateByKey("comment.create")),
+        name: computed(() => t("quick-start.view-an-issue")),
+        link: "/issue/101",
+        done: computed(() => uiStateStore.getIntroStateByKey("issue.visit")),
       },
       {
         name: computed(() => t("quick-start.visit-project")),
@@ -164,11 +157,11 @@ export default defineComponent({
 
     const isTaskActive = (index: number): boolean => {
       for (let i = index - 1; i >= 0; i--) {
-        if (!introList[i].done) {
+        if (!introList[i].done.value) {
           return false;
         }
       }
-      return !introList[index].done;
+      return !introList[index].done.value;
     };
 
     const hideQuickstart = () => {

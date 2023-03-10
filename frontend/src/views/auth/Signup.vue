@@ -2,11 +2,11 @@
   <div class="mx-auto w-full max-w-sm">
     <div>
       <img
-        class="h-12 w-auto"
+        class="h-12 w-auto mx-auto mb-8"
         src="../../assets/logo-full.svg"
         alt="Bytebase"
       />
-      <h2 class="mt-6 text-3xl leading-9 font-extrabold text-main">
+      <h2 class="text-2xl leading-9 font-medium text-main">
         <template v-if="needAdminSetup">
           <i18n-t
             keypath="auth.sign-up.admin-title"
@@ -227,8 +227,13 @@ import {
 } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
-import { useActuatorStore, useAuthStore } from "@/store";
-import { SignupInfo, TEXT_VALIDATION_DELAY } from "@/types";
+import {
+  useActuatorStore,
+  useAuthStore,
+  useOnboardingStateStore,
+  useSubscriptionStore,
+} from "@/store";
+import { SignupInfo, PlanType, TEXT_VALIDATION_DELAY } from "@/types";
 import { isValidEmail } from "@/utils";
 import AuthFooter from "./AuthFooter.vue";
 
@@ -249,6 +254,7 @@ export default defineComponent({
   components: { AuthFooter },
   setup() {
     const actuatorStore = useActuatorStore();
+    const subscriptionStore = useSubscriptionStore();
     const router = useRouter();
 
     const state = reactive<LocalState>({
@@ -268,14 +274,15 @@ export default defineComponent({
       }
     });
 
-    const { needAdminSetup } = storeToRefs(actuatorStore);
+    const { needAdminSetup, disallowSignup } = storeToRefs(actuatorStore);
 
     const allowSignup = computed(() => {
       return (
         isValidEmail(state.email) &&
         state.password &&
         !state.showPasswordMismatchError &&
-        state.acceptTermsAndPolicy
+        state.acceptTermsAndPolicy &&
+        !disallowSignup.value
       );
     });
 
@@ -313,7 +320,8 @@ export default defineComponent({
     };
 
     const onTextEmail = () => {
-      const email = state.email.trim();
+      const email = state.email.trim().toLowerCase();
+      state.email = email;
       if (!state.nameManuallyEdited) {
         const emailParts = email.split("@");
         if (emailParts.length > 0) {
@@ -342,7 +350,7 @@ export default defineComponent({
       state.acceptTermsAndPolicy = !state.acceptTermsAndPolicy;
     };
 
-    const trySignup = () => {
+    const trySignup = async () => {
       if (!passwordMatch.value) {
         state.showPasswordMismatchError = true;
       } else {
@@ -351,16 +359,23 @@ export default defineComponent({
           password: state.password,
           name: state.name,
         };
-        useAuthStore()
-          .signup(signupInfo)
-          .then(async () => {
-            // we need to update the server info after setting up the first admin account so that the splash screen
-            // won't display the UI for registering the first admin account again.
-            if (needAdminSetup.value) {
-              await actuatorStore.fetchServerInfo();
-            }
-            router.push("/");
-          });
+        await useAuthStore().signup(signupInfo);
+        if (needAdminSetup.value) {
+          await Promise.all([
+            actuatorStore.fetchServerInfo(),
+            (async function () {
+              if (subscriptionStore.canTrial) {
+                await subscriptionStore.trialSubscription(PlanType.ENTERPRISE);
+              }
+            })(),
+          ]);
+          // When the first time we created an end user, the server-side will
+          // generate onboarding data.
+          // We write a flag here to indicate that the workspace is just created
+          // and we can consume this flag somewhere else if needed.
+          useOnboardingStateStore().initialize();
+        }
+        router.replace("/");
       }
     };
 

@@ -20,6 +20,11 @@ export function idFromSlug(slug: string): IdType {
   return parseInt(parts[parts.length - 1]);
 }
 
+export function migrationHistoryIdFromSlug(slug: string): MigrationHistoryId {
+  const parts = slug.split("-").slice(1);
+  return parts.join("-");
+}
+
 export function indexFromSlug(slug: string): number {
   const parts = slug.split("-");
   return parseInt(parts[parts.length - 1]) - 1;
@@ -54,7 +59,7 @@ export function stageSlug(stageName: string, stageIndex: number): string {
   return [slug(stageName), stageIndex + 1].join("-");
 }
 
-export function taskSlug(name: string, id: number): string {
+export function taskSlug(name: string, id: IdType): string {
   return [slug(name), id].join("-");
 }
 

@@ -26,7 +26,6 @@ import {
   UNKNOWN_ID,
 } from "@/types";
 import { InstanceUser } from "@/types/InstanceUser";
-import { getPrincipalFromIncludedList } from "./principal";
 import { useEnvironmentStore } from "./environment";
 import { useDataSourceStore } from "./dataSource";
 import { useSQLStore } from "./sql";
@@ -53,17 +52,9 @@ function convert(
   const instancePartial = {
     ...(instance.attributes as Omit<
       Instance,
-      "id" | "environment" | "dataSourceList" | "creator" | "updater"
+      "id" | "environment" | "dataSourceList"
     >),
     id: parseInt(instance.id),
-    creator: getPrincipalFromIncludedList(
-      instance.relationships!.creator.data,
-      includedList
-    ),
-    updater: getPrincipalFromIncludedList(
-      instance.relationships!.updater.data,
-      includedList
-    ),
     environment,
     dataSourceList: [],
   };
@@ -102,7 +93,7 @@ function convert(
 function convertInstanceUser(instanceUser: ResourceObject): InstanceUser {
   return {
     ...(instanceUser.attributes as Omit<InstanceUser, "id">),
-    id: parseInt(instanceUser.id),
+    id: instanceUser.id,
   };
 }
 
@@ -115,7 +106,7 @@ function convertMigrationHistory(history: ResourceObject): MigrationHistory {
       MigrationHistory,
       "id" | "issueId" | "payload"
     >),
-    id: parseInt(history.id),
+    id: history.id,
     // This issueId is special since it's stored in the migration history table
     // and may refer to the issueId from the external system in the future.
     issueId: parseInt(history.attributes.issueId as string),
@@ -148,7 +139,7 @@ export const useInstanceStore = defineStore("instance", {
         }
       }
       return list.sort((a: Instance, b: Instance) => {
-        return b.createdTs - a.createdTs;
+        return b.id - a.id;
       });
     },
     getInstanceListByEnvironmentId(
@@ -376,17 +367,20 @@ export const useInstanceStore = defineStore("instance", {
     async fetchMigrationHistoryById({
       instanceId,
       migrationHistoryId,
+      sdl,
     }: {
       instanceId: InstanceId;
       migrationHistoryId: MigrationHistoryId;
+      sdl?: boolean;
     }) {
+      let url = `/api/instance/${instanceId}/migration/history/${migrationHistoryId}`;
+      if (sdl) {
+        url += "?sdl=true";
+      }
       const data = (
-        await axios.get(
-          `/api/instance/${instanceId}/migration/history/${migrationHistoryId}`,
-          {
-            timeout: INSTANCE_OPERATION_TIMEOUT,
-          }
-        )
+        await axios.get(url, {
+          timeout: INSTANCE_OPERATION_TIMEOUT,
+        })
       ).data;
       const migrationHistory = convertMigrationHistory(data.data);
 
@@ -462,13 +456,13 @@ export const useInstanceStore = defineStore("instance", {
 
       return historyList;
     },
-    async createEmbeddedPostgresInstance() {
+    async getSamplePostgresInstance() {
       const data = (
-        await axios.post<{
+        await axios.get<{
           host: string;
           port: number;
           username: string;
-        }>("/api/instance/new-embedded-pg")
+        }>("/api/instance/sample-pg")
       ).data;
 
       return data;

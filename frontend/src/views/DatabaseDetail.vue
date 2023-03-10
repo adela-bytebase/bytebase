@@ -1,5 +1,9 @@
 <template>
-  <div class="flex-1 overflow-auto focus:outline-none" tabindex="0">
+  <div
+    class="flex-1 overflow-auto focus:outline-none"
+    tabindex="0"
+    v-bind="$attrs"
+  >
     <main class="flex-1 relative overflow-y-auto">
       <!-- Highlight Panel -->
       <div
@@ -15,7 +19,7 @@
                 >
                   {{ database.name }}
 
-                  <ProtectedEnvironmentIcon
+                  <ProductionEnvironmentIcon
                     :environment="database.instance.environment"
                     tooltip
                     class="w-5 h-5"
@@ -72,40 +76,20 @@
                 >{{ projectName(database.project) }}</router-link
               >
             </dd>
-            <template v-if="database.sourceBackup">
-              <dt class="sr-only">{{ $t("db.parent") }}</dt>
-              <dd class="flex items-center text-sm md:mr-4 tooltip-wrapper">
-                <span class="textlabel">{{
-                  $t("database.restored-from")
-                }}</span>
-                <router-link
-                  :to="`/db/${database.sourceBackup.databaseId}`"
-                  class="normal-link"
-                >
-                  <!-- Do not display the name of the backup's database because that requires a fetch  -->
-                  <span class="tooltip">
-                    {{
-                      $t(
-                        "database.database-name-is-restored-from-another-database-backup",
-                        [database.name]
-                      )
-                    }}
-                  </span>
-                  {{ $t("database.database-backup") }}
-                </router-link>
-              </dd>
-            </template>
+            <SQLEditorButton
+              class="text-sm md:mr-4"
+              :database="database"
+              :label="true"
+              :disabled="!allowQuery"
+              @failed="handleGotoSQLEditorFailed"
+            />
             <dd
-              class="flex items-center text-sm md:mr-4"
-              :class="
-                allowQuery
-                  ? ['textlabel cursor-pointer hover:text-accent']
-                  : ['text-gray-400 cursor-not-allowed']
-              "
-              @click.prevent="gotoSQLEditor"
+              v-if="hasSchemaDiagramFeature"
+              class="flex items-center text-sm md:mr-4 textlabel cursor-pointer hover:text-accent"
+              @click.prevent="state.showSchemaDiagram = true"
             >
-              <span class="mr-1">{{ $t("sql-editor.self") }}</span>
-              <heroicons-solid:terminal class="w-5 h-5" />
+              <span class="mr-1">{{ $t("schema-diagram.self") }}</span>
+              <SchemaDiagramIcon />
             </dd>
             <DatabaseLabelProps
               :label-list="database.labels"
@@ -151,23 +135,15 @@
             class="btn-normal"
             @click="createMigration('bb.issue.database.data.update')"
           >
-            <span>{{ changeDataText }}</span>
-            <heroicons-outline:external-link
-              v-if="database.project.workflowType == 'VCS'"
-              class="-mr-1 ml-2 h-5 w-5 text-control-light"
-            />
+            <span>{{ $t("database.change-data") }}</span>
           </button>
           <button
-            v-if="allowAlterSchemaOrChangeData"
+            v-if="allowAlterSchema"
             type="button"
             class="btn-normal"
             @click="createMigration('bb.issue.database.schema.update')"
           >
-            <span>{{ alterSchemaText }}</span>
-            <heroicons-outline:external-link
-              v-if="database.project.workflowType == 'VCS'"
-              class="-mr-1 ml-2 h-5 w-5 text-control-light"
-            />
+            <span>{{ $t("database.alter-schema") }}</span>
           </button>
         </div>
       </div>
@@ -233,7 +209,7 @@
           class="mt-4"
           @next="doTransfer"
         >
-          <template #buttons="{ next, valid }">
+          <template #buttons="{ next }">
             <div
               class="w-full pt-4 mt-6 flex justify-end border-t border-block-border"
             >
@@ -251,9 +227,7 @@
               <button
                 type="button"
                 class="btn-primary ml-3 inline-flex justify-center py-2 px-4"
-                :disabled="
-                  !valid || state.editingProjectId == database.project.id
-                "
+                :disabled="state.editingProjectId == database.project.id"
                 @click.prevent="next"
               >
                 {{ $t("common.transfer") }}
@@ -295,9 +269,28 @@
 
   <GhostDialog ref="ghostDialog" />
 
+  <BBModal
+    v-if="state.showSchemaDiagram"
+    :title="$t('schema-diagram.self')"
+    class="h-[calc(100vh-40px)] !max-h-[calc(100vh-40px)]"
+    header-class="!border-0"
+    container-class="flex-1 !pt-0"
+    @close="state.showSchemaDiagram = false"
+  >
+    <div class="w-[80vw] h-full">
+      <SchemaDiagram
+        :database="database"
+        :database-metadata="
+          dbSchemaStore.getDatabaseMetadataByDatabaseId(database.id)
+        "
+      />
+    </div>
+  </BBModal>
+
   <SchemaEditorModal
     v-if="state.showSchemaEditorModal"
     :database-id-list="[database.id]"
+    alter-type="SINGLE_DB"
     @close="state.showSchemaEditorModal = false"
   />
 </template>
@@ -314,7 +307,6 @@ import { DatabaseLabelProps } from "@/components/DatabaseLabels";
 import { SelectDatabaseLabel } from "@/components/TransferDatabaseForm";
 import {
   idFromSlug,
-  connectionSlug,
   hasProjectPermission,
   hasWorkspacePermission,
   hidePrefix,
@@ -323,13 +315,13 @@ import {
   isDatabaseAccessible,
   allowUsingSchemaEditor,
   isArchivedDatabase,
+  instanceHasBackupRestore,
+  instanceHasAlterSchema,
 } from "@/utils";
 import {
   ProjectId,
   UNKNOWN_ID,
   DEFAULT_PROJECT_ID,
-  Repository,
-  baseDirectoryWebUrl,
   Database,
   DatabaseLabel,
   SQLResultSet,
@@ -337,12 +329,14 @@ import {
 import { BBTabFilterItem } from "@/bbkit/types";
 import { useI18n } from "vue-i18n";
 import { GhostDialog } from "@/components/AlterSchemaPrepForm";
+import { SchemaDiagram, SchemaDiagramIcon } from "@/components/SchemaDiagram";
+import { SQLEditorButton } from "@/components/DatabaseDetail";
 import {
   pushNotification,
   useCurrentUser,
   useDatabaseStore,
+  useDBSchemaStore,
   usePolicyByDatabaseAndType,
-  useRepositoryStore,
   useSQLStore,
 } from "@/store";
 import dayjs from "dayjs";
@@ -363,6 +357,7 @@ interface LocalState {
   editingProjectId: ProjectId;
   selectedIndex: number;
   syncingSchema: boolean;
+  showSchemaDiagram: boolean;
 }
 
 const props = defineProps({
@@ -372,16 +367,16 @@ const props = defineProps({
   },
 });
 
-const databaseStore = useDatabaseStore();
-const repositoryStore = useRepositoryStore();
-const sqlStore = useSQLStore();
-const router = useRouter();
 const { t } = useI18n();
+const router = useRouter();
+const databaseStore = useDatabaseStore();
+const dbSchemaStore = useDBSchemaStore();
+const sqlStore = useSQLStore();
 const ghostDialog = ref<InstanceType<typeof GhostDialog>>();
 
 const databaseTabItemList: DatabaseTabItem[] = [
   { name: t("common.overview"), hash: "overview" },
-  { name: t("migration-history.self"), hash: "migration-history" },
+  { name: t("change-history.self"), hash: "change-history" },
   { name: t("common.backup-and-restore"), hash: "backup-and-restore" },
 ];
 
@@ -392,12 +387,17 @@ const state = reactive<LocalState>({
   editingProjectId: UNKNOWN_ID,
   selectedIndex: OVERVIEW_TAB,
   syncingSchema: false,
+  showSchemaDiagram: false,
 });
 
 const currentUser = useCurrentUser();
 
 const database = computed((): Database => {
   return databaseStore.getDatabaseById(idFromSlug(props.databaseSlug));
+});
+
+const hasSchemaDiagramFeature = computed((): boolean => {
+  return instanceHasAlterSchema(database.value.instance);
 });
 
 const accessControlPolicy = usePolicyByDatabaseAndType(
@@ -519,26 +519,26 @@ const allowAlterSchemaOrChangeData = computed(() => {
   return allowEdit.value;
 });
 
+const allowAlterSchema = computed(() => {
+  return (
+    allowAlterSchemaOrChangeData.value &&
+    instanceHasAlterSchema(database.value.instance)
+  );
+});
+
 const allowEditDatabaseLabels = computed((): boolean => {
   // only allowed to edit database labels when allowAdmin
   return allowAdmin.value;
 });
 
-const alterSchemaText = computed(() => {
-  if (database.value.project.workflowType == "VCS") {
-    return t("database.alter-schema-in-vcs");
-  }
-  return t("database.alter-schema");
-});
-
-const changeDataText = computed(() => {
-  if (database.value.project.workflowType == "VCS") {
-    return t("database.change-data-in-vcs");
-  }
-  return t("database.change-data");
-});
-
 const tabItemList = computed((): BBTabFilterItem[] => {
+  if (!instanceHasBackupRestore(database.value.instance)) {
+    return databaseTabItemList
+      .filter((item) => item.hash !== "backup-and-restore")
+      .map((item) => {
+        return { title: item.name, alert: false };
+      });
+  }
   return databaseTabItemList.map((item) => {
     return { title: item.name, alert: false };
   });
@@ -575,66 +575,55 @@ const isUsingGhostMigration = async (databaseList: Database[]) => {
 const createMigration = async (
   type: "bb.issue.database.schema.update" | "bb.issue.database.data.update"
 ) => {
-  if (database.value.project.workflowType == "UI") {
-    let mode: "online" | "normal" | false = "normal";
-    if (type === "bb.issue.database.schema.update") {
-      if (allowUsingSchemaEditor([database.value])) {
-        state.showSchemaEditorModal = true;
-        return;
-      }
-
-      // Check and show a normal/online selection modal dialog if needed.
-      mode = await isUsingGhostMigration([database.value]);
-    }
-    if (mode === false) return;
-
-    // Create a user friendly default issue name
-    const issueNameParts: string[] = [];
-    issueNameParts.push(`[${database.value.name}]`);
-    if (mode === "online") {
-      issueNameParts.push("Online schema change");
-    } else {
-      issueNameParts.push(
-        type === "bb.issue.database.schema.update"
-          ? `Alter schema`
-          : `Change data`
-      );
-    }
-    const datetime = dayjs().format("@MM-DD HH:mm");
-    const tz = "UTC" + dayjs().format("ZZ");
-    issueNameParts.push(`${datetime} ${tz}`);
-
-    const query: Record<string, any> = {
-      template: type,
-      name: issueNameParts.join(" "),
-      project: database.value.project.id,
-      databaseList: database.value.id,
-    };
-    if (mode === "online") {
-      query.ghost = "1";
+  type AlterMode = "online" | "normal" | false;
+  let mode: AlterMode = "normal";
+  if (type === "bb.issue.database.schema.update") {
+    if (
+      database.value.syncStatus === "OK" &&
+      allowUsingSchemaEditor([database.value])
+    ) {
+      state.showSchemaEditorModal = true;
+      return;
     }
 
-    router.push({
-      name: "workspace.issue.detail",
-      params: {
-        issueSlug: "new",
-      },
-      query,
-    });
-  } else if (database.value.project.workflowType == "VCS") {
-    repositoryStore
-      .fetchRepositoryByProjectId(database.value.project.id)
-      .then((repository: Repository) => {
-        window.open(
-          baseDirectoryWebUrl(repository, {
-            DB_NAME: database.value.name,
-            ENV_NAME: database.value.instance.environment.name,
-            TYPE: type === "bb.issue.database.schema.update" ? "ddl" : "dml",
-          }),
-          "_blank"
-        );
-      });
+    // Check and show a normal/online selection modal dialog if needed.
+    mode = await isUsingGhostMigration([database.value]);
   }
+  if (mode === false) return;
+
+  // Create a user friendly default issue name
+  const issueNameParts: string[] = [];
+  issueNameParts.push(`[${database.value.name}]`);
+  if (mode === "online") {
+    issueNameParts.push("Online schema change");
+  } else {
+    issueNameParts.push(
+      type === "bb.issue.database.schema.update"
+        ? `Alter schema`
+        : `Change data`
+    );
+  }
+  const datetime = dayjs().format("@MM-DD HH:mm");
+  const tz = "UTC" + dayjs().format("ZZ");
+  issueNameParts.push(`${datetime} ${tz}`);
+
+  const query: Record<string, any> = {
+    template: type,
+    name: issueNameParts.join(" "),
+    project: database.value.project.id,
+    databaseList: database.value.id,
+  };
+  if (mode === "online") {
+    query.ghost = "1";
+  }
+
+  router.push({
+    name: "workspace.issue.detail",
+    params: {
+      issueSlug: "new",
+    },
+    query,
+  });
 };
 
 const updateProject = (newProjectId: ProjectId, labels?: DatabaseLabel[]) => {
@@ -686,25 +675,9 @@ const selectDatabaseTabOnHash = () => {
   }
 };
 
-const gotoSQLEditor = () => {
-  if (!allowQuery.value) {
-    return;
-  }
-
-  // SQL editors can only query databases in the projects available to the user.
-  if (
-    database.value.projectId === UNKNOWN_ID ||
-    database.value.projectId === DEFAULT_PROJECT_ID
-  ) {
-    state.editingProjectId = database.value.project.id;
-    state.showIncorrectProjectModal = true;
-  } else {
-    const url = `/sql-editor/${connectionSlug(
-      database.value.instance,
-      database.value
-    )}`;
-    window.open(url);
-  }
+const handleGotoSQLEditorFailed = () => {
+  state.editingProjectId = database.value.project.id;
+  state.showIncorrectProjectModal = true;
 };
 
 onMounted(() => {
@@ -752,6 +725,10 @@ const syncDatabaseSchema = () => {
           description: resultSet.error,
         });
       }
+      useDBSchemaStore().getOrFetchDatabaseMetadataById(
+        database.value.id,
+        true // skip cache
+      );
     })
     .catch(() => {
       state.syncingSchema = false;

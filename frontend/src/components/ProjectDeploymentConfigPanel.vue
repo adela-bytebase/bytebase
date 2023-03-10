@@ -10,6 +10,7 @@
         :deployment="state.deployment"
         :database-list="databaseList"
         :environment-list="environmentList"
+        show-search-box
       />
     </div>
 
@@ -20,12 +21,12 @@
       <i18n-t keypath="label.db-name-template-tips">
         <template #placeholder>
           <!-- prettier-ignore -->
-          <code v-pre class="text-xs font-mono bg-control-bg">{{DB_NAME}}</code>
+          <code v-pre class="text-xs font-mono bg-control-bg">{{DB_NAME}}__{{TENANT}}</code>
         </template>
         <template #link>
           <a
             class="normal-link inline-flex items-center"
-            href="https://www.bytebase.com/docs/tenant-database-management/overview#database-name-template?source=console"
+            href="https://www.bytebase.com/docs/batch-change/multi-tenant-change#database-name-template"
             target="__BLANK"
           >
             {{ $t("common.learn-more") }}
@@ -148,15 +149,14 @@ import {
   EMPTY_ID,
   DeploymentConfigPatch,
   LabelSelectorRequirement,
+  Database,
 } from "../types";
 import DeploymentConfigTool, { DeploymentMatrix } from "./DeploymentConfigTool";
 import { validateDeploymentConfig } from "../utils";
 import {
   pushNotification,
-  useDatabaseStore,
   useDeploymentStore,
   useEnvironmentList,
-  useEnvironmentStore,
   useProjectStore,
 } from "@/store";
 
@@ -176,13 +176,16 @@ export default defineComponent({
       required: true,
       type: Object as PropType<Project>,
     },
+    databaseList: {
+      type: Array as PropType<Database[]>,
+      default: () => [],
+    },
     allowEdit: {
       default: true,
       type: Boolean,
     },
   },
   setup(props) {
-    const databaseStore = useDatabaseStore();
     const deploymentStore = useDeploymentStore();
     const { t } = useI18n();
     const dialog = useDialog();
@@ -205,18 +208,7 @@ export default defineComponent({
       return true;
     });
 
-    const prepareList = () => {
-      useEnvironmentStore().fetchEnvironmentList();
-      databaseStore.fetchDatabaseListByProjectId(props.project.id);
-    };
-
     const environmentList = useEnvironmentList();
-
-    const databaseList = computed(() =>
-      databaseStore.getDatabaseListByProjectId(props.project.id)
-    );
-
-    watchEffect(prepareList);
 
     const resetStates = async () => {
       await nextTick(); // Waiting for all watchers done
@@ -245,7 +237,7 @@ export default defineComponent({
         values: [],
       };
       if (environmentList.value.length > 0) {
-        rule.values.push(environmentList.value[0].name);
+        rule.values.push(environmentList.value[0].resourceId);
       }
 
       state.deployment.schedule.deployments.push({
@@ -358,7 +350,6 @@ export default defineComponent({
       isDeploymentConfigDirty,
       allowUpdateDeploymentConfig,
       environmentList,
-      databaseList,
       addStage,
       revertDeploymentConfig,
       updateDeploymentConfig,

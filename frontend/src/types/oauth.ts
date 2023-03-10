@@ -1,5 +1,4 @@
 import { VCSType } from ".";
-import { randomString } from "../utils";
 
 export type OAuthConfig = {
   endpoint: string;
@@ -14,7 +13,7 @@ export type OAuthToken = {
   refreshToken: string;
 };
 
-export const OAuthStateSessionKey = "oauthstate";
+export const OAuthStateSessionKey = "oauth-state";
 
 export type OAuthWindowEventPayload = {
   error: string;
@@ -41,10 +40,10 @@ export function openWindowForOAuth(
   vcsType: VCSType
 ): Window | null {
   // we use type to determine oauth type when receiving the callback
-  const stateQueryParameter = `${type}-${randomString(20)}`;
+  const stateQueryParameter = `${type}.${vcsType}-${applicationId}`;
   sessionStorage.setItem(OAuthStateSessionKey, stateQueryParameter);
 
-  if (vcsType == "GITHUB_COM") {
+  if (vcsType == "GITHUB") {
     // GitHub OAuth App scopes: https://docs.github.com/en/developers/apps/building-oauth-apps/scopes-for-oauth-apps
     // We need the workflow scope to update GitHub action files.
     return window.open(
@@ -55,7 +54,7 @@ export function openWindowForOAuth(
       "location=yes,left=200,top=200,height=640,width=480,scrollbars=yes,status=yes"
     );
   }
-  // GITLAB_SELF_HOST
+  // GITLAB
   // GitLab OAuth App scopes: https://docs.gitlab.com/ee/integration/oauth_provider.html#authorized-applications
   return window.open(
     `${endpoint}?client_id=${applicationId}&redirect_uri=${encodeURIComponent(

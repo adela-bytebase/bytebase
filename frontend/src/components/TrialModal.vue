@@ -16,21 +16,17 @@
           <template #plan>
             <span class="font-bold text-accent">
               {{
-                $t(`subscription.plan.${planTypeToString(PlanType.TEAM)}.title`)
+                $t(
+                  `subscription.plan.${planTypeToString(
+                    PlanType.ENTERPRISE
+                  )}.title`
+                )
               }}
             </span>
           </template>
         </i18n-t>
       </p>
       <div class="mt-7 flex justify-end space-x-2">
-        <button
-          type="button"
-          class="btn-normal"
-          @click.prevent="$emit('cancel')"
-        >
-          {{ $t("common.dismiss") }}
-        </button>
-
         <button
           v-if="subscriptionStore.canTrial"
           type="button"
@@ -72,7 +68,7 @@ const learnMore = () => {
 };
 
 const trialSubscription = () => {
-  subscriptionStore.trialSubscription(PlanType.TEAM).then(() => {
+  subscriptionStore.trialSubscription(PlanType.ENTERPRISE).then(() => {
     pushNotification({
       module: "bytebase",
       style: "SUCCESS",

@@ -5,6 +5,7 @@ import {
   IssueId,
   PrincipalId,
   ProjectId,
+  SheetId,
   TaskId,
 } from "./id";
 import { Pipeline, PipelineCreate } from "./pipeline";
@@ -35,6 +36,7 @@ export type IssueStatus = "OPEN" | "DONE" | "CANCELED";
 export type CreateDatabaseContext = {
   instanceId: InstanceId;
   databaseName: string;
+  tableName: string;
   // Only applicable to PostgreSQL for "WITH OWNER <<owner>>"
   owner: string;
   characterSet: string;
@@ -47,10 +49,12 @@ export type CreateDatabaseContext = {
 
 export type MigrationDetail = {
   migrationType: MigrationType;
-  databaseId: DatabaseId;
-  databaseName: string;
   statement: string;
+  sheetId?: SheetId;
   earliestAllowedTs: number;
+  databaseId?: DatabaseId;
+  rollbackEnabled?: boolean;
+  rollbackDetail?: RollbackDetail;
 };
 
 export type UpdateSchemaGhostDetail = MigrationDetail & {
@@ -58,12 +62,16 @@ export type UpdateSchemaGhostDetail = MigrationDetail & {
   // more input parameters in the future
 };
 
-export type MigrationContext = {
-  detailList: MigrationDetail[];
+// RollbackDetail is the detail for rolling back a task.
+export type RollbackDetail = {
+  // IssueID is the id of the issue to rollback.
+  issueId: IssueId;
+  // TaskID is the task id to rollback.
+  taskId: TaskId;
 };
 
-export type UpdateSchemaGhostContext = {
-  detailList: UpdateSchemaGhostDetail[];
+export type MigrationContext = {
+  detailList: MigrationDetail[];
 };
 
 export type PITRContext = {
@@ -73,22 +81,13 @@ export type PITRContext = {
   createDatabaseContext?: CreateDatabaseContext;
 };
 
-export type RollbackContext = {
-  // IssueID is the id of the issue to rollback.
-  issueId: IssueId;
-  // TaskIDList is the list of task ids to rollback.
-  taskIdList: TaskId[];
-};
-
 // eslint-disable-next-line @typescript-eslint/ban-types
 export type EmptyContext = {};
 
 export type IssueCreateContext =
   | CreateDatabaseContext
   | MigrationContext
-  | UpdateSchemaGhostContext
   | PITRContext
-  | RollbackContext
   | EmptyContext;
 
 export type IssuePayload = { [key: string]: any };

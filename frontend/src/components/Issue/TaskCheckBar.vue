@@ -3,6 +3,10 @@
     v-if="task.taskCheckRunList.length > 0"
     class="flex items-start space-x-4"
   >
+    <div class="textlabel h-[26px] inline-flex items-center">
+      {{ $t("task.task-checks") }}
+    </div>
+
     <TaskCheckBadgeBar
       :task-check-run-list="task.taskCheckRunList"
       @select-task-check-type="viewCheckRunDetail"
@@ -28,9 +32,11 @@
     <BBModal
       v-if="state.showModal"
       :title="$t('task.check-result.title', { name: task.name })"
+      class="!w-[56rem]"
+      header-class="whitespace-pre-wrap break-all gap-x-1"
       @close="dismissDialog"
     >
-      <div class="space-y-4 md:min-w-[40rem] max-w-[52rem]">
+      <div class="space-y-4">
         <div>
           <TaskCheckBadgeBar
             :task-check-run-list="task.taskCheckRunList"
@@ -53,6 +59,7 @@
         <TaskCheckRunPanel
           v-if="selectedTaskCheckRun"
           :task-check-run="selectedTaskCheckRun"
+          :task="task"
         />
         <div class="pt-4 flex justify-end">
           <button

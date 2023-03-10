@@ -57,9 +57,6 @@
         placeholder="e.g. main"
         :disabled="!allowEdit"
       />
-      <div class="mt-2 textinfolabel">
-        {{ $t("repository.branch-specify-tip") }}
-      </div>
     </div>
     <div>
       <div class="textlabel">{{ $t("repository.base-directory") }}</div>
@@ -76,7 +73,7 @@
       />
     </div>
     <!-- Project schemaChangeType selector -->
-    <div v-if="isDev">
+    <div>
       <div class="textlabel">
         {{ $t("project.settings.schema-change-type") }}
         <span class="text-red-600">*</span>
@@ -103,20 +100,20 @@
         </template>
       </BBSelect>
     </div>
-    <div v-if="isProjectSchemaChangeTypeDDL">
+    <div>
       <div class="textlabel">
         {{ $t("repository.file-path-template") }}
         <span class="text-red-600">*</span>
-        <a
-          href="https://bytebase.com/docs/vcs-integration/name-and-organize-schema-files#file-path-template?source=console"
-          target="__blank"
-          class="font-normal normal-link"
-        >
-          {{ $t("common.config-guide") }}</a
-        >
       </div>
       <div class="mt-1 textinfolabel">
         {{ $t("repository.file-path-template-description") }}
+        <a
+          href="https://www.bytebase.com/docs/vcs-integration/name-and-organize-schema-files#file-path-template?source=console"
+          target="_BLANK"
+          class="font-normal normal-link ml-1"
+        >
+          {{ $t("common.learn-more") }}</a
+        >
       </div>
       <input
         id="filepathtemplate"
@@ -137,7 +134,7 @@
         {{ $t("common.optional-directory-wildcard") }}:
         {{ FILE_OPTIONAL_DIRECTORY_WILDCARD }}
       </div>
-      <div class="mt-2 textinfolabel">
+      <div v-if="isProjectSchemaChangeTypeDDL" class="mt-2 textinfolabel">
         • {{ $t("repository.file-path-example-schema-migration") }}:
         {{
           sampleFilePath(
@@ -159,18 +156,16 @@
       </div>
     </div>
     <div>
-      <div class="textlabel">
+      <div class="textlabel flex gap-x-1">
         {{ $t("repository.schema-path-template") }}
-        <a
-          href="https://bytebase.com/docs/vcs-integration/name-and-organize-schema-files#schema-path-template?source=console"
-          target="__blank"
-          class="font-normal normal-link"
-        >
-          {{ $t("common.config-guide") }}</a
-        >
+        <span v-if="isProjectSchemaChangeTypeSDL" class="text-red-600">*</span>
+        <FeatureBadge
+          feature="bb.feature.vcs-schema-write-back"
+          class="text-accent"
+        />
       </div>
       <div class="mt-1 textinfolabel">
-        <template v-if="isDev && !isProjectSchemaChangeTypeDDL">
+        <template v-if="isProjectSchemaChangeTypeSDL">
           {{ $t("project.settings.schema-path-template-sdl-description") }}
         </template>
         <template v-else>
@@ -179,8 +174,16 @@
             $t("repository.schema-writeback-protected-branch")
           }}</span>
         </template>
+        <a
+          href="https://www.bytebase.com/docs/vcs-integration/name-and-organize-schema-files#schema-path-template?source=console"
+          target="_BLANK"
+          class="font-normal normal-link ml-1"
+        >
+          {{ $t("common.learn-more") }}</a
+        >
       </div>
       <input
+        v-if="hasFeature('bb.feature.vcs-schema-write-back')"
         id="schemapathtemplate"
         v-model="repositoryConfig.schemaPathTemplate"
         name="schemapathtemplate"
@@ -188,14 +191,17 @@
         class="textfield mt-2 w-full"
         :disabled="!allowEdit"
       />
-      <div class="mt-2 textinfolabel">
-        <span class="text-red-600">*</span> {{ $t("repository.if-specified") }},
-        {{ $t("common.required-placeholder") }}:
-        {{ SCHEMA_REQUIRED_PLACEHOLDER }};
-        <template v-if="schemaOptionalTagPlaceholder.length > 0">
-          {{ $t("common.optional-placeholder") }}:
-          {{ schemaOptionalTagPlaceholder.join(", ") }}
-        </template>
+      <input
+        v-else
+        type="text"
+        class="textfield mt-2 w-full"
+        :value="getRquiredPlanString('bb.feature.vcs-schema-write-back')"
+        :disabled="true"
+      />
+      <div v-if="schemaTagPlaceholder" class="mt-2 textinfolabel">
+        <span class="text-red-600">*</span>
+        <span class="ml-1">{{ $t("repository.if-specified") }},</span>
+        <span class="ml-1">{{ schemaTagPlaceholder }}</span>
       </div>
       <div
         v-if="repositoryConfig.schemaPathTemplate"
@@ -211,17 +217,31 @@
       </div>
     </div>
     <div>
-      <div class="textlabel">{{ $t("repository.sheet-path-template") }}</div>
+      <div class="textlabel flex gap-x-1">
+        {{ $t("repository.sheet-path-template")
+        }}<FeatureBadge
+          feature="bb.feature.vcs-sheet-sync"
+          class="text-accent"
+        />
+      </div>
       <div class="mt-1 textinfolabel">
         {{ $t("repository.sheet-path-template-description") }}
       </div>
       <input
+        v-if="hasFeature('bb.feature.vcs-sheet-sync')"
         id="sheetpathtemplate"
         v-model="repositoryConfig.sheetPathTemplate"
         name="sheetpathtemplate"
         type="text"
         class="textfield mt-2 w-full"
         :disabled="!allowEdit"
+      />
+      <input
+        v-else
+        type="text"
+        class="textfield mt-2 w-full"
+        :value="getRquiredPlanString('bb.feature.vcs-sheet-sync')"
+        :disabled="true"
       />
       <div class="mt-2 textinfolabel capitalize">
         <span class="text-red-600">*</span>
@@ -281,7 +301,7 @@ import {
   VCSType,
 } from "@/types";
 import BBBetaBadge from "@/bbkit/BBBetaBadge.vue";
-import { hasFeature } from "@/store";
+import { hasFeature, useSubscriptionStore } from "@/store";
 
 const FILE_REQUIRED_PLACEHOLDER = "{{DB_NAME}}, {{VERSION}}, {{TYPE}}";
 const SCHEMA_REQUIRED_PLACEHOLDER = "{{DB_NAME}}";
@@ -339,11 +359,16 @@ export default defineComponent({
       showFeatureModal: false,
     });
 
+    const subscriptionStore = useSubscriptionStore();
+
     const isTenantProject = computed(() => {
       return props.project.tenantMode === "TENANT";
     });
     const isProjectSchemaChangeTypeDDL = computed(() => {
       return (props.schemaChangeType || "DDL") === "DDL";
+    });
+    const isProjectSchemaChangeTypeSDL = computed(() => {
+      return (props.schemaChangeType || "DDL") === "SDL";
     });
     const enableSQLReviewTitle = computed(() => {
       return props.vcsType.startsWith("GITLAB")
@@ -423,11 +448,35 @@ export default defineComponent({
       return tags;
     });
 
+    const schemaRequiredTagPlaceholder = computed(() => {
+      const tags = [] as string[];
+      // Only allows {{DB_NAME}} to be an optional placeholder for non-tenant mode projects
+      if (!isTenantProject.value) tags.push(SCHEMA_REQUIRED_PLACEHOLDER);
+      return tags;
+    });
+
     const schemaOptionalTagPlaceholder = computed(() => {
       const tags = [] as string[];
       // Only allows {{ENV_NAME}} to be an optional placeholder for non-tenant mode projects
       if (!isTenantProject.value) tags.push("{{ENV_NAME}}");
       return tags;
+    });
+
+    const schemaTagPlaceholder = computed(() => {
+      const placeholders: string[] = [];
+      const required = schemaRequiredTagPlaceholder.value;
+      const optional = schemaOptionalTagPlaceholder.value;
+      if (required.length > 0) {
+        placeholders.push(
+          `${t("common.required-placeholder")}: ${required.join(", ")}`
+        );
+      }
+      if (optional.length > 0) {
+        placeholders.push(
+          `${t("common.optional-placeholder")}: ${optional.join(", ")}`
+        );
+      }
+      return placeholders.join("; ");
     });
 
     const onSQLReviewCIToggle = (on: boolean) => {
@@ -442,8 +491,12 @@ export default defineComponent({
       FILE_OPTIONAL_DIRECTORY_WILDCARD,
       fileOptionalPlaceholder,
       schemaOptionalTagPlaceholder,
+      schemaTagPlaceholder,
       state,
+      hasFeature,
+      getRquiredPlanString: subscriptionStore.getRquiredPlanString,
       isProjectSchemaChangeTypeDDL,
+      isProjectSchemaChangeTypeSDL,
       enableSQLReviewTitle,
       sampleFilePath,
       sampleSchemaPath,

@@ -1,5 +1,9 @@
 <template>
-  <div class="flex-1 overflow-auto focus:outline-none" tabindex="0">
+  <div
+    v-if="table"
+    class="flex-1 overflow-auto focus:outline-none"
+    tabindex="0"
+  >
     <main class="flex-1 relative pb-8 overflow-y-auto">
       <!-- Highlight Panel -->
       <div
@@ -13,8 +17,7 @@
                 <h1
                   class="pt-2 pb-2.5 text-xl font-bold leading-6 text-main truncate flex items-center gap-x-3"
                 >
-                  {{ table.name }}
-
+                  {{ getTableName(table.name) }}
                   <BBBadge
                     v-if="isGhostTable(table)"
                     text="gh-ost"
@@ -74,14 +77,13 @@
               <router-link :to="`/db/${databaseSlug}`" class="normal-link">{{
                 database.name
               }}</router-link>
-
-              <span class="ml-2 textlabel">
-                {{ $t("sql-editor.self") }}
-              </span>
-              <button class="ml-1 btn-icon" @click.prevent="gotoSQLEditor">
-                <heroicons-solid:terminal class="w-5 h-5" />
-              </button>
             </dd>
+            <SQLEditorButton
+              class="text-sm md:mr-4"
+              :database="database"
+              :label="true"
+              :disabled="!allowQuery"
+            />
           </dl>
         </div>
       </div>
@@ -142,19 +144,6 @@
                 database.instance.engine != 'SNOWFLAKE'
               "
             >
-              <div class="col-span-1 col-start-1">
-                <dt class="text-sm font-medium text-control-light">
-                  {{
-                    database.instance.engine == "POSTGRES"
-                      ? $t("db.encoding")
-                      : $t("db.character-set")
-                  }}
-                </dt>
-                <dd class="mt-1 text-sm text-main">
-                  {{ database.characterSet }}
-                </dd>
-              </div>
-
               <div class="col-span-1">
                 <dt class="text-sm font-medium text-control-light">
                   {{ $t("db.collation") }}
@@ -168,37 +157,19 @@
                 </dd>
               </div>
             </template>
-
-            <div class="col-span-1 col-start-1">
-              <dt class="text-sm font-medium text-control-light">
-                {{ $t("common.updated-at") }}
-              </dt>
-              <dd class="mt-1 text-sm text-main">
-                {{ humanizeTs(table.updatedTs) }}
-              </dd>
-            </div>
-
-            <div class="col-span-1">
-              <dt class="text-sm font-medium text-control-light">
-                {{ $t("common.created-at") }}
-              </dt>
-              <dd class="mt-1 text-sm text-main">
-                {{ humanizeTs(table.createdTs) }}
-              </dd>
-            </div>
           </dl>
         </div>
       </div>
 
-      <div class="mt-6 px-6">
+      <div v-if="shouldShowColumnTable" class="mt-6 px-6">
         <div class="text-lg leading-6 font-medium text-main mb-4">
           {{ $t("database.columns") }}
         </div>
         <ColumnTable
           :database="database"
+          :schema="schemaName"
           :table="table"
-          :column-list="table.columnList"
-          :engine="database.instance.engine"
+          :column-list="table.columns"
           :sensitive-data-list="sensitiveDataList"
         />
       </div>
@@ -207,29 +178,43 @@
         <div class="text-lg leading-6 font-medium text-main mb-4">
           {{ $t("database.indexes") }}
         </div>
-        <IndexTable :index-list="table.indexList" :database="database" />
+        <IndexTable :database="database" :index-list="table.indexes" />
       </div>
     </main>
   </div>
 </template>
 
 <script lang="ts">
-import { computed, defineComponent } from "vue";
+import { computed, defineComponent, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import {
+  bytesToString,
+  hasWorkspacePermission,
+  idFromSlug,
+  isDatabaseAccessible,
+  isGhostTable,
+} from "@/utils";
+import {
+  useCurrentUser,
+  useDatabaseStore,
+  useDBSchemaStore,
+  usePolicyByDatabaseAndType,
+} from "@/store";
+import {
+  DEFAULT_PROJECT_ID,
+  SensitiveData,
+  SensitiveDataPolicyPayload,
+  UNKNOWN_ID,
+} from "@/types";
+import { TableMetadata } from "@/types/proto/store/database";
 import ColumnTable from "../components/ColumnTable.vue";
 import IndexTable from "../components/IndexTable.vue";
 import InstanceEngineIcon from "../components/InstanceEngineIcon.vue";
-import {
-  bytesToString,
-  connectionSlug,
-  idFromSlug,
-  isGhostTable,
-} from "../utils";
-import { usePolicyByDatabaseAndType, useTableStore } from "@/store";
-import { SensitiveData, SensitiveDataPolicyPayload, Table } from "@/types";
+import { SQLEditorButton } from "@/components/DatabaseDetail";
 
 export default defineComponent({
   name: "TableDetail",
-  components: { ColumnTable, IndexTable, InstanceEngineIcon },
+  components: { ColumnTable, IndexTable, InstanceEngineIcon, SQLEditorButton },
   props: {
     databaseSlug: {
       required: true,
@@ -241,26 +226,69 @@ export default defineComponent({
     },
   },
   setup(props) {
-    const tableStore = useTableStore();
-
-    const table = computed(() => {
-      return tableStore.getTableListByDatabaseIdAndTableName(
-        idFromSlug(props.databaseSlug),
-        props.tableName
-      ) as Table;
-    });
+    const route = useRoute();
+    const router = useRouter();
+    const databaseStore = useDatabaseStore();
+    const dbSchemaStore = useDBSchemaStore();
+    const currentUser = useCurrentUser();
+    const table = ref<TableMetadata>();
+    const databaseId = idFromSlug(props.databaseSlug);
+    const schemaName = (route.query.schema as string) || "";
 
     const database = computed(() => {
-      return table.value.database;
+      return databaseStore.getDatabaseById(databaseId);
+    });
+    const instanceEngine = computed(() => {
+      return database.value.instance.engine;
     });
 
-    const gotoSQLEditor = () => {
-      const url = `/sql-editor/${connectionSlug(
-        database.value.instance,
-        database.value
-      )}`;
-      window.open(url);
+    const accessControlPolicy = usePolicyByDatabaseAndType(
+      computed(() => ({
+        databaseId: database.value.id,
+        type: "bb.policy.access-control",
+      }))
+    );
+    const allowQuery = computed(() => {
+      if (
+        database.value.projectId === UNKNOWN_ID ||
+        database.value.projectId === DEFAULT_PROJECT_ID
+      ) {
+        return hasWorkspacePermission(
+          "bb.permission.workspace.manage-database",
+          currentUser.value.role
+        );
+      }
+      const policy = accessControlPolicy.value;
+      const list = policy ? [policy] : [];
+      return isDatabaseAccessible(database.value, list, currentUser.value);
+    });
+    const hasSchemaProperty = computed(
+      () => instanceEngine.value === "POSTGRES"
+    );
+    const shouldShowColumnTable = computed(() => {
+      return instanceEngine.value !== "MONGODB";
+    });
+    const getTableName = (tableName: string) => {
+      if (hasSchemaProperty.value) {
+        return `"${schemaName}"."${tableName}"`;
+      }
+      return tableName;
     };
+
+    onMounted(() => {
+      const schemaList = dbSchemaStore.getSchemaListByDatabaseId(databaseId);
+      const schema = schemaList.find((schema) => schema.name === schemaName);
+      if (schema) {
+        table.value = schema.tables.find(
+          (table) => table.name === props.tableName
+        );
+      }
+      if (!table.value) {
+        router.replace({
+          name: "error.404",
+        });
+      }
+    });
 
     const sensitiveDataPolicy = usePolicyByDatabaseAndType(
       computed(() => ({
@@ -279,12 +307,15 @@ export default defineComponent({
     });
 
     return {
+      schemaName,
       table,
       database,
-      gotoSQLEditor,
+      allowQuery,
+      getTableName,
       bytesToString,
       isGhostTable,
       sensitiveDataList,
+      shouldShowColumnTable,
     };
   },
 });

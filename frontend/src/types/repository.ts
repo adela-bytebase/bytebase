@@ -1,17 +1,10 @@
 import isEmpty from "lodash-es/isEmpty";
 import { RepositoryId, VCSId } from "./id";
-import { Principal } from "./principal";
 import { Project } from "./project";
 import { VCS } from "./vcs";
 
 export type Repository = {
   id: RepositoryId;
-
-  // Standard fields
-  creator: Principal;
-  createdTs: number;
-  updater: Principal;
-  updatedTs: number;
 
   // Related fields
   vcs: VCS;
@@ -103,12 +96,12 @@ export function baseDirectoryWebUrl(
     return repository.webUrl;
   }
   let url = "";
-  if (repository.vcs.type == "GITLAB_SELF_HOST") {
+  if (repository.vcs.type == "GITLAB") {
     url = `${repository.webUrl}/-/tree/${repository.branchFilter}`;
     if (!isEmpty(repository.baseDirectory)) {
       url += `/${repository.baseDirectory}`;
     }
-  } else if (repository.vcs.type == "GITHUB_COM") {
+  } else if (repository.vcs.type == "GITHUB") {
     url = `${repository.webUrl}/tree/${repository.branchFilter}`;
     if (!isEmpty(repository.baseDirectory)) {
       url += `/${repository.baseDirectory}`;

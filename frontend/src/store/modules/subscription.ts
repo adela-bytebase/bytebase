@@ -2,21 +2,36 @@ import { defineStore } from "pinia";
 import axios from "axios";
 import dayjs from "dayjs";
 import { computed, Ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Subscription,
   FeatureType,
   PlanType,
-  FEATURE_MATRIX,
   SubscriptionState,
+  planTypeToString,
 } from "@/types";
 
 export const useSubscriptionStore = defineStore("subscription", {
   state: (): SubscriptionState => ({
+    featureMatrix: new Map<FeatureType, boolean[]>(),
     subscription: undefined,
     trialingDays: 14,
-    trialingInstanceCount: 999,
   }),
   getters: {
+    seatCount(state): number {
+      const count = state.subscription?.seat ?? 0;
+      if (count <= 0) {
+        return Number.MAX_VALUE;
+      }
+      return count;
+    },
+    instanceCount(state): number {
+      const count = state.subscription?.instanceCount ?? 0;
+      if (count <= 0) {
+        return Number.MAX_VALUE;
+      }
+      return count;
+    },
     currentPlan(state): PlanType {
       return state.subscription?.plan ?? PlanType.FREE;
     },
@@ -78,11 +93,15 @@ export const useSubscriptionStore = defineStore("subscription", {
   },
   actions: {
     hasFeature(type: FeatureType) {
-      return !this.isExpired && FEATURE_MATRIX.get(type)![this.currentPlan];
-    },
+      const matrix = this.featureMatrix.get(type);
+      if (!Array.isArray(matrix)) {
+        return false;
+      }
 
+      return !this.isExpired && matrix[this.currentPlan];
+    },
     getMinimumRequiredPlan(type: FeatureType): PlanType {
-      const matrix = FEATURE_MATRIX.get(type);
+      const matrix = this.featureMatrix.get(type);
       if (!Array.isArray(matrix)) {
         return PlanType.FREE;
       }
@@ -94,6 +113,15 @@ export const useSubscriptionStore = defineStore("subscription", {
       }
       return PlanType.FREE;
     },
+    getRquiredPlanString(type: FeatureType): string {
+      const { t } = useI18n();
+      const plan = t(
+        `subscription.plan.${planTypeToString(
+          this.getMinimumRequiredPlan(type)
+        )}.title`
+      );
+      return t("subscription.require-subscription", { requiredPlan: plan });
+    },
     setSubscription(subscription: Subscription) {
       this.subscription = subscription;
     },
@@ -103,6 +131,18 @@ export const useSubscriptionStore = defineStore("subscription", {
         const subscription = data.attributes as Subscription;
         this.setSubscription(subscription);
         return subscription;
+      } catch (e) {
+        console.error(e);
+      }
+    },
+    async fetchFeatureMatrix() {
+      try {
+        const { data } = await axios.get<{
+          [key: string]: boolean[];
+        }>(`/api/feature`);
+        for (const [key, value] of Object.entries(data)) {
+          this.featureMatrix.set(key as FeatureType, value);
+        }
       } catch (e) {
         console.error(e);
       }
@@ -130,7 +170,8 @@ export const useSubscriptionStore = defineStore("subscription", {
             attributes: {
               type: planType,
               days: this.trialingDays,
-              instanceCount: this.trialingInstanceCount,
+              seat: 10,
+              instanceCount: -1,
             },
           },
         })
@@ -150,4 +191,9 @@ export const hasFeature = (type: FeatureType) => {
 export const featureToRef = (type: FeatureType): Ref<boolean> => {
   const store = useSubscriptionStore();
   return computed(() => store.hasFeature(type));
+};
+
+export const useCurrentPlan = () => {
+  const store = useSubscriptionStore();
+  return computed(() => store.currentPlan);
 };

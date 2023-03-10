@@ -13,7 +13,7 @@
     "custom": "自定义",
     "im": "IM",
     "overview": "概览",
-    "migration-history": "变更历史",
+    "change-history": "变更历史",
     "webhook": "Webhook",
     "webhooks": "Webhook",
     "key": "键值",
@@ -27,10 +27,12 @@
     "sign-up": "注册",
     "email": "邮箱",
     "username": "用户名",
+    "credentials": "凭据",
     "password": "密码",
     "activate": "激活",
     "save": "保存",
     "cancel": "取消",
+    "cancelled": "已取消",
     "comment": "评论",
     "home": "主页",
     "setting": "设置",
@@ -119,14 +121,13 @@
     "repository": "仓库",
     "change": "变更",
     "branch": "分支",
-    "config-guide": "配置指南",
     "required-placeholder": "必需的占位符",
     "optional-placeholder": "可选的占位符",
     "optional-directory-wildcard": "可选的目录通配符",
     "sensitive-placeholder": "敏感数据 - 仅写入",
     "enabled": "开启",
     "default": "默认",
-    "version-control": "版本控制",
+    "gitops": "GitOps",
     "restore": "恢复",
     "detailed-guide": "详细指南",
     "workspace": "工作空间",
@@ -215,7 +216,17 @@
     "restart": "重启",
     "want-help": "加入用户群",
     "operation": "操作",
-    "rollback": "回滚"
+    "rollback": "回滚",
+    "total": "共计",
+    "discard-changes": "取消修改",
+    "error-message": "错误信息",
+    "demo-mode": "演示模式",
+    "operations": "操作",
+    "on": "开",
+    "off": "关",
+    "verify": "验证",
+    "regenerate": "重新生成",
+    "download": "下载"
   },
   "error-page": {
     "go-back-home": "回到主页"
@@ -250,7 +261,7 @@
       "compatibility": "兼容性",
       "connection": "连接",
       "migration-schema": "变更 schema",
-      "sql-review": "SQL 审查",
+      "sql-review": "SQL 审核",
       "earliest-allowed-time": "最早执行时间",
       "ghost-sync": "gh-ost 同步",
       "statement-type": "语句类型",
@@ -262,8 +273,8 @@
     "invoker": "执行者",
     "started": "开始于",
     "ended": "结束于",
-    "view-migration": "查看变更",
-    "view-migration-history": "查看变更历史",
+    "view-change": "查看变更",
+    "view-change-history": "查看变更历史",
     "earliest-allowed-time-unset": "未设置",
     "status": {
       "running": "运行中",
@@ -290,17 +301,26 @@
       "counting": "统计中"
     },
     "n-similar-tasks": "({count} 个相似的任务)",
-    "mark-as-done": "标记为已完成",
-    "mark-as-done-modal-title": "将任务[{name}]标记为已完成？"
+    "skip": "跳过",
+    "skip-modal-title": "跳过任务[{name}]？",
+    "task-checks": "任务检查项",
+    "rollback": {
+      "sql-rollback": "SQL 回滚",
+      "failed": "失败",
+      "preview-rollback-issue": "预览回滚工单",
+      "generating": "生成中",
+      "empty-rollback-statement": "回滚语句为空",
+      "cancel-generating": "取消生成回滚语句",
+      "sql-rollback-tips": "开启时，Bytebase 会保留数据变更的回滚日志，\n可以用于创建一个新的工单来回滚这次变更。{link}"
+    }
   },
   "banner": {
-    "demo-intro": "这是 Bytebase 的演示版本。",
-    "demo-intro-readonly": "这是 Bytebase 的只读演示版本",
     "update-license": "更新证书",
     "license-expires": "您的{plan}证书已在 {expireAt} 过期",
     "trial-expires": "您的{plan}试用将在 {days} 天后过期",
     "extend-trial": "申请延长试用",
-    "action": "5 秒部署您自己的服务",
+    "deploy": "5 秒部署到本地",
+    "request-demo": "和我们的产品专家预约 30 分钟产品演示",
     "debug": "Debug 模式已开启，您可以通过右上角头像下拉框关闭 Debug。",
     "readonly": "Bytebase 处于只读模式。您仍然可以查看控制台，但任何尝试更改的请求都会失败。",
     "external-url": "Bytebase 还没有配置 --external-url",
@@ -332,12 +352,14 @@
       "general": "通用",
       "members": "成员",
       "im-integration": "IM 集成管理",
-      "version-control": "版本控制",
+      "sso": "SSO",
+      "gitops": "GitOps",
       "subscription": "订阅",
       "labels": "标签",
       "debug-log": "Debug 日志",
       "sensitive-data": "敏感数据",
-      "access-control": "访问控制"
+      "access-control": "访问控制",
+      "audit-log": "审计日志"
     },
     "profile": {
       "email": "邮箱",
@@ -380,16 +402,6 @@
         "project-role-provider-gitlab": "同步自对应 GitLab 项目的 {rawRole} 角色",
         "cannot-change-role-of-systembot": "不能修改机器人助手的角色"
       },
-      "toggle-role-provider": {
-        "title": "您确认吗？"
-      },
-      "change-role-provider-to-vcs": {
-        "content": "开启 VCS 同步将会用 VCS 中对应仓库的成员列表替换现存的所有成员。\n原来的成员将会无效，您之后也可以关闭该 VCS 同步来撤销这一操作。",
-        "emphasize": "请注意，该功能需要 VCS 仓库内所有成员均设置了公开邮箱。"
-      },
-      "change-role-provider-to-bytebase": {
-        "content": "将会恢复成以下成员的权限。所有由 VCS 提供的成员将会被移除。"
-      },
       "system-bot": "机器人助手",
       "service-account": "服务账号",
       "copy-service-key": "复制 Service Key",
@@ -403,26 +415,89 @@
       "description": "可以让用户在 IM 里直接审批工单。",
       "feishu-updated-tip": "飞书配置更新成功"
     },
+    "sso": {
+      "create": "创建 SSO",
+      "description": "单点登录（SSO）是一种认证方法，使用户能够通过其他应用程序和网站来进行登录。",
+      "archive": "归档该 SSO",
+      "archive-info": "已归档 SSO 不会显示，您可以通过点击页面左下方的 \"归档\"来恢复。",
+      "restore": "恢复该 SSO",
+      "form": {
+        "type": "类型",
+        "learn-more-with-user-doc": "了解更多如何配置",
+        "redirect-url": "回调地址",
+        "redirect-url-description": "将会用于填写到身份提供商申请表单中的相应字段。",
+        "use-template": "使用模版",
+        "select-template": "选择模版",
+        "basic-information": "基础信息",
+        "name": "名称",
+        "name-description": "显示给登录用户的名称",
+        "resource-id": "资源 ID",
+        "resource-id-description": "唯一的字符串，有效字符为 /[a-z][0-9]-/",
+        "domain": "域名",
+        "domain-description": "OAuth 提供商的域名",
+        "identity-provider-information": "OAuth 提供商信息",
+        "identity-provider-information-description": "这些信息是由您的身份提供商提供的。",
+        "identity-provider-needed-information": "用以下信息创建您的 SSO 应用程序。",
+        "endpoints": "链接信息",
+        "endpoints-description": "链接信息是由您的 OAuth 提供商提供。",
+        "auth-url-description": "登录页面的链接",
+        "scopes-description": "访问 Auth URL 时携带的范围参数，使用空格分隔多个值",
+        "token-url-description": "用于获取 accessToken 的 API 地址",
+        "user-info-url-description": "用于通过 accessToken 获取用户信息的 API 地址",
+        "user-information-mapping": "用户信息映射",
+        "user-information-mapping-description": "字段映射保存了来自 API 用户信息的字段名。",
+        "identifier": "Bytebase 用户的唯一标识符",
+        "display-name": "Bytebase 用户的昵称",
+        "email": "Bytebase 用户的 Email"
+      },
+      "copy-redirect-url": "Redirect URL 已复制到剪切板。"
+    },
     "general": {
       "workspace": {
         "branding": "品牌",
-        "only-owner-can-edit": "仅管理员可以更新品牌信息",
+        "only-owner-can-edit": "仅管理员可以更改此设置",
         "logo": "Logo",
         "logo-aspect": "Logo 建议为 5:2 的宽:高比例（例如 100 x 40 像素）",
         "select-logo": "选择",
         "drag-logo": "或拖拽文件",
         "logo-upload-tip": "支持 {extension} 类型文件，不能大于 {size} MiB",
-        "logo-upload-succeed": "Logo 更新完成"
+        "logo-upload-succeed": "Logo 更新完成",
+        "security": "安全",
+        "watermark": {
+          "self": "水印",
+          "update-success": "水印设置已更新",
+          "description": "在页面上显示水印，包含用户名、ID 和 Email。",
+          "only-owner-can-edit": "仅管理员可以更新水印设置",
+          "enable": "开启水印"
+        },
+        "disallow-signup": {
+          "enable": "禁用自助注册",
+          "description": "禁用之后，新用户将无法自助注册，只能通过管理员邀请来创建账户。"
+        },
+        "network": "网络",
+        "external-url": {
+          "self": "外部链接",
+          "description": "用户或回调能访问到的 Bytebase URL，必须以 http:// 或 https:// 开头。{viewDoc}"
+        },
+        "config-updated": "配置已更新"
       }
     },
     "sensitive-data": {
-      "description": "以下列的查询结果将会被显示为 \"******\"。在表详情页，你可以将多个列标记为敏感数据。",
+      "description": "以下列的查询结果将会被显示为 \"******\"。在表详情页，您可以将多个列标记为敏感数据。",
       "remove-sensitive-column-tips": "不再对此列数据脱敏？"
     },
     "access-control": {
-      "description": "允许开发者通过 SQL 编辑器对下列受保护环境中的数据库执行查询。",
+      "description": "允许开发者通过 SQL 编辑器对下列生产环境中的数据库执行查询。{link}",
       "add-rule": "添加规则",
-      "remove-policy-tips": "删除这条规则？"
+      "remove-policy-tips": "删除这条规则？",
+      "inactive-rules": "无效的规则",
+      "inactive-rules-description": "这些规则不再生效，因为不属于生产环境。",
+      "no-database-in-production-environment": "请确保{production_environment}中有数据库。"
+    },
+    "release": {
+      "new-version-available": "有新版本可更新",
+      "new-version-content": "新版本 {tag} 正式发布！请根据我们的文档来获取新版本。",
+      "not-show-till-next-release": "在下次更新前不要提醒我"
     }
   },
   "activity": {
@@ -435,6 +510,7 @@
       "comment-create": "创建评论",
       "issue-field-update": "更新工单字段",
       "issue-status-update": "更新工单状态",
+      "pipeline-stage-status-update": "更新工单阶段状态",
       "pipeline-task-status-update": "更新工单任务状态",
       "pipeline-task-file-commit": "提交文件",
       "pipeline-task-statement-update": "更新 SQL",
@@ -477,10 +553,12 @@
       "task-name": "任务 {name}",
       "committed-to-at": "提交 {file} 到 {branch}{'@'}{repo}",
       "dismissed-stale-approval": "更新了{task}，此前的批准已被撤销",
-      "external-approval-rejected": "拒绝阶段 \"{stageName}\" 的{imName}外部审批"
+      "external-approval-rejected": "拒绝阶段 \"{stageName}\" 的{imName}外部审批",
+      "skipped": "跳过"
     },
     "subject-prefix": {
-      "task": "任务"
+      "task": "任务",
+      "stage": "阶段"
     },
     "n-similar-activities": "({count} 个相似的活动)"
   },
@@ -534,7 +612,7 @@
     "stage-select": {
       "active": "{name}（活动中）"
     },
-    "not-allowed-to-single-database-in-tenant-mode": "在多租户模式下无法对单个数据库{operation}",
+    "not-allowed-to-operate-unassigned-database": "未分配的数据库无法{operation}。\n需要先将它转移到项目里。",
     "migration-mode": {
       "title": "变更模式",
       "normal": {
@@ -552,6 +630,8 @@
     "edit-sql-statement-in-vcs": "该项目开启了基于 VCS 的版本管理。请在对应的 Git 仓库修改 SQL 文件并提交，开启新的工单。",
     "edit-sql-statement": "编辑 SQL 语句",
     "upload-sql": "上传 SQL",
+    "upload-sql-as-sheet": "上传 SQL 至工作表",
+    "statement-from-sheet-warning": "当前的 SQL 语句来自一个工作表。它是只读的且只显示了部分内容。",
     "override-current-statement": "覆盖当前的 SQL 语句",
     "upload-sql-file-max-size-exceeded": "上传文件大小不能超过 {size}。",
     "waiting-earliest-allowed-time": "将于 {time} 之后执行",
@@ -568,15 +648,22 @@
     },
     "sql-hint": {
       "change-will-apply-to-all-tasks-in-tenant-mode": "改动将会应用到其他所有任务",
-      "dont-apply-to-database-in-baseline-migration": "对于建立基线的迁移，Bytebase 不会应用到数据库，只会记录一个基线历史",
+      "dont-apply-to-database-in-baseline-migration": "建立基线只会记录当前的 Schema 到变更历史里，并不会把 SQL 应用到数据库",
       "snowflake": "使用 <<schema>>.<<table>> 来标注一个 SnowFlake 的表"
     },
-    "rollback-from": "当前任务回滚自 {link}。",
+    "will-rollback": "当前任务将会回滚 {link}",
     "issue-link-with-task": "工单 {issue} - 任务 {task}",
     "assignee-attention": {
       "send-approval-request-successfully": "{im}审批请求发送成功",
+      "send-attention-request-successfully": "审核人 {principal} 已收到关注请求",
       "needs-attention": "需要关注",
-      "click-to-mark": "点击以标记为「需要关注」"
+      "click-to-mark": "点击以请求审核人关注"
+    },
+    "sdl": {
+      "schema-change": "Schema 变化",
+      "generated-ddl-statements": "生成的 DDL 语句",
+      "full-schema": "完整 schema",
+      "left-schema-may-change": "左边的 schema 在工单执行前可能会发生变化。"
     }
   },
   "alter-schema": {
@@ -584,13 +671,11 @@
     "vcs-info": "已开启 VCS 版本管理。选择该数据库会跳转到对应的 Git 仓库以发起变更流程。",
     "alter-single-db": "变更单个数据库",
     "alter-multiple-db": "手动选择数据库",
-    "alter-multiple-db-info": "针对每个环境，您可以选择多个数据库进行变更或者直接跳过该环境，这样您就可以在一条流水线上把变更逐步作用到多个环境。",
     "alter-db-group": "按部署的配置",
     "no-databases-in-project": "该项目里没有数据库。点击 创建数据库 或 转移数据库 以添加数据库。"
   },
   "quick-action": {
     "create-db": "创建数据库",
-    "choose-db": "选择数据库",
     "new-db": "创建数据库",
     "add-instance": "@:common.add@:common.instance",
     "create-instance": "@:common.create@:common.instance",
@@ -613,6 +698,7 @@
   },
   "create-db": {
     "new-database-name": "新数据库名称",
+    "new-collection-name": "新集合名称",
     "database-owner-name": "数据库所有者",
     "cluster": "集群",
     "reserved-db-error": "{databaseName} 是一个预留名称",
@@ -628,6 +714,7 @@
     "select-instance-first": "先选择实例",
     "select-environment-first": "先选择环境",
     "tables": "表",
+    "collections": "集合",
     "views": "视图",
     "extensions": "插件",
     "parent": "母",
@@ -644,7 +731,7 @@
     "create-migration-schema": "@:common.create@:common.migration @:{'common.schema'}",
     "missing-migration-schema": "缺少@:common.migration @:common.schema",
     "unable-to-connect-instance-to-check-migration-schema": "无法连接到@:{'common.instance'}以检查@:{'common.migration'} @:{'common.schema'}",
-    "bytebase-relies-on-migration-schema-to-manage-version-control-based-schema-migration-for-databases-belonged-to-this-instance": "Bytebase 需要依赖「变更 schema」来记录这个实例上的数据库 schema 变更。如果没有设置「变更 schema」，您无法对这个实例上的数据库进行表结构和数据变更。",
+    "bytebase-relies-on-migration-schema-to-manage-gitops-based-schema-migration-for-databases-belonged-to-this-instance": "Bytebase 需要依赖「变更 schema」来记录这个实例上的数据库 schema 变更。如果没有设置「变更 schema」，您无法对这个实例上的数据库进行表结构和数据变更。",
     "please-contact-your-dba-to-configure-it": "请联系 DBA 配置。",
     "please-check-the-instance-connection-info-is-correct": "请检查实例连接信息是否正确。",
     "users": "用户",
@@ -664,10 +751,12 @@
     "account": "账户",
     "name": "名称",
     "host-or-socket": "Host 或 Socket",
+    "project-id-and-instance-id": "项目 ID 与实例 ID",
+    "project-id": "项目 ID",
+    "instance-id": "实例 ID",
     "your-snowflake-account-name": "您的 Snowflake @:{'instance.account'}@:{'instance.name'}",
     "port": "端口",
     "instance-name": "@:common.instance@:instance.name",
-    "instance-name-unique": "@:{'common.instance'}@:{'instance.name'}需要保证唯一性",
     "snowflake-web-console": "Snowflake @:{'instance.web-console'}",
     "external-link": "外部链接",
     "web-console": "Web 控制台",
@@ -710,11 +799,13 @@
       }
     },
     "no-password": "无密码",
+    "type-or-paste-credentials": "输入或粘贴 CREDENTIALS",
+    "type-or-paste-credentials-write-only": "输入或粘贴 CREDENTIALS - 仅写入",
     "password-write-only": "YOUR_DB_PWD - 仅写入",
     "test-connection": "测试连接",
     "ignore-and-create": "忽略并创建",
-    "add-a-postgresql-sample-instance": "创建一个 PostgreSQL 样本实例",
-    "successfully-created-postgresql-instance": "成功创建了 PostgreSQL 样本实例。并且填好了连接信息。",
+    "add-a-postgresql-sample-instance": "添加一个 PostgreSQL 样本实例",
+    "successfully-added-postgresql-instance": "成功添加了 PostgreSQL 样本实例。并且填好了连接信息。",
     "connection-info-seems-to-be-incorrect": "连接信息似乎错误",
     "new-instance": "新实例",
     "unable-to-connect": "Bytebase 无法连接到实例。我们推荐您再检查一遍连接信息。但也可以暂时忽略此警告。您在创建后仍能在实例详细页里修复连接信息。\n\n错误详情:{0}",
@@ -725,24 +816,29 @@
     "failed-to-connect-instance": "连接到实例失败。",
     "failed-to-connect-instance-localhost": "连接到实例失败。\n如果您使用的 Docker 部署，请尝试使用 \"host.docker.internal\" 作为 Host 地址。",
     "search-instance-name": "搜索实例名称",
-    "grants": "权限"
+    "grants": "权限",
+    "authentication-database": "认证数据库",
+    "find-gcp-project-id-and-instance-id": "查看 GCP 项目 ID 与实例 ID 的方法见",
+    "create-gcp-credentials": "创建凭据的方法见",
+    "used-for-testing-connection": "仅作测试连接用"
   },
   "environment": {
+    "id": "环境 ID",
+    "id-description": "环境 ID 是环境的唯一标识符。一旦创建不能修改。",
     "select": "选择环境",
     "archive": "归档此环境",
-    "archive-info": "已归档环境不会显示。您可以从归档界面恢复。",
+    "archive-info": "已归档环境不会显示，您可以通过点击页面左下方的 \"归档\"来恢复。",
     "create": "创建环境",
     "restore": "恢复此环境",
-    "successfully-updated-environment": "环境'{0}'更新成功",
-    "protected": "受保护的",
+    "successfully-updated-environment": "环境'{name}'更新成功",
     "disable-auto-backup": {
       "self": "禁用数据库自动备份",
       "content": "禁用自动备份策略仅对新添加的数据库生效。\n是否要将该设置应用到当前环境下的所有数据库？"
-    }
+    },
+    "production-environment": "生产环境"
   },
   "quick-start": {
-    "bookmark-an-issue": "收藏工单",
-    "add-a-comment": "添加评论",
+    "view-an-issue": "查看工单",
     "visit-project": "@:common.visit@:common.projects",
     "visit-instance": "@:common.visit@:common.instances",
     "visit-database": "@:common.visit@:common.databases",
@@ -772,11 +868,11 @@
       "title": "登录您的账号",
       "forget-password": "忘记密码?",
       "new-user": "第一次使用 Bytebase?",
-      "demo-note": "请使用 demo 账号登录",
+      "demo-note": "邮箱:{username} 密码:{password}",
       "gitlab": "通过 GitLab 登录",
       "github": "通过 GitHub 登录",
-      "3rd-party-auth-demo": "演示模式不支持第三方账号登录",
-      "gitlab-oauth": "您可联系管理员开启 GitLab 登录"
+      "gitlab-oauth": "您可联系管理员开启 GitLab 登录",
+      "sign-in-with-idp": "通过 {idp} 登录"
     },
     "password-forget": {
       "title": "忘记了您的密码？",
@@ -821,12 +917,12 @@
     "environment-tier": {
       "name": "环境级别",
       "description": "使该环境在显示上不同于其他环境。{newline}默认情况下，开发者无法通过 SQL 编辑器在这个环境的数据库上执行任何查询。",
-      "mark-env-as-protected": "标记为受保护的环境"
+      "mark-env-as-production": "标记为生产环境"
     }
   },
-  "migration-history": {
+  "change-history": {
     "self": "变更历史",
-    "select": "选择版本",
+    "select": "Schema 版本是在每次通过 Bytebase 执行 Schema 变更后被记录下来的",
     "workflow": "工作流",
     "commit-info": "由 {author} 于 {time}",
     "no-schema-change": "本次变更没有任何 Schema 的改动",
@@ -839,7 +935,7 @@
     "after-left-schema-choice": "和本次变更后的 Schema",
     "show-diff": "显示差异",
     "left-vs-right": "之前{prevLink} vs 当前版本",
-    "schema-snapshot-after-migration": "完成这次变更后的 schema 快照",
+    "schema-snapshot-after-change": "完成这次变更后的 schema 快照",
     "current-schema-empty": "当前 schema 为空",
     "list-limit": "对于有变更历史的数据库，我们会在下面最多列出5条记录。您可以点击数据库名称去进一步查看全部的记录。",
     "no-history-in-project": "这个项目下没有发现任何数据库有变更历史。",
@@ -849,7 +945,7 @@
     "config-instance": "配置实例",
     "establish-baseline-description": "Bytebase 将用当前的 schema 作为新的基线。这将会把数据库当前的 schema 状态同步到 Bytebase 记录的 schema 状态，并且解决 schema 偏差的问题。在进行此操作前，您应该检查当前的基线确实反映了期望的状态。",
     "establish-database-baseline": "建立「{name}」基线",
-    "instance-missing-migration-schema": "实例「{name}」缺失用于记录变更历史的 schema。",
+    "instance-missing-change-schema": "实例「{name}」缺失用于记录变更历史的 schema。",
     "instance-bad-connection": "无法连接实例「{name}」以获取变更历史。",
     "contact-dba": "请联系您的 DBA 进行配置。"
   },
@@ -861,8 +957,6 @@
     "sync-status": "同步状态",
     "search-database-name": "搜索数据库名称",
     "search-database": "搜索数据库",
-    "restored-from": "恢复于",
-    "database-name-is-restored-from-another-database-backup": "{0}恢复于另一个数据库备份",
     "transfer-project": "转移项目",
     "alter-schema": "变更 Schema",
     "alter-schema-in-vcs": "变更 Schema (VCS)",
@@ -903,7 +997,7 @@
     "updated-backup-webhook-url-for-database-props-database-name": "更新了数据库'{0}'的 webhook URL。",
     "last-sync-status": "最后一次同步状态",
     "last-sync-status-long": "最后一次同步在{1}，状态为{0}",
-    "version-control-enabled": "已启用版本控制",
+    "gitops-enabled": "已启用 GitOps",
     "restore-backup": "恢复备份'{0}'到一个新的数据库中",
     "nullable": "可为空",
     "restore": "恢复",
@@ -922,6 +1016,7 @@
     "index-size": "索引大小",
     "column": "列",
     "columns": "列",
+    "data-type": "数据类型",
     "indexes": "索引",
     "row-count-est": "估计行数",
     "incorrect-project-warning": "SQL 编辑器只能查询用户可用的项目中的数据库。您应该首先将此数据库转移到一个可用的项目中。",
@@ -966,24 +1061,33 @@
     "selected-n-databases": "已选择 {n} 个数据库",
     "sync-schema": {
       "title": "库表同步",
-      "select-project": "步骤 1. 选择项目",
-      "select-schema": "步骤 2. 选择 Schema",
-      "select-database": "步骤 3. 选择待同步的数据库",
-      "schema-diff": "Schema 对比结果",
-      "synchronize-statements": "DDL 语句",
-      "synchronize-statements-description": "您可以继续编辑生成的 Schema DDL 语句。",
-      "select-schema-and-target-database-tip": "请先选择 Schema 和数据库。",
-      "no-difference-tip": "没有发现差异。",
+      "select-project": "选择项目",
+      "to-database": "选择待同步的数据库",
+      "from-database": "选择源数据库",
+      "schema-change-preview": "预览 '{database}' 的 Schema 变更",
+      "schema-change-preview-no-database": "预览 Schema 变更",
+      "synchronize-statements": "对应生成的 DDL 语句",
+      "synchronize-statements-description": "您可以继续编辑生成的 Schema DDL 语句",
+      "select-from-database-and-schema-tip": "选择源数据库和 Schema 版本",
+      "select-to-database-tip": "选择待同步的数据库",
+      "no-difference-tip": "没有发现差异",
       "more-version": "更多...",
       "character-sets-diff-found": "Schema 之间的字符集不同",
       "preview-issue": "预览工单"
     },
     "sensitive": "敏感",
-    "access-denied": "你没有访问该数据库的权限"
+    "access-denied": "您没有访问该数据库的权限",
+    "schema": {
+      "select": "选择 schema"
+    },
+    "show-missing-databases": "显示未找到的数据库",
+    "n-selected-m-in-total": "（已选择 {selected}，共计 {total}）",
+    "doesnt-match-database-name-template": "不符合租户数据库名称模板",
+    "doesnt-match-tenant-value": "与租户标签值不匹配",
+    "should-follow-database-name-template": "需要遵循租户数据库名称模板"
   },
   "repository": {
     "branch-observe-file-change": "Bytebase 跟踪文件变更的分支。",
-    "branch-specify-tip": "诀窍: 可以使用空字符串跟踪所有分支的变更.",
     "base-directory": "根目录",
     "base-directory-description": "Bytebase 跟踪文件变更的根目录。如果为空，则他会跟踪整个仓库。",
     "file-path-template": "文件路径模版",
@@ -1013,15 +1117,15 @@
     "sql-review-ci-remove-modal": "SQL 审核 CI 已禁用。您可以手动删除 {repository} 的 {vcs} 文件。",
     "sql-review-ci-restore-modal": "恢复到 UI 工作流后，SQL 审核 CI 将会被禁用，您可以手动删除 {repository} 的 {vcs} 文件。",
     "git-provider": "Git 提供方",
-    "version-control-status": "@.capitalize:common.version-control 已{status}",
-    "version-control-description-file-path": "数据库变更脚本存放在 {fullPath}。为了进行一次变更，开发者需要创建一个匹配 {fullPathTemplate} 文件路径格式的变更脚本。",
-    "version-control-description-branch": "当脚本审核通过并且合并到 {branch} 分支后，Bytebase 将自动发起一条流水线来执行新的 schema 变更。",
-    "version-control-description-description-schema-path": "当 schema 变更完成后, Bytebase 会把变更后的最新 schema 回写到指定的 {schemaPathTemplate}。",
+    "gitops-status": "@.capitalize:common.gitops 已{status}",
+    "gitops-description-file-path": "数据库变更脚本存放在 {fullPath}。为了进行一次变更，开发者需要创建一个匹配 {fullPathTemplate} 文件路径格式的变更脚本。",
+    "gitops-description-branch": "当脚本审核通过并且合并到 {branch} 分支后，Bytebase 将自动发起一条流水线来执行新的 schema 变更。",
+    "gitops-description-description-schema-path": "当 schema 变更完成后, Bytebase 会把变更后的最新 schema 回写到指定的 {schemaPathTemplate}。",
     "restore-to-ui-workflow": "恢复到 UI 工作流",
     "restore-ui-workflow-description": "当使用 UI 工作流时，开发者会通过 Bytebase\n\n控制台直接提交一个 SQL 审核工单，让指定的 DBA 或者开发同事审核。当审核通过后，Bytebase 再执行相应的 SQL 变更。",
     "restore-ui-workflow-success": "成功恢复到 UI 工作流",
-    "update-version-control-config-success": "成功更新@:common.version-control配置",
-    "setup-wizard-guide": "如果您在过程中遇到问题, 请参考{guide}",
+    "update-gitops-config-success": "成功更新 @:common.gitops 配置",
+    "setup-wizard-guide": "如果您在过程中遇到问题, 请参考 {guide}",
     "add-git-provider": "添加 Git 提供方",
     "choose-git-provider": "选择 Git 提供方",
     "select-repository": "选择仓库",
@@ -1032,9 +1136,7 @@
     "select-repository-attention-gitlab": "Bytebase 仅列出您至少拥有 'Maintainer' 权限的 GitLab 项目。因为只有至少拥有该权限，才能够配置项目的 webhook 用来监听代码推送事件。",
     "select-repository-attention-github": "Bytebase 仅列出您拥有管理员权限的 GitHub 仓库。因为只有拥有该权限，才能够配置仓库的 webhook 用来监听代码推送事件。",
     "select-repository-search": "搜索仓库",
-    "linked": "关联的仓库",
-    "role-provider": "项目角色权限提供方",
-    "role-provider-description": "Bytebase 将会从选定的角色提供方同步成员角色，所有此前存在的成员将会被替换。"
+    "linked": "关联的仓库"
   },
   "workflow": {
     "current-workflow": "当前工作流",
@@ -1072,7 +1174,7 @@
     "dashboard": {
       "modal": {
         "title": "如何创建您的'@:{'common.project'}' ?",
-        "content": "在 Bytebase 中，项目的概念与其他常见的的开发工具类似\n\n一个项目会有属于他的协作成员，并且每一个数据库和工单总是归属于某一个项目\n\n同时，一个项目可以关联一个代码仓库，并以此来进行版本控制",
+        "content": "在 Bytebase 中，项目的概念与其他常见的的开发工具类似\n\n一个项目会有属于他的协作成员，并且每一个数据库和工单总是归属于某一个项目\n\n同时，一个项目可以关联一个代码仓库，并以此来开启 GitOps 工作流",
         "cancel": "关闭",
         "confirm": "不再出现"
       },
@@ -1080,8 +1182,7 @@
     },
     "table": {
       "key": "@:common.key",
-      "name": "@:common.name",
-      "created-at": "创建于"
+      "name": "@:common.name"
     },
     "create-modal": {
       "project-name": "@:{'common.project'}@:{'common.name'}",
@@ -1146,6 +1247,10 @@
         "issue-comment-creation": {
           "title": "工单被评论",
           "label": "当新的工单评论被创建"
+        },
+        "issue-stage-status-change": {
+          "title": "工单阶段状态变更",
+          "label": "当一个工单包含的阶段状态发生了变更"
         }
       }
     },
@@ -1160,17 +1265,13 @@
       "developer": "@.upper:common.role.developer",
       "archive": {
         "title": "归档项目",
-        "description": "已归档的项目将不会显示在日常界面，但您仍然可以从归档页面中恢复他。",
+        "description": "已归档的项目将不会显示在日常界面，您可以通过点击页面左下方的 \"归档\"来恢复。",
         "btn-text": "归档这个@:common.project"
       },
       "restore": {
         "title": "恢复项目",
         "btn-text": "恢复这个@:common.project"
       },
-      "sync-from-vcs": "从 VCS 同步",
-      "success-member-sync-prompt": "从 VCS 同步成功",
-      "view-vcs-member": "在 VCS 中查看成员",
-      "switch-role-provider-to-bytebase-success-prompt": "成功关闭了 VCS 项目成员同步",
       "schema-change-type": "Schema 变更类型",
       "select-schema-change-type-ddl": "通过指定过程 DDL 变更到期望的 Schema",
       "select-schema-change-type-sdl": "直接指定期望达到的 Schema",
@@ -1194,15 +1295,16 @@
     "mark-all-as-read": "全部标记为已读",
     "view-older": "查看更早"
   },
-  "version-control": {
+  "gitops": {
     "setting": {
       "description": "Bytebase 支持 GitOps 工作流。该工作流下，数据库变更脚本存储在版本控制系统上 (VCS)，新创建的变更脚本会自动触发对应的数据库变更。Bytebase 的所有者先在此配置 VCS，在这之后，项目的所有者就可以从所配置的 VCS 中选取他们的 Git 仓库。",
-      "description-highlight": "配置 VCS 后，在付费版订阅下，Bytebase 将自动开启通过 VCS 的第三方认证登录",
+      "description-highlight": "如果您想通过您配置的VCS启用第三方登录，请在SSO中进行配置。",
       "add-git-provider": {
         "self": "添加 Git 提供方",
         "description": "在项目可以启用 GitOps 工作流前，Bytebase 首先需要以在 VCS 中注册为 OAuth 应用的方式和 VCS 进行集成。以下是配置该集成的步骤，您也可以按照我们的{guide}。",
         "gitlab-self-host": "自托管 GitLab",
         "gitlab-self-host-admin-requirement": "您必须是 GitLab 实例的管理员才能进行该配置。否则您需要让您的 GitLab 实例管理员把 Bytebase 先注册为 GitLab 整个实例级别的 OAuth 应用，之后再让对方提供给您注册完成后的应用 ID 以及 Secret，以让您在「OAuth 应用信息」步骤进行填写。",
+        "gitlab-com-admin-requirement": "您的账号必须对您打算关联的代码仓库拥有管理员权限。通常这个账号对应的是一个专门的服务账号而非个人账号。",
         "github-com-admin-requirement": "您必须是 GitHub 组织的管理员才能进行该配置。否则您需要让您的 GitHub 组织管理员把 Bytebase 先注册为组织级别的 OAuth 应用，之后再让对方提供给您注册完成后的应用 ID 以及 Secret，以让您在「OAuth 应用信息」步骤进行填写。",
         "oauth-info-correct": "OAuth 信息验证成功",
         "check-oauth-info-match": "请确认 Secret 和注册在 GitLab 实例上的应用信息匹配。",
@@ -1220,9 +1322,12 @@
         },
         "oauth-info": {
           "self": "OAuth 应用信息",
-          "gitlab-register-oauth-application": "注册 Bytebase 为一个 GitLab 实例级别 (instance-wide) 的 OAuth 应用。",
-          "gitlab-login-as-admin": "以管理员身份登录 GitLab 实例。这个账号必须是整个 GitLab 实例的管理员 (会看到小扳手在顶栏)。",
-          "gitlab-visit-admin-page": "通过点击小扳手访问管理员界面，然后导航到「应用」分区，再点击「创建应用」。",
+          "gitlab-self-host-register-oauth-application": "注册 Bytebase 为一个 GitLab 实例级别 (instance-wide) 的 OAuth 应用。",
+          "gitlab-self-host-login-as-admin": "以管理员身份登录 GitLab 实例。这个账号必须是整个 GitLab 实例的管理员 (会看到小扳手在顶栏)。",
+          "gitlab-self-host-visit-admin-page": "通过点击小扳手访问管理员界面，然后导航到「应用」分区，再点击「创建应用」。",
+          "gitlab-com-register-oauth-application": "注册 Bytebase 为一个 GitLab 用户的 OAuth 应用。",
+          "gitlab-com-login": "通过账号登陆 GitLab.com。通常这个账号对应的是一个专门的服务账号而非个人账号。",
+          "gitlab-com-visit-application-page": "访问 Preferences -> Applications 页面。您可以通过右上角的头像下拉菜单访问到该页面。",
           "gitlab-paste-oauth-info": "从刚创建好的应用上粘贴它的应用 ID 和 Secret 到下面的字段。",
           "github-register-oauth-application": "注册 Bytebase 为一个 GitHub 组织级别 (organization-wide) 的 OAuth 应用。",
           "github-login-as-admin": "以组织管理员身份登录 GitHub.com。这个账号必须是 GitHub 组织的管理员 (能够进入组织 Settings 页面)。",
@@ -1239,30 +1344,35 @@
         },
         "confirm": {
           "confirm-info": "确认信息",
-          "confirm-description": "创建完成后，这个 Git 供应方将出现在项目面板「版本控制」Tab 下，可以被项目所有者选中。"
+          "confirm-description": "创建完成后，这个 Git 供应方将出现在项目面板「GitOps」Tab 下，可以被项目所有者选中。"
         }
       },
       "git-provider": {
-        "gitlab-application-id-label": "注册为 GitLab 实例级 OAuth 应用的应用 ID。",
+        "gitlab-self-host-application-id-label": "注册为 GitLab 实例级 OAuth 应用的应用 ID。",
+        "gitlab-com-application-id-label": "注册为 GitLab OAuth 应用的应用 ID。",
         "view-in-gitlab": "查看 GitLab",
-        "secret-label-gitlab": "注册为 GitLab 实例级 OAuth 应用的 Secret。",
+        "gitlab-self-host-secret-label": "注册为 GitLab 实例级 OAuth 应用的 Secret。",
+        "gitlab-com-secret-label": "注册为 GitLab OAuth 应用的 Secret。",
         "github-application-id-label": "注册为 GitHub 组织级别 OAuth 应用的 Client ID。",
         "secret-label-github": "注册为 GitHub 组织级别 OAuth 应用的 Client secret。",
-        "delete": "删除这个提供方前，需要先解除所有仓库的关联。"
+        "delete-forbidden": "删除这个提供方前，需要先解除所有仓库的关联。",
+        "delete": "删除 Git 提供方",
+        "delete-confirm": "删除 Git 提供方 \"{name}\"？"
       }
     }
   },
   "archive": {
     "archived": "已归档",
     "project-search-bar-placeholder": "搜索@.lower:{'common.project'}的名称",
-    "instance-bar-placeholder": "搜索@.lower:{'common.instance'}的名称",
-    "environment-bar-placeholder": "搜索@.lower:{'common.environment'}的名称"
+    "instance-search-bar-placeholder": "搜索@.lower:{'common.instance'}的名称",
+    "environment-search-bar-placeholder": "搜索@.lower:{'common.environment'}的名称",
+    "sso-search-bar-placeholder": "搜索 SSO 的名称"
   },
   "deployment-config": {
     "stage-n": "阶段 {n}",
     "add-selector": "添加选择条件",
     "update-success": "成功更新部署配置",
-    "this-is-example-deployment-config": "这是部署配置的样例，你需要在此基础上编辑并保存。",
+    "this-is-example-deployment-config": "这是部署配置的样例，您需要在此基础上编辑并保存。",
     "n-databases": "{n} 个数据库",
     "selectors": "选择条件",
     "add-stage": "添加阶段",
@@ -1323,7 +1433,8 @@
     "ssl-connection": "SSL 连接",
     "read-replica-host": "只读副本 Host",
     "read-replica-port": "只读副本端口",
-    "delete-read-only-data-source": "删除只读数据源"
+    "delete-read-only-data-source": "删除只读数据源",
+    "connection-string-schema": "连接串模式"
   },
   "setting": {
     "project": {
@@ -1393,7 +1504,7 @@
     "sql-review-result": "SQL 检查结果",
     "alter-table": "修改表结构",
     "visualize-explain": "可视化 Explain",
-    "sql-execute-in-protected-environment": "下面的 SQL 语句将会在受保护的环境中执行。",
+    "sql-execute-in-production-environment": "小心，您正在操作生产环境下的数据库。",
     "rows-upper-limit": "到达查询结果条数上限",
     "tab-mode": {
       "readonly": "只读",
@@ -1404,7 +1515,10 @@
     "connect-in-admin-mode": "以管理员模式连接",
     "admin-mode": {
       "self": "管理员模式"
-    }
+    },
+    "read-only-mode-not-allowed": "实例{instance}无法通过只读模式访问。",
+    "run-selected": "运行选中的语句",
+    "clear-screen": "清屏"
   },
   "schema-editor": {
     "self": "Schema 编辑器",
@@ -1412,7 +1526,12 @@
     "preview-issue": "预览工单",
     "sync-sql-from-schema-editor": "从 Schema 编辑器中同步 SQL",
     "raw-sql": "SQL 语句",
+    "search-database-and-table": "搜索数据库和表",
+    "search-table": "搜索表",
+    "search-column": "搜索列",
     "actions": {
+      "create-schema": "新建 Schema",
+      "drop-schema": "删除 Schema",
       "create-table": "新建表",
       "rename": "重命名",
       "drop-table": "删除表",
@@ -1432,30 +1551,45 @@
       "collation": "字符排序规则",
       "comment": "注释"
     },
-    "table-list": "表",
+    "schema": {
+      "select": "选择 schema",
+      "name": "Schema 名称"
+    },
+    "tables": "表",
     "table": {
+      "select": "选择表",
       "name": "表名"
     },
-    "column-list": "列",
+    "columns": "列",
     "column": {
+      "select": "选择列",
       "name": "名称",
       "type": "类型",
       "default": "默认值",
       "comment": "注释",
-      "not-null": "不可为空"
+      "not-null": "不可为空",
+      "primary": "主键"
     },
     "nothing-changed": "无任何改动",
     "message": {
+      "invalid-schema-name": "无效的 Schema 名称",
+      "duplicated-schema-name": "重复的 Schema 名称",
       "invalid-table-name": "无效的表名",
       "duplicated-table-name": "重复的表名",
       "invalid-column-name": "无效的列名",
       "duplicated-column-name": "重复的列名",
-      "invalid-column-type": "无效的列类型"
+      "invalid-column-type": "无效的列类型",
+      "failed-to-fetch-database-schema": "请求数据库 Schema 失败"
     },
     "confirm-to-close": {
       "title": "确定关闭？",
       "description": "关闭后更改将会丢失。"
-    }
+    },
+    "tenant-mode-tips": "点击“预览工单”后，当前更改将会应用于所有选定的租户数据库。",
+    "edit-foreign-key": "修改外键",
+    "select-reference-schema": "选择外键的 Schema",
+    "select-reference-table": "选择外键的表",
+    "select-reference-column": "选择外键的列"
   },
   "label": {
     "empty-label-value": "<空值>",
@@ -1477,7 +1611,7 @@
     "setting": {
       "description": "标签是一组可用于标识数据库租户的键值对。{link}。"
     },
-    "db-name-template-tips": "如果您的租户数据库名字遵循命名模版，您可以在这里指定。有着相同 {placeholder} 的数据库会分在一组。如果您不想分组，就让它为空。{link}。",
+    "db-name-template-tips": "如果您的租户数据库名字遵循命名模版，您可以在这里指定。例如：数据库名字为 db1__SH, db1__BJ, db1__GZ，此时命名模板可以是 {placeholder}。{link}。",
     "confirm-change": "您确定要修改 '{label}' 吗？",
     "parsed-from-template": "从 {name} 中依据模板 {template} 解析得出",
     "cannot-transfer-template-not-match": "数据库 '{name}' 无法转移到这个项目，因为它的名称不符合模板 {template}。"
@@ -1486,13 +1620,20 @@
     "unknown-event": "未知的事件类型，认证失败"
   },
   "subscription": {
+    "trial-start-modal": {
+      "title": "已开启{plan}试用",
+      "content": "您的{plan}试用已开启！在 {date} 之前所有{plan}功能将不受限制。",
+      "button": "了解",
+      "subscription-page": "订阅页面",
+      "subscription": "可以在{page}查看我们的订阅方案及付费功能。"
+    },
     "description": "您可以在这里上传您购买的 Bytebase 证书来解锁团队版/企业版功能。",
     "upload-license": "上传证书",
     "upgrade-trial-button": "升级试用",
-    "start-n-days-trial": "开启 {days} 天试用",
+    "start-n-days-trial": "开启 {days} 天试用 (无需信用卡)",
     "successfully-start-trial": "成功开启 {days} 天的免费试用",
     "successfully-upgrade-trial": "成功升级为{plan}试用",
-    "require-subscription": "这个功能需要{requiredPlan}订阅，请购买的 Bytebase 证书来解锁该功能。",
+    "require-subscription": "这个功能需要{requiredPlan}订阅，请购买 Bytebase 证书来解锁该功能。",
     "required-plan-with-trial": "这个功能需要{requiredPlan}订阅，但是{startTrial}。",
     "trial-for-plan": "您可以开启{plan}的 {days} 天免费试用 - 无需任何信用卡或预付费",
     "trial-for-days": "您可以开启 {days} 天的免费试用 - 无需任何信用卡或预付费",
@@ -1519,6 +1660,13 @@
         "runoutof": "已用尽全部 {total} 个实例额度。",
         "upgrade": "@:{'subscription.upgrade'}来获取更多实例额度。"
       },
+      "bb-feature-seat-count": {
+        "title": "席位数量限制",
+        "desc": "您已达最大席位数量限制，请付费升级来获取更多席位额度。",
+        "remaining": "当前总席位额度为 {total}，目前仅剩 {count} 个份额可用。",
+        "runoutof": "已用尽全部 {total} 个席位额度。",
+        "upgrade": "@:{'subscription.upgrade'}来获取更多席位额度。"
+      },
       "bb-feature-multi-tenancy": {
         "title": "多租户",
         "desc": "「多租户功能」可以同时管理多个属于不同租户的同构数据库，帮您更统一和方便地对多个数据库进行管理和表结构变更。"
@@ -1533,7 +1681,7 @@
       },
       "bb-feature-environment-tier-policy": {
         "title": "环境级别",
-        "desc": "「环境级别」可以将环境标记为受保护的"
+        "desc": "「环境级别」可以将环境标记为生产环境"
       },
       "bb-feature-sensitive-data": {
         "title": "敏感数据",
@@ -1541,7 +1689,7 @@
       },
       "bb-feature-access-control": {
         "title": "访问控制",
-        "desc": "可以修改受保护的环境中的数据库的查询权限。"
+        "desc": "可以修改生产环境中的数据库的查询权限。"
       },
       "bb-feature-lgtm": {
         "title": "LGTM 检查",
@@ -1552,8 +1700,16 @@
         "desc": "通过集成 IM 来批准工单。"
       },
       "bb-feature-sql-review": {
-        "title": "Schema 审核策略",
-        "desc": "给不同的环境定制 schema 审核策略，免费版仅可使用部分规则。"
+        "title": "解锁 100+ SQL 审核策略",
+        "desc": "配置各种 SQL lint 规则，以在研发组织中落地 SQL 最佳实践，保障 Schema 的规范一致性。"
+      },
+      "bb-feature-vcs-schema-write-back": {
+        "title": "Schema 回写",
+        "desc": "当一个 Schema 变更完成后，可以将最新的 Schema 快照回写到 VCS。"
+      },
+      "bb-feature-vcs-sheet-sync": {
+        "title": "从 VCS 同步 SQL 脚本",
+        "desc": "将保存在 VCS 中的 SQL 脚本同步到 Sheet 中。"
       },
       "bb-feature-vcs-sql-review": {
         "title": "GitOps 工作流中的 SQL 审核",
@@ -1563,14 +1719,17 @@
         "title": "角色管理",
         "desc": "「角色管理」可以赋予成员诸如 DBA 这样的特定角色。"
       },
+      "bb-feature-watermark": {
+        "title": "水印设置",
+        "desc": "在页面上显示水印，包含用户名、ID 和 Email。"
+      },
+      "bb-feature-audit-log": {
+        "title": "审计日志",
+        "desc": "记录和查询工作空间中的用户执行的操作。"
+      },
       "bb-feature-schema-drift": {
         "title": "Schema 偏差",
         "desc": "@:{'subscription.upgrade'}来解锁 schema 偏差异常的自动检测。"
-      },
-      "bb-feature-3rd-party-auth": {
-        "title": "第三方认证 & 授权",
-        "desc": "Bytebase 可根据您配置的 VCS 来支持相应的第三方认证 & 授权。",
-        "login": "请@:{'subscription.upgrade'}来开启该功能"
       },
       "bb-feature-branding": {
         "title": "自定义品牌信息",
@@ -1591,6 +1750,14 @@
       "bb-feature-read-replica-connection": {
         "title": "Read replica connection",
         "desc": "使用只读副本连接到只读数据源。"
+      },
+      "bb-feature-sso": {
+        "title": "Single Sign-On (SSO)",
+        "desc": "使得用户能够通过 SSO 安全地进行登录 Bytebase。"
+      },
+      "bb-feature-2fa": {
+        "title": "双重认证",
+        "desc": "双重认证为系统成员提供了一个额外的安全层。在登录时，用户需要输入由认证器应用程序生成的安全代码。"
       }
     }
   },
@@ -1600,7 +1767,7 @@
     "shared-with-me": "与我共享",
     "starred": "已加星标",
     "actions": {
-      "sync-from-vcs": "从 VCS 同步数据"
+      "sync-from-vcs": "从 VCS 同步 SQL 脚本"
     },
     "hint-tips": {
       "confirm-to-sync-sheet": "确定要同步工作表?",
@@ -1628,11 +1795,12 @@
     "rules": "规则",
     "filter": "筛选",
     "no-permission": "仅 DBA 或所有者有权限创建或更新审核策略。",
-    "disable": "停用审查策略",
-    "enable": "开启审查策略",
+    "disable": "停用审核策略",
+    "enable": "开启审核策略",
     "delete": "删除审核策略",
     "input-then-press-enter": "输入后按下回车来添加",
     "not-available-for-free": "{plan}订阅不能使用该规则",
+    "unlock-full-feature": "解锁 100+ SQL Review 规则",
     "create": {
       "breadcrumb": "创建审核策略",
       "basic-info": {
@@ -1658,7 +1826,15 @@
       "preview": {
         "name": "预览"
       }
-    }
+    },
+    "edit-rule": {
+      "self": "编辑 SQL 审核规则"
+    },
+    "rule": {
+      "active": "开启"
+    },
+    "enabled-rules": "开启的规则数",
+    "rule-detail": "规则详情"
   },
   "debug-log": {
     "title": "Debug 日志",
@@ -1683,6 +1859,31 @@
       }
     }
   },
+  "audit-log": {
+    "no-logs": "暂无审计日志",
+    "audit-log-detail": "审计详情",
+    "table": {
+      "created-ts": "时间",
+      "created-time": "创建时间",
+      "updated-time": "更新时间",
+      "creator": "操作者",
+      "type": "事件类型",
+      "level": "事件等级",
+      "comment": "评论",
+      "payload": "Payload",
+      "empty": "<空>",
+      "view-details": "查看详情",
+      "select-type": "选择类型"
+    },
+    "type": {
+      "member-create": "增加成员",
+      "member-role-update": "更新角色",
+      "member-activate": "激活成员",
+      "member-deactivate": "禁用成员",
+      "database-transfer": "转移数据库",
+      "sql-editor-query": "SQL 编辑器查询"
+    }
+  },
   "onboarding-guide": {
     "create-database-guide": {
       "let-add-a-instance": "让我们先添加一个实例吧",
@@ -1700,6 +1901,111 @@
         "create-a-new-database": "创建了一个数据库",
         "keep-going-with-bytebase": "继续使用 Bytebase！"
       }
+    }
+  },
+  "schema-diagram": {
+    "self": "Schema 关系图",
+    "fit-content-with-view": "自动适应视图"
+  },
+  "identity-provider": {
+    "test-connection": "测试连接",
+    "test-modal": {
+      "title": "测试 OAuth2 连接性",
+      "start-test": "点击登录按钮开始测试"
+    }
+  },
+  "sensitive-data": {
+    "self": "敏感数据"
+  },
+  "resource": {
+    "environment": "环境",
+    "instance": "实例",
+    "project": "项目",
+    "idp": "身份提供商"
+  },
+  "resource-id": {
+    "self": "{resource} ID",
+    "description": "{resource} ID 是一个唯一的标识符。创建之后无法修改。",
+    "cannot-be-changed-later": "创建之后无法修改。",
+    "validation": {
+      "duplicate": "{resource} ID 已存在。请使用其他 ID。",
+      "pattern": "{resource} ID 只能包含小写字母、数字和连字符。它必须以一个小写字母开头。",
+      "minlength": "{resource} ID 至少包含 1 个字符。",
+      "overflow": "{resource} ID 应该少于 64 个字符。"
+    }
+  },
+  "multi-factor": {
+    "self": "多重认证",
+    "auth-code": "认证码",
+    "recovery-code": "恢复码",
+    "other-methods": {
+      "self": "其他方法",
+      "use-auth-app": {
+        "self": "使用身份验证器应用程序",
+        "description": "在您的移动设备上打开双重认证器（TOTP）应用程序，查看认证码。"
+      },
+      "use-recovery-code": {
+        "self": "使用恢复码",
+        "description": "如果您无法访问您的移动设备，请输入一个恢复码来验证您的身份。"
+      }
+    }
+  },
+  "two-factor": {
+    "self": "双重认证",
+    "description": "双重认证为系统成员提供了一个额外的安全层。在登录时，用户需要输入由认证器应用程序生成的安全代码。",
+    "setup-steps": {
+      "setup-auth-app": {
+        "self": "设置认证器应用程序",
+        "description": "使用像 Google Authenticator、Microsoft Authenticator 或 Authy 这样的手机应用程序来进行 2FA 认证操作。",
+        "scan-qr-code": {
+          "self": "扫描二维码",
+          "description": "使用您手机中的认证器应用程序进行扫描。如果您无法扫描，可以{action}。",
+          "enter-the-text": "输入文本"
+        },
+        "verify-code": "验证应用程序的代码"
+      },
+      "download-recovery-codes": {
+        "self": "下载恢复码",
+        "tips": "保持您的恢复码和您的密码一样安全。建议将它们保存在一个密码管理器中，如 Lastpass、1Password 或 Keeper。",
+        "keep-safe": {
+          "self": "把您的恢复码放在一个安全的地方。",
+          "description": "这些代码是在您丢失密码和第二要素的情况下访问您的账户的最后手段。如果您找不到这些代码，您将失去对您账户的访问。"
+        }
+      },
+      "recovery-codes-saved": "确定已经保存了我的恢复码"
+    },
+    "recovery-codes": {
+      "self": "恢复码",
+      "description": "恢复码可以在您失去对设备的访问权和无法收到双因素认证代码的情况下用于访问您的账户。"
+    },
+    "disable": {
+      "self": "禁用双重认证",
+      "description": "您即将禁用您账户的双重认证。您在登录时将不再需要输入由您的 Authenticator 应用程序生成的安全代码。"
+    },
+    "messages": {
+      "2fa-enabled": "双重认证开启成功",
+      "2fa-disabled": "双重认证禁用成功",
+      "recovery-codes-regenerated": "恢复码已经重新生成"
+    }
+  },
+  "plugin": {
+    "ai": {
+      "examples": "例子",
+      "text-to-sql-placeholder": "在此输入自然语言后，Bytebase 会马上转换成 SQL 语句",
+      "run-automatically": "自动运行",
+      "conversation": {
+        "conversations": "会话",
+        "untitled": "未命名会话",
+        "delete": "删除会话",
+        "rename": "修改会话名称",
+        "select-or-create": "选择或{create}一个会话以开始。"
+      },
+      "preset-suggestion": {
+        "1": "哪个部门的员工最多？",
+        "2": "哪个部门经理的下属最多？",
+        "3": "各个部门的性别比例如何？"
+      },
+      "statement-copied": "语句已复制到剪贴板"
     }
   }
 }

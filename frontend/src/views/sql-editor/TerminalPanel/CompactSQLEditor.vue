@@ -4,24 +4,10 @@
       ref="editorRef"
       class="w-full h-auto max-h-[360px]"
       :value="sql"
+      :language="selectedLanguage"
       :dialect="selectedDialect"
       :readonly="readonly"
-      :options="{
-        theme: 'bb-dark',
-        minimap: {
-          enabled: false,
-        },
-        scrollbar: {
-          vertical: 'hidden',
-          horizontal: 'hidden',
-          alwaysConsumeMouseWheel: false,
-        },
-        overviewRulerLanes: 0,
-        lineNumbers: getLineNumber,
-        lineNumbersMinChars: 5,
-        glyphMargin: false,
-        cursorStyle: 'block',
-      }"
+      :options="EDITOR_OPTIONS"
       @change="handleChange"
       @change-selection="handleChangeSelection"
       @save="handleSaveSheet"
@@ -32,17 +18,26 @@
 
 <script lang="ts" setup>
 import { computed, nextTick, ref, watch, watchEffect } from "vue";
+import { editor as Editor } from "monaco-editor";
 
 import {
   useInstanceStore,
   useTabStore,
   useSQLEditorStore,
   useDatabaseStore,
-  useTableStore,
+  useDBSchemaStore,
   useInstanceById,
 } from "@/store";
 import MonacoEditor from "@/components/MonacoEditor/MonacoEditor.vue";
-import { ExecuteConfig, ExecuteOption, SQLDialect } from "@/types";
+import {
+  Database,
+  dialectOfEngine,
+  ExecuteConfig,
+  ExecuteOption,
+  SQLDialect,
+} from "@/types";
+import { TableMetadata } from "@/types/proto/store/database";
+import { useInstanceEditorLanguage } from "@/utils";
 
 const props = defineProps({
   sql: {
@@ -64,6 +59,8 @@ const emit = defineEmits<{
     config: ExecuteConfig,
     option?: ExecuteOption
   ): void;
+  (e: "history", direction: "up" | "down"): void;
+  (e: "clear-screen"): void;
 }>();
 
 const MIN_EDITOR_HEIGHT = 40; // ~= 1 line
@@ -71,7 +68,7 @@ const MIN_EDITOR_HEIGHT = 40; // ~= 1 line
 const instanceStore = useInstanceStore();
 const tabStore = useTabStore();
 const databaseStore = useDatabaseStore();
-const tableStore = useTableStore();
+const dbSchemaStore = useDBSchemaStore();
 const sqlEditorStore = useSQLEditorStore();
 
 const editorRef = ref<InstanceType<typeof MonacoEditor>>();
@@ -82,12 +79,10 @@ const selectedInstance = useInstanceById(
 const selectedInstanceEngine = computed(() => {
   return instanceStore.formatEngine(selectedInstance.value);
 });
+const selectedLanguage = useInstanceEditorLanguage(selectedInstance);
 const selectedDialect = computed((): SQLDialect => {
-  const engine = selectedInstanceEngine.value;
-  if (engine === "PostgreSQL") {
-    return "postgresql";
-  }
-  return "mysql";
+  const engine = selectedInstance.value.engine;
+  return dialectOfEngine(engine);
 });
 const currentTabId = computed(() => tabStore.currentTabId);
 const isSwitchingTab = ref(false);
@@ -109,6 +104,13 @@ watch(
   }
 );
 
+const firstLinePrompt = computed(() => {
+  const lang = selectedLanguage.value;
+  if (lang === "javascript") return "MONGO>";
+  if (lang === "redis") return "REDIS>";
+  return "SQL>";
+});
+
 const getLineNumber = (lineNumber: number) => {
   /*
     Show a SQL CLI like command prompt.
@@ -116,7 +118,9 @@ const getLineNumber = (lineNumber: number) => {
       -> second_line
       -> more_lines
   */
-  if (lineNumber === 1) return "SQL>";
+  if (lineNumber === 1) {
+    return firstLinePrompt.value;
+  }
   return "->";
 };
 
@@ -148,12 +152,22 @@ const handleSaveSheet = () => {
 const handleEditorReady = async () => {
   const monaco = await import("monaco-editor");
   const editor = editorRef.value?.editorInstance;
+  const readonly = editor?.createContextKey<boolean>(
+    "readonly",
+    props.readonly
+  );
+  watch(
+    () => props.readonly,
+    () => readonly?.set(props.readonly)
+  );
+
   editor?.addAction({
     id: "RunQuery",
     label: "Run Query",
     keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
     contextMenuGroupId: "operation",
     contextMenuOrder: 0,
+    precondition: "!readonly",
     run: async () => {
       emit("execute", props.sql, {
         databaseType: selectedInstanceEngine.value,
@@ -166,14 +180,31 @@ const handleEditorReady = async () => {
     label: "Explain Query",
     keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyE],
     contextMenuGroupId: "operation",
-    contextMenuOrder: 0,
+    contextMenuOrder: 1,
+    precondition: "!readonly",
     run: async () => {
       emit(
         "execute",
         props.sql,
-        { databaseType: selectedInstanceEngine.value },
+        {
+          databaseType: selectedInstanceEngine.value,
+        },
         { explain: true }
       );
+    },
+  });
+
+  editor?.addAction({
+    id: "ClearScreen",
+    label: "Clear Screen",
+    keybindings: [
+      monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyC,
+    ],
+    contextMenuGroupId: "operation",
+    contextMenuOrder: 3,
+    precondition: "!readonly",
+    run: () => {
+      emit("clear-screen");
     },
   });
 
@@ -210,7 +241,6 @@ const handleEditorReady = async () => {
     }
     cursorAtLast?.set(false);
   });
-
   editor?.addCommand(
     monaco.KeyCode.Enter,
     () => {
@@ -225,19 +255,71 @@ const handleEditorReady = async () => {
     },
     // Tell the editor this should be only
     // triggered when both of the two conditions are satisfied.
-    "endsWithSemicolon && cursorAtLast"
+    "!readonly && endsWithSemicolon && cursorAtLast && editorTextFocus && !suggestWidgetVisible && !renameInputVisible && !inSnippetMode && !quickFixWidgetVisible"
   );
 
-  watchEffect(() => {
+  const cursorAtFirstLine = editor?.createContextKey<boolean>(
+    "cursorAtFirstLine",
+    false
+  );
+  const cursorAtLastLine = editor?.createContextKey<boolean>(
+    "cursorAtLastLine",
+    false
+  );
+  const updateCursorPosition = () => {
+    if (!editor) return;
+    const model = editor.getModel();
+    if (model) {
+      const maxLine = model.getLineCount();
+      const cursor = editor.getPosition();
+      cursorAtFirstLine?.set(cursor?.lineNumber === 1);
+      cursorAtLastLine?.set(cursor?.lineNumber === maxLine);
+      return;
+    }
+    cursorAtLast?.set(false);
+  };
+  updateCursorPosition();
+  editor?.onDidChangeCursorPosition(updateCursorPosition);
+  editor?.addCommand(
+    monaco.KeyCode.UpArrow,
+    () => {
+      // When
+      // - the cursor is at the first line
+      // - then press "CtrlCmd + Up"
+      // We trigger the "history" event
+      emit("history", "up");
+    },
+    // Tell the editor this should be only
+    // triggered when both of the two conditions are satisfied.
+    "!readonly && cursorAtFirstLine && editorTextFocus && !suggestWidgetVisible && !renameInputVisible && !inSnippetMode && !quickFixWidgetVisible"
+  );
+  editor?.addCommand(
+    monaco.KeyCode.DownArrow,
+    () => {
+      // When
+      // - the cursor is at the last line
+      // - then press "CtrlCmd + Down"
+      // We trigger the "history" event
+      emit("history", "down");
+    },
+    // Tell the editor this should be only
+    // triggered when both of the two conditions are satisfied.
+    "!readonly && cursorAtLastLine && editorTextFocus && !suggestWidgetVisible && !renameInputVisible && !inSnippetMode && !quickFixWidgetVisible"
+  );
+
+  watchEffect(async () => {
     if (selectedInstance.value) {
+      const databaseMap: Map<Database, TableMetadata[]> = new Map();
       const databaseList = databaseStore.getDatabaseListByInstanceId(
         selectedInstance.value.id
       );
-      const tableList = databaseList
-        .map((item) => tableStore.getTableListByDatabaseId(item.id))
-        .flat();
-
-      editorRef.value?.setEditorAutoCompletionContext(databaseList, tableList);
+      for (const database of databaseList) {
+        const tableList = await dbSchemaStore.getOrFetchTableListByDatabaseId(
+          database.id
+        );
+        databaseMap.set(database, tableList);
+      }
+      editorRef.value?.setEditorAutoCompletionContext(databaseMap);
     }
   });
 
@@ -253,4 +335,25 @@ const updateEditorHeight = () => {
   }
   editorRef.value?.setEditorContentHeight(actualHeight);
 };
+
+const EDITOR_OPTIONS = ref<Editor.IStandaloneEditorConstructionOptions>({
+  theme: "bb-dark",
+  minimap: {
+    enabled: false,
+  },
+  scrollbar: {
+    vertical: "hidden",
+    horizontal: "hidden",
+    alwaysConsumeMouseWheel: false,
+  },
+  overviewRulerLanes: 0,
+  lineNumbers: getLineNumber,
+  lineNumbersMinChars: firstLinePrompt.value.length + 1,
+  glyphMargin: false,
+  cursorStyle: "block",
+});
+watch(
+  firstLinePrompt,
+  (prompt) => (EDITOR_OPTIONS.value.lineNumbersMinChars = prompt.length + 1)
+);
 </script>
