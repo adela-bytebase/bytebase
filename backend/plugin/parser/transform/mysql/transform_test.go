@@ -34,7 +34,7 @@ func TestCreateTableSeparateIndex(t *testing.T) {
 
 func TestNormalize(t *testing.T) {
 	input := `
-	create table t(a int) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+	create table t(a int DEFAULT NULL, b varchar(20) COLLATE utf8mb4_general_ci) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 	create index idx_a on t(a);
 	create unique index uk_t_a on t(a);
 	create index idx_xxx on t(a);
@@ -44,7 +44,7 @@ func TestNormalize(t *testing.T) {
 	standard := `
 	create table t4(a int);
 	create table t2(a int) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-	create table t(a int);
+	create table t(a int, b varchar(20));
 	create unique index uk_t_a on t(a);
 	create index idx_a on t(a);
 	create index idx_yyy on t(a);
@@ -54,7 +54,8 @@ func TestNormalize(t *testing.T) {
 		"  `a` INT\n" +
 		") ENGINE=InnoDB DEFAULT CHARACTER SET=UTF8MB4 DEFAULT COLLATE=UTF8MB4_GENERAL_CI;\n\n" +
 		"CREATE TABLE `t` (\n" +
-		"  `a` INT\n" +
+		"  `a` INT,\n" +
+		"  `b` VARCHAR(20)\n" +
 		");\n\n" +
 		"CREATE INDEX `idx_xxx` ON `t` (`a`);\n\n" +
 		"CREATE UNIQUE INDEX `uk_t_a` ON `t` (`a`);\n\n" +
@@ -67,4 +68,27 @@ func TestNormalize(t *testing.T) {
 	got, err := mysqlTransformer.Normalize(input, standard)
 	a.NoError(err)
 	a.Equal(want, got)
+}
+
+func TestCheck(t *testing.T) {
+	type testData struct {
+		input string
+		err   string
+	}
+	tests := []testData{
+		{
+			input: `create table t(a int, FOREIGN KEY (a) references t1(a));`,
+			err:   "The constraint name is required for SDL format",
+		},
+		{
+			input: `create table t(a int, CHECK (a > 0));`,
+			err:   "The constraint name is required for SDL format",
+		},
+	}
+	a := require.New(t)
+	mysqlTransformer := &SchemaTransformer{}
+	for _, test := range tests {
+		_, err := mysqlTransformer.Check(test.input)
+		a.Equal(test.err, err.Error())
+	}
 }

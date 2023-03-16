@@ -14,11 +14,12 @@ import (
 // InstanceChangeHistoryMessage records the change history of an instance.
 // it deprecates the old MigrationHistory.
 type InstanceChangeHistoryMessage struct {
-	CreatorID           int
-	CreatedTs           int64
-	UpdaterID           int
-	UpdatedTs           int64
-	InstanceID          int
+	CreatorID int
+	CreatedTs int64
+	UpdaterID int
+	UpdatedTs int64
+	// nil means bytebase meta instance.
+	InstanceID          *int
 	DatabaseID          *int
 	IssueID             *int
 	ReleaseVersion      string
@@ -42,7 +43,7 @@ type InstanceChangeHistoryMessage struct {
 // FindInstanceChangeHistoryMessage is for listing a list of instance change history.
 type FindInstanceChangeHistoryMessage struct {
 	ID         *int64
-	InstanceID int
+	InstanceID *int
 	DatabaseID *int
 	Source     *db.MigrationSource
 	Version    *string
@@ -138,14 +139,14 @@ func (*Store) createInstanceChangeHistoryImpl(ctx context.Context, tx *Tx, creat
 			valueStr = append(valueStr, fmt.Sprintf("$%d", count))
 			count++
 		}
-		if create.CreatedTs != 0 {
+		if create.CreatedTs == 0 {
 			valueStr = append(valueStr, "DEFAULT")
 		} else {
 			valueStr = append(valueStr, fmt.Sprintf("$%d", count))
 			values = append(values, create.CreatedTs)
 			count++
 		}
-		if create.UpdatedTs != 0 {
+		if create.UpdatedTs == 0 {
 			valueStr = append(valueStr, "DEFAULT")
 		} else {
 			valueStr = append(valueStr, fmt.Sprintf("$%d", count))
@@ -198,6 +199,9 @@ func (*Store) createInstanceChangeHistoryImpl(ctx context.Context, tx *Tx, creat
 			UpdatedTs: createdTs,
 		})
 		i++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return list, nil
@@ -266,6 +270,23 @@ func (s *Store) FindInstanceChangeHistoryList(ctx context.Context, find *db.Migr
 		if err != nil {
 			return nil, err
 		}
+		if change.DatabaseID != nil {
+			database, err := s.GetDatabaseV2(ctx, &FindDatabaseMessage{UID: change.DatabaseID})
+			if err != nil {
+				return nil, err
+			}
+			migrationHistory.Namespace = database.DatabaseName
+		}
+		creator, err := s.GetPrincipalByID(ctx, change.CreatorID)
+		if err != nil {
+			return nil, err
+		}
+		migrationHistory.Creator = creator.Name
+		updater, err := s.GetPrincipalByID(ctx, change.UpdaterID)
+		if err != nil {
+			return nil, err
+		}
+		migrationHistory.Updater = updater.Name
 		migrationHistoryList = append(migrationHistoryList, migrationHistory)
 	}
 
@@ -362,6 +383,9 @@ func (s *Store) ListInstanceChangeHistory(ctx context.Context, find *FindInstanc
 		changeHistory.Deleted = convertRowStatusToDeleted(rowStatus)
 		list = append(list, &changeHistory)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -383,7 +407,7 @@ func (s *Store) UpdateInstanceChangeHistoryAsDone(ctx context.Context, migration
 		Status:              &status,
 		Schema:              &updatedSchema,
 	}
-	return s.updateInstanceChangeHistory(ctx, update)
+	return s.UpdateInstanceChangeHistory(ctx, update)
 }
 
 // UpdateInstanceChangeHistoryAsFailed updates a change history to failed.
@@ -398,12 +422,12 @@ func (s *Store) UpdateInstanceChangeHistoryAsFailed(ctx context.Context, migrati
 		ExecutionDurationNs: &migrationDurationNs,
 		Status:              &status,
 	}
-	return s.updateInstanceChangeHistory(ctx, update)
+	return s.UpdateInstanceChangeHistory(ctx, update)
 }
 
 // UpdateInstanceChangeHistory updates an instance change history.
 // it deprecates the old UpdateHistoryAsDone and UpdateHistoryAsFailed.
-func (s *Store) updateInstanceChangeHistory(ctx context.Context, update *UpdateInstanceChangeHistoryMessage) error {
+func (s *Store) UpdateInstanceChangeHistory(ctx context.Context, update *UpdateInstanceChangeHistoryMessage) error {
 	set, args := []string{}, []interface{}{}
 	if v := update.Status; v != nil {
 		set, args = append(set, fmt.Sprintf("status = $%d", len(args)+1)), append(args, *v)
@@ -413,6 +437,9 @@ func (s *Store) updateInstanceChangeHistory(ctx context.Context, update *UpdateI
 	}
 	if v := update.Schema; v != nil {
 		set, args = append(set, fmt.Sprintf("schema = $%d", len(args)+1)), append(args, *v)
+	}
+	if len(set) == 0 {
+		return nil
 	}
 	query := `
 	UPDATE instance_change_history
@@ -433,7 +460,7 @@ func (s *Store) updateInstanceChangeHistory(ctx context.Context, update *UpdateI
 	return tx.Commit()
 }
 
-func (*Store) getLargestInstanceChangeHistorySequenceImpl(ctx context.Context, tx *Tx, instanceID int, databaseID *int, baseline bool) (int64, error) {
+func (*Store) getLargestInstanceChangeHistorySequenceImpl(ctx context.Context, tx *Tx, instanceID *int, databaseID *int, baseline bool) (int64, error) {
 	query := `
 	SELECT
 		MAX(sequence)
@@ -458,7 +485,7 @@ func (*Store) getLargestInstanceChangeHistorySequenceImpl(ctx context.Context, t
 }
 
 // GetLargestInstanceChangeHistorySequence will get the largest sequence number.
-func (s *Store) GetLargestInstanceChangeHistorySequence(ctx context.Context, instanceID int, databaseID *int, baseline bool) (int64, error) {
+func (s *Store) GetLargestInstanceChangeHistorySequence(ctx context.Context, instanceID *int, databaseID *int, baseline bool) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return -1, err
@@ -478,7 +505,7 @@ func (s *Store) GetLargestInstanceChangeHistorySequence(ctx context.Context, ins
 }
 
 // GetLargestInstanceChangeHistoryVersionSinceBaseline will get the largest version since last baseline or branch.
-func (s *Store) GetLargestInstanceChangeHistoryVersionSinceBaseline(ctx context.Context, instanceID int, databaseID *int) (*string, error) {
+func (s *Store) GetLargestInstanceChangeHistoryVersionSinceBaseline(ctx context.Context, instanceID *int, databaseID *int) (*string, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -570,6 +597,9 @@ func (s *Store) ListInstanceHavingInstanceChangeHistory(ctx context.Context) ([]
 			return nil, err
 		}
 		list = append(list, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return list, nil

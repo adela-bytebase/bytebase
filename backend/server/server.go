@@ -568,7 +568,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	p.Use(e)
 
 	// TODO: remove this on May 2023
-	s.backfillInstanceChangeHistory(ctx)
+	go s.backfillInstanceChangeHistory(ctx)
 
 	serverStarted = true
 	return s, nil
@@ -693,17 +693,38 @@ func (s *Server) getInitSetting(ctx context.Context, datastore *store.Store) (*w
 	}
 
 	// initial workspace profile setting
-	bytes, err := protojson.Marshal(&storepb.WorkspaceProfileSetting{
-		ExternalUrl:    s.profile.ExternalURL,
-		DisallowSignup: false,
+	settingName := api.SettingWorkspaceProfile
+	workspaceProfileSetting, err := s.store.GetSettingV2(ctx, &store.FindSettingMessage{
+		Name:    &settingName,
+		Enforce: true,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := datastore.CreateSettingIfNotExistV2(ctx, &store.SettingMessage{
-		Name:        api.SettingWorkspaceProfile,
-		Value:       string(bytes),
-		Description: "Workspace general settings",
+
+	workspaceProfilePayload := &storepb.WorkspaceProfileSetting{
+		ExternalUrl:    s.profile.ExternalURL,
+		DisallowSignup: false,
+	}
+	if workspaceProfileSetting != nil {
+		payload := new(storepb.WorkspaceProfileSetting)
+		if err := protojson.Unmarshal([]byte(workspaceProfileSetting.Value), payload); err != nil {
+			return nil, err
+		}
+		workspaceProfilePayload.DisallowSignup = payload.DisallowSignup
+		if s.profile.ExternalURL == "" {
+			workspaceProfilePayload.ExternalUrl = payload.ExternalUrl
+		}
+	}
+
+	bytes, err := protojson.Marshal(workspaceProfilePayload)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := datastore.UpsertSettingV2(ctx, &store.SetSettingMessage{
+		Name:  api.SettingWorkspaceProfile,
+		Value: string(bytes),
 	}, api.SystemBotID); err != nil {
 		return nil, err
 	}
@@ -892,16 +913,6 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 		return errors.Wrapf(err, "failed to create onboarding instance")
 	}
 
-	// Try creating the migration history database.
-	driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, postgres.SampleDatabase)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect onboarding instance")
-	}
-	defer driver.Close(ctx)
-	if err := driver.SetupMigrationIfNeeded(ctx); err != nil {
-		return errors.Wrapf(err, "failed to set up migration schema on onboarding instance")
-	}
-
 	// Sync the instance schema so we can transfer the sample database later.
 	if _, err := s.SchemaSyncer.SyncInstance(ctx, instance); err != nil {
 		return errors.Wrapf(err, "failed to sync onboarding instance")
@@ -1084,8 +1095,11 @@ func (s *Server) backfillInstanceChangeHistory(ctx context.Context) {
 
 		var errList error
 		for _, instance := range instanceList {
-			err := func() error {
-				if instance.Engine == db.Redis {
+			err := func(instance *store.InstanceMessage) error {
+				limit := 10
+				offset := 0
+
+				if instance.Engine == db.Redis || instance.Engine == db.Oracle || instance.Engine == db.Spanner || instance.Engine == db.MongoDB || instance.Engine == db.SQLite {
 					return nil
 				}
 				if instanceMigrated[instance.UID] {
@@ -1107,76 +1121,81 @@ func (s *Server) backfillInstanceChangeHistory(ctx context.Context) {
 				}
 				defer driver.Close(ctx)
 
-				history, err := driver.FindMigrationHistoryList(ctx, &db.MigrationHistoryFind{
-					InstanceID: instance.UID,
-				})
-				if err != nil {
-					return err
-				}
-				if len(history) == 0 {
-					return nil
-				}
-
-				var creates []*store.InstanceChangeHistoryMessage
-				for _, h := range history {
-					var databaseID *int
-					if database, ok := nameToDatabase[h.Namespace]; ok {
-						databaseID = &database.UID
-					}
-
-					var issueID *int
-					if id, err := strconv.Atoi(h.IssueID); err != nil {
-						errList = multierr.Append(errList, err)
-					} else if hasIssueID[id] {
-						// Has FK constraint on issue_id.
-						// Set to id if issue exists.
-						issueID = &id
-					}
-
-					creatorID := api.SystemBotID
-					updaterID := api.SystemBotID
-					if principal, ok := nameToPrincipal[h.Creator]; ok {
-						creatorID = principal.ID
-					}
-					if principal, ok := nameToPrincipal[h.Updater]; ok {
-						updaterID = principal.ID
-					}
-
-					storedVersion, err := util.ToStoredVersion(false, h.Version, "")
+				for {
+					history, err := driver.FindMigrationHistoryList(ctx, &db.MigrationHistoryFind{
+						InstanceID: &instance.UID,
+						Limit:      &limit,
+						Offset:     &offset,
+					})
 					if err != nil {
 						return err
 					}
+					if len(history) == 0 {
+						break
+					}
+					offset += limit
 
-					changeHistory := store.InstanceChangeHistoryMessage{
-						CreatorID:           creatorID,
-						CreatedTs:           h.CreatedTs,
-						UpdaterID:           updaterID,
-						UpdatedTs:           h.UpdatedTs,
-						InstanceID:          instance.UID,
-						DatabaseID:          databaseID,
-						IssueID:             issueID,
-						ReleaseVersion:      h.ReleaseVersion,
-						Sequence:            int64(h.Sequence),
-						Source:              h.Source,
-						Type:                h.Type,
-						Status:              h.Status,
-						Version:             storedVersion,
-						Description:         h.Description,
-						Statement:           h.Statement,
-						Schema:              h.Schema,
-						SchemaPrev:          h.SchemaPrev,
-						ExecutionDurationNs: h.ExecutionDurationNs,
-						Payload:             h.Payload,
+					var creates []*store.InstanceChangeHistoryMessage
+					for _, h := range history {
+						var databaseID *int
+						if database, ok := nameToDatabase[h.Namespace]; ok {
+							databaseID = &database.UID
+						}
+
+						var issueID *int
+						if id, err := strconv.Atoi(h.IssueID); err != nil {
+							errList = multierr.Append(errList, err)
+						} else if hasIssueID[id] {
+							// Has FK constraint on issue_id.
+							// Set to id if issue exists.
+							issueID = &id
+						}
+
+						creatorID := api.SystemBotID
+						updaterID := api.SystemBotID
+						if principal, ok := nameToPrincipal[h.Creator]; ok {
+							creatorID = principal.ID
+						}
+						if principal, ok := nameToPrincipal[h.Updater]; ok {
+							updaterID = principal.ID
+						}
+
+						storedVersion, err := util.ToStoredVersion(h.UseSemanticVersion, h.Version, h.SemanticVersionSuffix)
+						if err != nil {
+							return err
+						}
+
+						changeHistory := store.InstanceChangeHistoryMessage{
+							CreatorID:           creatorID,
+							CreatedTs:           h.CreatedTs,
+							UpdaterID:           updaterID,
+							UpdatedTs:           h.UpdatedTs,
+							InstanceID:          &instance.UID,
+							DatabaseID:          databaseID,
+							IssueID:             issueID,
+							ReleaseVersion:      h.ReleaseVersion,
+							Sequence:            int64(h.Sequence),
+							Source:              h.Source,
+							Type:                h.Type,
+							Status:              h.Status,
+							Version:             storedVersion,
+							Description:         h.Description,
+							Statement:           h.Statement,
+							Schema:              h.Schema,
+							SchemaPrev:          h.SchemaPrev,
+							ExecutionDurationNs: h.ExecutionDurationNs,
+							Payload:             h.Payload,
+						}
+
+						creates = append(creates, &changeHistory)
 					}
 
-					creates = append(creates, &changeHistory)
-				}
-
-				if _, err := s.store.CreateInstanceChangeHistory(ctx, creates...); err != nil {
-					return err
+					if _, err := s.store.CreateInstanceChangeHistory(ctx, creates...); err != nil {
+						return err
+					}
 				}
 				return nil
-			}()
+			}(instance)
 			if err != nil {
 				errList = multierr.Append(errList, err)
 			}

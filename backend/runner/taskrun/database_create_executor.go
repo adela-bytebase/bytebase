@@ -41,6 +41,11 @@ type DatabaseCreateExecutor struct {
 	profile      config.Profile
 }
 
+var cannotCreateDatabase = map[db.Type]bool{
+	db.Redis:  true,
+	db.Oracle: true,
+}
+
 // RunOnce will run the database create task executor once.
 func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.TaskMessage) (terminated bool, result *api.TaskRunResultPayload, err error) {
 	payload := &api.TaskDatabaseCreatePayload{}
@@ -57,15 +62,18 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 	if err != nil {
 		return true, nil, err
 	}
+
+	if cannotCreateDatabase[instance.Engine] {
+		return true, nil, errors.Errorf("Creating database is not supported")
+	}
+
 	environment, err := exec.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &instance.EnvironmentID})
 	if err != nil {
 		return true, nil, err
 	}
 
 	var driver db.Driver
-	if instance.Engine == db.Oracle {
-		return true, nil, errors.Errorf("Creating Oracle database is not supported")
-	} else if instance.Engine == db.MongoDB {
+	if instance.Engine == db.MongoDB {
 		// For MongoDB, it allows us to connect to the non-existing database. So we pass the database name to driver to let us connect to the specific database.
 		// And run the create collection statement later.
 		driver, err = exec.dbFactory.GetAdminDatabaseDriver(ctx, instance, payload.DatabaseName)
@@ -122,6 +130,8 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 	// Create a migrate migration history upon creating the database.
 	// TODO(d): support semantic versioning.
 	mi := &db.MigrationInfo{
+		InstanceID:     &task.InstanceID,
+		CreatorID:      task.CreatorID,
 		ReleaseVersion: exec.profile.Version,
 		Version:        schemaVersion,
 		Namespace:      payload.DatabaseName,
@@ -161,13 +171,11 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 		)
 	} else {
 		mi.IssueID = strconv.Itoa(issue.UID)
+		mi.IssueIDInt = &issue.UID
 	}
 
-	migrationID, _, err := driver.ExecuteMigration(ctx, mi, statement)
-	if err != nil {
-		return true, nil, err
-	}
-
+	// Upsert first because we need database id in instance change history.
+	// The sync status is NOT_FOUND, which will be updated to OK if succeeds.
 	labels := make(map[string]string)
 	if payload.Labels != "" {
 		var databaseLabels []*api.DatabaseLabel
@@ -183,12 +191,29 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 		EnvironmentID:        environment.ResourceID,
 		InstanceID:           instance.ResourceID,
 		DatabaseName:         payload.DatabaseName,
-		SyncState:            api.OK,
+		SyncState:            api.NotFound,
 		SuccessfulSyncTimeTs: time.Now().Unix(),
 		SchemaVersion:        schemaVersion,
 		Labels:               labels,
 	})
 	if err != nil {
+		return true, nil, err
+	}
+
+	mi.DatabaseID = &database.UID
+
+	migrationID, _, err := utils.ExecuteMigration(ctx, exec.store, driver, mi, statement)
+	if err != nil {
+		return true, nil, err
+	}
+
+	syncStatus := api.OK
+	if _, err := exec.store.UpdateDatabase(ctx, &store.UpdateDatabaseMessage{
+		EnvironmentID: environment.ResourceID,
+		InstanceID:    instance.ResourceID,
+		DatabaseName:  payload.DatabaseName,
+		SyncState:     &syncStatus,
+	}, api.SystemBotID); err != nil {
 		return true, nil, err
 	}
 
@@ -287,7 +312,7 @@ func (*DatabaseCreateExecutor) getSchemaFromPeerTenantDatabase(ctx context.Conte
 		return "", "", err
 	}
 	defer driver.Close(ctx)
-	schemaVersion, err := utils.GetLatestSchemaVersion(ctx, stores, driver, instance.UID, similarDB.UID, similarDB.DatabaseName)
+	schemaVersion, err := utils.GetLatestSchemaVersion(ctx, stores, similarDBInstance.UID, similarDB.UID, similarDB.DatabaseName)
 	if err != nil {
 		return "", "", errors.Wrapf(err, "failed to get migration history for database %q", similarDB.DatabaseName)
 	}

@@ -1,68 +1,71 @@
 <template>
-  <BBModal class="!pb-0" container-class="!p-0" @close="$emit('close')">
-    <div
-      class="h-[calc(100vh-10rem)] w-[calc(100vw-8rem)] max-w-[72rem] px-8 pb-4 flex"
-    >
-      <aside class="hidden lg:flex lg:flex-col w-[14em] border-l border-b">
-        <ConversationList />
-      </aside>
+  <div
+    v-if="openAIKey"
+    class="w-full flex flex-col"
+    :class="[
+      !isChatMode && 'px-4 py-2 border-t',
+      isChatMode && 'flex-1 overflow-hidden',
+    ]"
+  >
+    <template v-if="isChatMode">
+      <ActionBar />
+      <ChatView :conversation="selectedConversation" @enter="requestAI" />
+    </template>
 
-      <div class="flex-1 flex flex-col bg-gray-100">
-        <ChatView @enter="requestAI" />
-
-        <div class="px-2 py-2">
-          <div>
-            <label class="inline-flex items-center gap-x-1">
-              <BBCheckbox :value="autoRun" @toggle="autoRun = $event" />
-              <span class="textinfolabel">
-                {{ $t("plugin.ai.run-automatically") }}
-              </span>
-            </label>
-          </div>
-          <PromptInput :disabled="state.loading" @enter="requestAI" />
-        </div>
+    <div :class="[isChatMode && 'px-4 py-2 flex flex-col gap-2']">
+      <div v-if="isChatMode" class="flex items-center gap-2 w-full">
+        <DynamicSuggestions class="flex-1" @enter="requestAI" />
       </div>
+      <PromptInput @focus="tab.editMode = 'CHAT-TO-SQL'" @enter="requestAI" />
     </div>
-  </BBModal>
+
+    <template v-if="isChatMode">
+      <HistoryPanel v-if="showHistoryDialog" />
+    </template>
+  </div>
 </template>
 
 <script lang="ts" setup>
-import { reactive, toRef } from "vue";
-import { Axios, AxiosResponse } from "axios";
+import { computed, reactive, watch } from "vue";
 import { head } from "lodash-es";
+import { Axios, AxiosResponse } from "axios";
 
-import { BBCheckbox, BBModal } from "@/bbkit";
-import { useAIContext } from "../logic";
-import type { OpenAIMessage, OpenAIResponse } from "../types";
-import ConversationList from "./ConversationList.vue";
-import ChatView from "./ChatView";
-import PromptInput from "./PromptInput.vue";
+import { useCurrentTab } from "@/store";
 import { useConversationStore } from "../store";
+import ActionBar from "./ActionBar.vue";
+import ChatView from "./ChatView";
+import DynamicSuggestions from "./DynamicSuggestions.vue";
+import PromptInput from "./PromptInput.vue";
+import HistoryPanel from "./HistoryPanel";
+import { onConnectionChanged, useAIContext, useCurrentChat } from "../logic";
+import { OpenAIMessage, OpenAIResponse } from "../types";
 
 type LocalState = {
   loading: boolean;
 };
 
-defineEmits<{
-  (event: "close"): void;
-}>();
-
 const state = reactive<LocalState>({
   loading: false,
 });
 
-const context = useAIContext();
-
-const { showDialog, openAIKey, autoRun } = context;
-
+const tab = useCurrentTab();
 const store = useConversationStore();
-const conversation = toRef(store, "selectedConversation");
+const isChatMode = computed(() => tab.value.editMode === "CHAT-TO-SQL");
+
+const context = useAIContext();
+const { events, openAIKey, autoRun, showHistoryDialog } = context;
+const {
+  list: conversationList,
+  ready,
+  selected: selectedConversation,
+} = useCurrentChat();
 
 const requestAI = async (query: string) => {
-  const c = conversation.value;
-  if (!c) return;
+  const conversation = selectedConversation.value;
+  if (!conversation) return;
+  const t = tab.value;
 
-  const { messageList } = c;
+  const { messageList } = conversation;
   if (messageList.length === 0) {
     // For the first message of a conversation,
     // add extra database schema metadata info if possible
@@ -95,7 +98,7 @@ const requestAI = async (query: string) => {
     prompts.push(`### ${query}`);
     const prompt = prompts.join("\n");
     await store.createMessage({
-      conversation_id: c.id,
+      conversation_id: conversation.id,
       content: query,
       prompt,
       author: "USER",
@@ -104,7 +107,7 @@ const requestAI = async (query: string) => {
     });
   } else {
     await store.createMessage({
-      conversation_id: c.id,
+      conversation_id: conversation.id,
       content: query,
       prompt: query,
       author: "USER",
@@ -115,17 +118,16 @@ const requestAI = async (query: string) => {
 
   const answer = await store.createMessage({
     author: "AI",
-    prompt: "SELECT",
+    prompt: "",
     content: "",
     error: "",
-    conversation_id: c.id,
+    conversation_id: conversation.id,
     status: "LOADING",
   });
   const url = "https://api.openai.com/v1/chat/completions";
-  const FINAL_PROMPT = "SELECT";
   const messages: OpenAIMessage[] = [];
 
-  c.messageList.forEach((message) => {
+  conversation.messageList.forEach((message) => {
     const { author, prompt } = message;
     messages.push({
       role: author === "USER" ? "user" : "assistant",
@@ -166,14 +168,8 @@ const requestAI = async (query: string) => {
 
     const text = head(data?.choices)?.message.content?.trim();
     if (text) {
-      const parts = [text];
-      if (!text.startsWith(FINAL_PROMPT)) {
-        parts.unshift(FINAL_PROMPT);
-      }
-      const statement = parts.join(" ").trim();
-
-      answer.content = statement;
-      answer.prompt = statement;
+      answer.content = text;
+      answer.prompt = text;
     }
 
     answer.status = "DONE";
@@ -183,11 +179,16 @@ const requestAI = async (query: string) => {
   } finally {
     state.loading = false;
     await store.updateMessage(answer);
-    if (c.id === conversation.value?.id) {
+    if (conversation.id === conversation.id) {
       if (answer.status === "FAILED") {
         context.events.emit("error", answer.error);
       } else {
-        if (showDialog.value && autoRun.value) {
+        if (
+          autoRun.value &&
+          t.id === tab.value.id &&
+          conversation.id === selectedConversation.value?.id
+        ) {
+          // If the chat is still active, emit 'apply-statement' event
           context.events.emit("apply-statement", {
             statement: answer.content,
             run: autoRun.value,
@@ -197,4 +198,30 @@ const requestAI = async (query: string) => {
     }
   }
 };
+
+onConnectionChanged(() => {
+  showHistoryDialog.value = false;
+});
+
+events.on("new-conversation", async () => {
+  showHistoryDialog.value = false;
+  const c = await store.createConversation({
+    name: "",
+    ...tab.value.connection,
+  });
+  selectedConversation.value = c;
+});
+
+watch(
+  [ready, conversationList],
+  async ([ready, list]) => {
+    if (ready && list.length === 0) {
+      store.createConversation({
+        name: "",
+        ...tab.value.connection,
+      });
+    }
+  },
+  { immediate: true }
+);
 </script>

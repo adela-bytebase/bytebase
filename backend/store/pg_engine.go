@@ -20,7 +20,7 @@ import (
 	dbdriver "github.com/bytebase/bytebase/backend/plugin/db"
 
 	// Register postgres driver.
-	_ "github.com/bytebase/bytebase/backend/plugin/db/pg"
+	"github.com/bytebase/bytebase/backend/plugin/db/pg"
 
 	"github.com/bytebase/bytebase/backend/common"
 )
@@ -146,7 +146,8 @@ func (db *DB) Open(ctx context.Context) (schemaVersion *semver.Version, err erro
 		return nil, errors.Wrap(err, "failed to get current schema version")
 	}
 
-	if err := migrate(ctx, d, verBefore, db.mode, db.connCfg.StrictUseDb, db.serverVersion, databaseName); err != nil {
+	pgDriver := d.(*pg.Driver)
+	if err := migrate(ctx, pgDriver, verBefore, db.mode, db.connCfg.StrictUseDb, db.serverVersion, databaseName); err != nil {
 		return nil, errors.Wrap(err, "failed to migrate")
 	}
 
@@ -298,7 +299,7 @@ const (
 // file run in a transaction to prevent partial migrations.
 //
 // The procedure follows https://github.com/bytebase/bytebase/blob/main/docs/schema-update-guide.md.
-func migrate(ctx context.Context, d dbdriver.Driver, curVer *semver.Version, mode common.ReleaseMode, strictDb bool, serverVersion, databaseName string) error {
+func migrate(ctx context.Context, d *pg.Driver, curVer *semver.Version, mode common.ReleaseMode, strictDb bool, serverVersion, databaseName string) error {
 	log.Info("Apply database migration if needed...")
 	if curVer == nil {
 		log.Info("The database schema has not been setup.")
@@ -355,9 +356,11 @@ func migrate(ctx context.Context, d dbdriver.Driver, curVer *semver.Version, mod
 			createDatabase = true
 		}
 
-		if _, _, err := d.ExecuteMigration(
+		// TODO(p0ny): migrate to instance change history
+		if _, _, err := d.ExecuteMigrationUsingMigrationHistory(
 			ctx,
 			&dbdriver.MigrationInfo{
+				InstanceID:            nil,
 				ReleaseVersion:        serverVersion,
 				UseSemanticVersion:    true,
 				Version:               cutoffSchemaVersion.String(),
@@ -418,9 +421,11 @@ func migrate(ctx context.Context, d dbdriver.Driver, curVer *semver.Version, mod
 					continue
 				}
 				log.Info(fmt.Sprintf("Migrating %s...", pv.version))
-				if _, _, err := d.ExecuteMigration(
+				// TODO(p0ny): migrate to instance change history
+				if _, _, err := d.ExecuteMigrationUsingMigrationHistory(
 					ctx,
 					&dbdriver.MigrationInfo{
+						InstanceID:            nil,
 						ReleaseVersion:        serverVersion,
 						UseSemanticVersion:    true,
 						Version:               pv.version.String(),
@@ -486,7 +491,7 @@ func getProdCutoffVersion() (semver.Version, error) {
 	return patchVersions[len(patchVersions)-1].version, nil
 }
 
-func migrateDev(ctx context.Context, d dbdriver.Driver, serverVersion, databaseName string, cutoffSchemaVersion semver.Version, histories []*dbdriver.MigrationHistory) error {
+func migrateDev(ctx context.Context, d *pg.Driver, serverVersion, databaseName string, cutoffSchemaVersion semver.Version, histories []*dbdriver.MigrationHistory) error {
 	devMigrations, err := getDevMigrations()
 	if err != nil {
 		return err
@@ -509,9 +514,11 @@ func migrateDev(ctx context.Context, d dbdriver.Driver, serverVersion, databaseN
 	for _, m := range migrations {
 		log.Info(fmt.Sprintf("Migrating dev %s...", m.filename))
 		// We expect to use semantic versioning for dev environment too because getLatestVersion() always expect to get the latest version in semantic format.
-		if _, _, err := d.ExecuteMigration(
+		// TODO(p0ny): migrate to instance change history
+		if _, _, err := d.ExecuteMigrationUsingMigrationHistory(
 			ctx,
 			&dbdriver.MigrationInfo{
+				InstanceID:            nil,
 				ReleaseVersion:        serverVersion,
 				UseSemanticVersion:    true,
 				Version:               cutoffSchemaVersion.String(),

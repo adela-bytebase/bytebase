@@ -172,6 +172,7 @@
 
     <!-- 2FA setting section -->
     <div
+      v-if="showMFAConfig"
       class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 border-t mt-16 pt-8 pb-4"
     >
       <div class="w-full flex flex-row justify-between items-center">
@@ -188,8 +189,10 @@
       </div>
       <p class="mt-4 text-sm text-gray-500">
         {{ $t("two-factor.description") }}
-        <!-- TODO(steven): update the docs link -->
-        <LearnMoreLink class="ml-1" url="" />
+        <LearnMoreLink
+          class="ml-1"
+          url="https://www.bytebase.com/docs/administration/2fa?source=console"
+        />
       </p>
       <template v-if="isMFAEnabled">
         <div class="w-full flex flex-row justify-between items-center mt-8">
@@ -241,6 +244,7 @@
     v-if="state.showDisable2FAConfirmModal"
     :title="$t('two-factor.disable.self')"
     :description="$t('two-factor.disable.description')"
+    :style="'danger'"
     @close="state.showDisable2FAConfirmModal = false"
     @confirm="handleDisable2FA"
   />
@@ -328,6 +332,11 @@ const principal = computed(() => {
     return principalStore.principalById(parseInt(props.principalId));
   }
   return currentUser.value;
+});
+
+const showMFAConfig = computed(() => {
+  // Only show MFA config for the user themselves.
+  return principal.value.id === currentUser.value.id;
 });
 
 const passwordMismatch = computed(() => {

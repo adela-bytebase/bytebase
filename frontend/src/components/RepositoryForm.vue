@@ -91,12 +91,14 @@
         "
       >
         <template #menuItem="{ item }">
-          {{
-            $t(
-              `project.settings.select-schema-change-type-${item.toLowerCase()}`
-            )
-          }}
-          <BBBetaBadge v-if="item === 'SDL'" />
+          <div class="flex items-center gap-x-2">
+            {{
+              $t(
+                `project.settings.select-schema-change-type-${item.toLowerCase()}`
+              )
+            }}
+            <BBBetaBadge v-if="item === 'SDL'" class="!leading-3" />
+          </div>
         </template>
       </BBSelect>
     </div>
@@ -200,7 +202,9 @@
       />
       <div v-if="schemaTagPlaceholder" class="mt-2 textinfolabel">
         <span class="text-red-600">*</span>
-        <span class="ml-1">{{ $t("repository.if-specified") }},</span>
+        <span v-if="isProjectSchemaChangeTypeDDL" class="ml-1">
+          {{ $t("repository.if-specified") }},
+        </span>
         <span class="ml-1">{{ schemaTagPlaceholder }}</span>
       </div>
       <div
@@ -247,7 +251,7 @@
         <span class="text-red-600">*</span>
         {{ $t("common.required-placeholder") }}: {{ "\{\{NAME\}\}" }};
         <template v-if="schemaOptionalTagPlaceholder.length > 0">
-          {{ $t("common.optional-placeholder") }}: {{ "\{\{ENV_NAME\}\}" }},
+          {{ $t("common.optional-placeholder") }}: {{ "\{\{ENV_ID\}\}" }},
           {{ "\{\{DB_NAME\}\}" }}
         </template>
       </div>
@@ -399,7 +403,11 @@ export default defineComponent({
           sampleText: type,
         },
         {
-          placeholder: "{{ENV_NAME}}",
+          placeholder: "{{ENV_ID}}",
+          sampleText: "env1",
+        },
+        {
+          placeholder: "{{ENV_NAME}}", // for legacy support
           sampleText: "env1",
         },
         {
@@ -431,6 +439,14 @@ export default defineComponent({
           placeholder: "{{DB_NAME}}",
           sampleText: "db1",
         },
+        {
+          placeholder: "{{ENV_ID}}",
+          sampleText: "env1",
+        },
+        {
+          placeholder: "{{ENV_NAME}}", // for legacy support
+          sampleText: "env1",
+        },
       ];
       let result = `${baseDirectory}/${schemaPathTemplate}`;
       for (const item of placeholderList) {
@@ -442,8 +458,8 @@ export default defineComponent({
 
     const fileOptionalPlaceholder = computed(() => {
       const tags = [] as string[];
-      // Only allows {{ENV_NAME}} to be an optional placeholder for non-tenant mode projects
-      if (!isTenantProject.value) tags.push("{{ENV_NAME}}");
+      // Only allows {{ENV_ID}} to be an optional placeholder for non-tenant mode projects
+      if (!isTenantProject.value) tags.push("{{ENV_ID}}");
       tags.push("{{DESCRIPTION}}");
       return tags;
     });
@@ -457,8 +473,8 @@ export default defineComponent({
 
     const schemaOptionalTagPlaceholder = computed(() => {
       const tags = [] as string[];
-      // Only allows {{ENV_NAME}} to be an optional placeholder for non-tenant mode projects
-      if (!isTenantProject.value) tags.push("{{ENV_NAME}}");
+      // Only allows {{ENV_ID}} to be an optional placeholder for non-tenant mode projects
+      if (!isTenantProject.value) tags.push("{{ENV_ID}}");
       return tags;
     });
 

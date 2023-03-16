@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tidb/parser/ast"
 	"github.com/pingcap/tidb/parser/format"
 	"github.com/pingcap/tidb/parser/model"
+	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pkg/errors"
 
 	bbparser "github.com/bytebase/bytebase/backend/plugin/parser"
@@ -141,6 +142,7 @@ func (t *SchemaTransformer) Normalize(schema string, standard string) (string, e
 			if table, exists := tableSet[node.Table.Name.String()]; exists {
 				table.missing = false
 				removeRedundantTableOption(table.createTable, node)
+				removeRedundantColumnOption(table.createTable, node)
 			}
 		case *ast.CreateIndexStmt:
 			if table, exists := tableSet[node.Table.Name.String()]; exists {
@@ -231,6 +233,52 @@ func (t *SchemaTransformer) Normalize(schema string, standard string) (string, e
 	}
 	remainingStatement = append([]string{orderedSDL}, remainingStatement...)
 	return strings.Join(remainingStatement, ""), nil
+}
+
+func removeRedundantColumnOption(table *ast.CreateTableStmt, standard *ast.CreateTableStmt) {
+	columnSet := make(map[string]*ast.ColumnDef)
+	for _, column := range standard.Cols {
+		columnSet[column.Name.Name.O] = column
+	}
+
+	for _, column := range table.Cols {
+		var newOptionList []*ast.ColumnOption
+		if standardColumn, exists := columnSet[column.Name.Name.O]; exists {
+			for _, option := range column.Options {
+				if option.Tp == ast.ColumnOptionCollate {
+					standardCollate := extractColumnCollate(standardColumn.Options)
+					if standardCollate == nil {
+						continue
+					}
+				} else if option.Tp == ast.ColumnOptionDefaultValue {
+					standardDefault := extractColumnDefault(standardColumn.Options)
+					if standardDefault == nil && option.Expr.GetType().GetType() == mysql.TypeNull {
+						continue
+					}
+				}
+				newOptionList = append(newOptionList, option)
+			}
+		}
+		column.Options = newOptionList
+	}
+}
+
+func extractColumnCollate(list []*ast.ColumnOption) *ast.ColumnOption {
+	for _, option := range list {
+		if option.Tp == ast.ColumnOptionCollate {
+			return option
+		}
+	}
+	return nil
+}
+
+func extractColumnDefault(list []*ast.ColumnOption) *ast.ColumnOption {
+	for _, option := range list {
+		if option.Tp == ast.ColumnOptionDefaultValue {
+			return option
+		}
+	}
+	return nil
 }
 
 func removeRedundantTableOption(table *ast.CreateTableStmt, standard *ast.CreateTableStmt) {
@@ -327,6 +375,9 @@ func (*SchemaTransformer) Check(schema string) (int, error) {
 				case ast.ConstraintFulltext:
 					return stmt.LastLine, errors.Errorf("The fulltext constraint in CREATE TABLE statements is invalid SDL format. Please use CREATE FULLTEXT INDEX statements, such as \"CREATE UNIQUE INDEX fdx_t_id ON t(id);\"")
 				case ast.ConstraintCheck, ast.ConstraintForeignKey:
+					if constraint.Name == "" {
+						return stmt.LastLine, errors.Errorf("The constraint name is required for SDL format")
+					}
 				}
 			}
 			if node.Partition != nil {

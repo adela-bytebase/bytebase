@@ -69,6 +69,13 @@ type TableKey struct {
 	Table  string
 }
 
+// IndexKey is the map key for table metadata.
+type IndexKey struct {
+	Schema string
+	Table  string
+	Index  string
+}
+
 var (
 	driversMu sync.RWMutex
 	drivers   = make(map[Type]driverFunc)
@@ -140,21 +147,23 @@ type MigrationInfoPayload struct {
 
 // MigrationInfo is the API message for migration info.
 type MigrationInfo struct {
+	// fields for instance change history
+	InstanceID *int
+	DatabaseID *int
+	IssueIDInt *int
+	CreatorID  int
+
 	ReleaseVersion string
 	Version        string
 	Namespace      string
-	InstanceID     int
 	Database       string
-	DatabaseID     *int
 	Environment    string
 	Source         MigrationSource
 	Type           MigrationType
 	Status         MigrationStatus
 	Description    string
 	Creator        string
-	CreatorID      int
 	IssueID        string
-	IssueIDInt     *int
 	// Payload contains JSON-encoded string of VCS push event if the migration is triggered by a VCS push event.
 	Payload        string
 	CreateDatabase bool
@@ -182,7 +191,7 @@ const placeholderRegexp = `[^\\/?%*:|"<>]+`
 // It returns (nil, nil) if it doesn't look like a migration file path.
 func ParseMigrationInfo(filePath, filePathTemplate string, allowOmitDatabaseName bool) (*MigrationInfo, error) {
 	placeholderList := []string{
-		"ENV_NAME",
+		"ENV_ID",
 		"VERSION",
 		"DB_NAME",
 		"TYPE",
@@ -216,7 +225,7 @@ func ParseMigrationInfo(filePath, filePathTemplate string, allowOmitDatabaseName
 		index := myRegex.SubexpIndex(placeholder)
 		if index >= 0 {
 			switch placeholder {
-			case "ENV_NAME":
+			case "ENV_ID":
 				mi.Environment = matchList[index]
 			case "VERSION":
 				mi.Version = matchList[index]
@@ -280,7 +289,7 @@ func ParseSchemaFileInfo(baseDirectory, schemaPathTemplate, file string) (*Migra
 	schemaFilePathRegex := strings.ReplaceAll(schemaPathTemplate, ".", `\.`)
 
 	placeholders := []string{
-		"ENV_NAME",
+		"ENV_ID",
 		"DB_NAME",
 	}
 	for _, placeholder := range placeholders {
@@ -306,12 +315,13 @@ func ParseSchemaFileInfo(baseDirectory, schemaPathTemplate, file string) (*Migra
 	return &MigrationInfo{
 		Source:      VCS,
 		Type:        Migrate,
-		Environment: info["ENV_NAME"],
+		Environment: info["ENV_ID"],
 		Database:    info["DB_NAME"],
 	}, nil
 }
 
 // MigrationHistory is the API message for migration history.
+// TODO(p0ny): migrate to instance change history.
 type MigrationHistory struct {
 	ID string
 
@@ -346,11 +356,12 @@ type MigrationHistoryFind struct {
 	Source   *MigrationSource
 	Version  *string
 	// If specified, then it will only fetch "Limit" most recent migration histories
-	Limit *int
+	Limit  *int
+	Offset *int
 
 	// Fields below should be set if fetching from metaDB instance_change_history table.
 	DatabaseID *int
-	InstanceID int
+	InstanceID *int
 }
 
 // ConnectionConfig is the configuration for connections.
@@ -459,9 +470,8 @@ type Driver interface {
 	NeedsSetupMigration(ctx context.Context) (bool, error)
 	// Create or upgrade migration related tables
 	SetupMigrationIfNeeded(ctx context.Context) error
-	// Execute migration will apply the statement and record the migration history, the schema after migration on success.
+	// Execute migration will apply the statement.
 	// The migration type is determined by m.Type. Note, it can also perform data migration (DML) in addition to schema migration (DDL).
-	// It returns the migration history id and the schema after migration on success.
 	ExecuteMigration(ctx context.Context, m *MigrationInfo, statement string) (string, string, error)
 	// Find the migration history list and return most recent item first.
 	FindMigrationHistoryList(ctx context.Context, find *MigrationHistoryFind) ([]*MigrationHistory, error)

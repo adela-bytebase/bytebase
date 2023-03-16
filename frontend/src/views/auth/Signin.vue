@@ -123,12 +123,7 @@
         <button
           type="button"
           class="btn-normal flex justify-center w-full h-10 mb-2 tooltip-wrapper"
-          :disabled="!hasSSOFeature"
-          @click.prevent="
-            () => {
-              trySigninWithIdentityProvider(identityProvider);
-            }
-          "
+          @click.prevent="trySigninWithIdentityProvider(identityProvider)"
         >
           <span class="text-center align-middle">
             {{
@@ -142,44 +137,25 @@
     </div>
   </div>
   <AuthFooter />
-
-  <MFAChallengeModal
-    v-if="state.showMFAChallengeModal"
-    :challenge-callback="state.mfaChallengeCallback"
-  />
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, reactive, watch } from "vue";
+import { computed, onMounted, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
-import {
-  MFAChallengeCallback,
-  MFAChallengeContext,
-  OAuthWindowEventPayload,
-} from "@/types";
 import { isValidEmail, openWindowForSSO } from "@/utils";
 import {
-  featureToRef,
   useActuatorStore,
   useAuthStore,
   useIdentityProviderStore,
 } from "@/store";
-import {
-  IdentityProvider,
-  IdentityProviderType,
-} from "@/types/proto/v1/idp_service";
+import { IdentityProvider } from "@/types/proto/v1/idp_service";
 import AuthFooter from "./AuthFooter.vue";
-import MFAChallengeModal from "@/components/MFAChallengeModal.vue";
-import { Status } from "nice-grpc-common";
 
 interface LocalState {
   email: string;
   password: string;
   showPassword: boolean;
-  activeIdentityProvider?: IdentityProvider;
-  showMFAChallengeModal: boolean;
-  mfaChallengeCallback: MFAChallengeCallback;
 }
 
 const actuatorStore = useActuatorStore();
@@ -191,11 +167,8 @@ const state = reactive<LocalState>({
   email: "",
   password: "",
   showPassword: false,
-  showMFAChallengeModal: false,
-  mfaChallengeCallback: (_: MFAChallengeContext) => undefined,
 });
 const { isDemo, disallowSignup } = storeToRefs(actuatorStore);
-const hasSSOFeature = featureToRef("bb.feature.sso");
 
 const identityProviderList = computed(
   () => identityProviderStore.identityProviderList
@@ -223,108 +196,32 @@ onMounted(async () => {
   await identityProviderStore.fetchIdentityProviderList();
 });
 
-onUnmounted(() => {
-  if (state.activeIdentityProvider) {
-    window.removeEventListener(
-      `bb.oauth.signin.${state.activeIdentityProvider.name}`,
-      loginWithIdentityProviderEventListener,
-      false
-    );
-  }
-});
-
-watch(
-  () => state.activeIdentityProvider?.name,
-  (newValue, oldValue) => {
-    window.removeEventListener(
-      `bb.oauth.signin.${oldValue}`,
-      loginWithIdentityProviderEventListener,
-      false
-    );
-    window.addEventListener(
-      `bb.oauth.signin.${newValue}`,
-      loginWithIdentityProviderEventListener,
-      false
-    );
-  }
-);
-
-const loginWithIdentityProviderEventListener = async (event: Event) => {
-  if (!state.activeIdentityProvider) {
-    return;
-  }
-
-  if (
-    state.activeIdentityProvider.type === IdentityProviderType.OAUTH2 ||
-    state.activeIdentityProvider.type === IdentityProviderType.OIDC
-  ) {
-    const payload = (event as CustomEvent).detail as OAuthWindowEventPayload;
-    if (payload.error) {
-      return;
-    }
-
-    const signinContext = {
-      idpName: state.activeIdentityProvider.name,
-      idpContext: {
-        oauth2Context: {
-          code: payload.code,
-        },
-      },
-      web: true,
-    };
-    try {
-      await authStore.login({
-        ...signinContext,
-      });
-      router.push("/");
-    } catch (error: any) {
-      if (error.response.data.code === Status.FAILED_PRECONDITION) {
-        state.showMFAChallengeModal = true;
-        state.mfaChallengeCallback = async (mfaContext) => {
-          await authStore.login({
-            ...signinContext,
-            ...mfaContext,
-          });
-          router.push("/");
-        };
-      }
-    }
-  }
-};
-
 const allowSignin = computed(() => {
   return isValidEmail(state.email) && state.password;
 });
 
 const trySignin = async () => {
-  const signinContext = {
+  const mfaTempToken = await authStore.login({
     email: state.email,
     password: state.password,
     web: true,
-  };
-  try {
-    await authStore.login({
-      ...signinContext,
+  });
+  if (mfaTempToken) {
+    router.push({
+      name: "auth.mfa",
+      query: {
+        mfaTempToken,
+        redirect: "",
+      },
     });
+  } else {
     router.push("/");
-  } catch (error: any) {
-    if (error.response.data.code === Status.FAILED_PRECONDITION) {
-      state.showMFAChallengeModal = true;
-      state.mfaChallengeCallback = async (mfaContext) => {
-        await authStore.login({
-          ...signinContext,
-          ...mfaContext,
-        });
-        router.push("/");
-      };
-    }
   }
 };
 
 const trySigninWithIdentityProvider = async (
   identityProvider: IdentityProvider
 ) => {
-  state.activeIdentityProvider = identityProvider;
-  await openWindowForSSO(identityProvider);
+  await openWindowForSSO(identityProvider, false);
 };
 </script>
