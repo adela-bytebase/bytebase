@@ -10,7 +10,6 @@ import (
 	"github.com/bytebase/bytebase/backend/common"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	vcsPlugin "github.com/bytebase/bytebase/backend/plugin/vcs"
-	_ "github.com/bytebase/bytebase/backend/plugin/vcs/github" // Import to call the init until it is imported from somewhere else
 )
 
 func (s *Server) registerOAuthRoutes(g *echo.Group) {
@@ -55,7 +54,7 @@ func (s *Server) registerOAuthRoutes(g *echo.Group) {
 			}
 		} else {
 			vcsType = req.Type
-			if vcsType != vcsPlugin.GitLab && vcsType != vcsPlugin.GitHub {
+			if vcsType != vcsPlugin.GitLab && vcsType != vcsPlugin.GitHub && vcsType != vcsPlugin.Bitbucket {
 				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Unexpected VCS type: %s", vcsType))
 			}
 
@@ -73,7 +72,7 @@ func (s *Server) registerOAuthRoutes(g *echo.Group) {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to find workspace setting").SetInternal(err)
 		}
 
-		oauthExchange.RedirectURL = fmt.Sprintf("%s/oauth/callback", oauthRedirectURL(setting.ExternalUrl))
+		oauthExchange.RedirectURL = fmt.Sprintf("%s/oauth/callback", setting.ExternalUrl)
 		oauthToken, err := vcsPlugin.Get(vcsType, vcsPlugin.ProviderConfig{}).
 			ExchangeOAuthToken(
 				c.Request().Context(),
@@ -81,7 +80,10 @@ func (s *Server) registerOAuthRoutes(g *echo.Group) {
 				oauthExchange,
 			)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, oauthErrorMessage(setting.ExternalUrl)).SetInternal(err)
+			return echo.NewHTTPError(
+				http.StatusInternalServerError,
+				fmt.Sprintf("Failed to exchange OAuth token. Make sure %q matches your browser host. Note that if you are not using port 80 or 443, you should also specify the port such as --external-url=http://host:port", setting.ExternalUrl),
+			).SetInternal(err)
 		}
 
 		resp := &api.OAuthToken{

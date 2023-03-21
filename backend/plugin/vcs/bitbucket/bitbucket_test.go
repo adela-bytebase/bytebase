@@ -18,7 +18,7 @@ import (
 func TestProvider_ExchangeOAuthToken(t *testing.T) {
 	p := newMockProvider(func(r *http.Request) (*http.Response, error) {
 		assert.Equal(t, "/site/oauth2/access_token", r.URL.Path)
-		assert.Equal(t, "dGVzdF9jbGllbnRfaWQ6dGVzdF9jbGllbnRfc2VjcmV0", r.Header.Get("Authorization"))
+		assert.Equal(t, "Basic dGVzdF9jbGllbnRfaWQ6dGVzdF9jbGllbnRfc2VjcmV0", r.Header.Get("Authorization"))
 
 		require.NoError(t, r.ParseForm())
 		assert.Equal(t, "authorization_code", r.PostForm.Get("grant_type"))
@@ -877,7 +877,7 @@ func TestOAuth_RefreshToken(t *testing.T) {
 					return &http.Response{
 						StatusCode: http.StatusUnauthorized,
 						Body: io.NopCloser(strings.NewReader(`
-					{"error":"invalid_token","error_description":"Token is expired. You can either do re-authorization or token refresh."}
+					{"error":"invalid_grant","error_description":"The provided authorization grant is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client."}
 					`)),
 					}, nil
 				}
