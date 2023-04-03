@@ -84,6 +84,18 @@
             >{{ $t("sql-review.title") }}</router-link
           >
           <router-link
+            to="/setting/risk-center"
+            class="outline-item group w-full flex items-center truncate pl-11 pr-2 py-2"
+          >
+            {{ $t("custom-approval.risk.risk-center") }}
+          </router-link>
+          <router-link
+            to="/setting/custom-approval"
+            class="outline-item group w-full flex items-center truncate pl-11 pr-2 py-2"
+          >
+            {{ $t("custom-approval.self") }}
+          </router-link>
+          <router-link
             v-if="showSensitiveDataItem"
             to="/setting/sensitive-data"
             class="outline-item group w-full flex items-center truncate pl-11 pr-2 py-2"
@@ -105,7 +117,7 @@
           >
         </div>
       </div>
-      <div class="mt-8">
+      <div v-if="showIntegrationSection" class="mt-8">
         <div
           class="group flex items-center px-2 py-2 text-sm leading-5 font-medium rounded-md text-gray-700"
         >
@@ -191,6 +203,10 @@ const showVCSItem = computed((): boolean => {
     "bb.permission.workspace.manage-vcs-provider",
     currentUser.value.role
   );
+});
+
+const showIntegrationSection = computed(() => {
+  return showVCSItem.value || showIMIntegrationItem.value || showSSOItem.value;
 });
 
 const showDebugLogItem = computed((): boolean => {

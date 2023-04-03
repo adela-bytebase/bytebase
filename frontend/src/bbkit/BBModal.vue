@@ -10,7 +10,7 @@
       :data-bb-modal-active="active"
     >
       <div class="modal-header" :class="headerClass">
-        <div class="text-xl text-main mr-2">
+        <div class="text-xl text-main mr-2 flex-1 overflow-hidden">
           <slot name="title"><component :is="renderTitle" /></slot>
           <component :is="renderSubtitle" />
         </div>
@@ -86,6 +86,10 @@ export default defineComponent({
       type: Boolean,
       default: true,
     },
+    beforeClose: {
+      type: Function as PropType<() => Promise<boolean>>,
+      default: undefined,
+    },
   },
   emits: ["close"],
   setup(props, { emit }) {
@@ -100,7 +104,12 @@ export default defineComponent({
       subtitle: undefined,
     });
 
-    const close = () => {
+    const close = async () => {
+      const { beforeClose } = props;
+      if (beforeClose) {
+        const pass = await beforeClose();
+        if (!pass) return;
+      }
       emit("close");
     };
 

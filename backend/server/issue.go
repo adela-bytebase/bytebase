@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/bytebase/bytebase/backend/common"
 	"github.com/bytebase/bytebase/backend/common/log"
@@ -27,6 +28,7 @@ import (
 	"github.com/bytebase/bytebase/backend/plugin/vcs"
 	"github.com/bytebase/bytebase/backend/store"
 	"github.com/bytebase/bytebase/backend/utils"
+	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 )
 
 func (s *Server) registerIssueRoutes(g *echo.Group) {
@@ -42,15 +44,13 @@ func (s *Server) registerIssueRoutes(g *echo.Group) {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create issue").SetInternal(err)
 		}
 
-		if s.MetricReporter != nil {
-			s.MetricReporter.Report(&metric.Metric{
-				Name:  metricAPI.IssueCreateMetricName,
-				Value: 1,
-				Labels: map[string]interface{}{
-					"type": issue.Type,
-				},
-			})
-		}
+		s.MetricReporter.Report(&metric.Metric{
+			Name:  metricAPI.IssueCreateMetricName,
+			Value: 1,
+			Labels: map[string]interface{}{
+				"type": issue.Type,
+			},
+		})
 
 		c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
 		if err := jsonapi.MarshalPayload(c.Response().Writer, issue); err != nil {
@@ -207,6 +207,18 @@ func (s *Server) registerIssueRoutes(g *echo.Group) {
 			Description:   issuePatch.Description,
 			NeedAttention: issuePatch.AssigneeNeedAttention,
 			Payload:       issuePatch.Payload,
+		}
+
+		// If we are to set AssigneeNeedAttention to true
+		// make sure that CI approval is finished.
+		if issuePatch.AssigneeNeedAttention != nil && *issuePatch.AssigneeNeedAttention {
+			approved, err := utils.CheckIssueApproved(issue)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check if the issue is approved").SetInternal(err)
+			}
+			if !approved {
+				return echo.NewHTTPError(http.StatusBadRequest, "Cannot set assigneeNeedAttention because the issue is not approved")
+			}
 		}
 
 		if issuePatch.AssigneeID != nil {
@@ -408,6 +420,21 @@ func (s *Server) createIssue(ctx context.Context, issueCreate *api.IssueCreate, 
 	if assignee == nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("assignee %d not found", issueCreate.AssigneeID))
 	}
+	// TODO(p0ny): remove issueCreate.Payload
+	issueCreatePayload := &storepb.IssuePayload{
+		Approval: &storepb.IssuePayloadApproval{
+			ApprovalFindingDone: false,
+		},
+	}
+	if !s.licenseService.IsFeatureEnabled(api.FeatureCustomApproval) {
+		issueCreatePayload.Approval.ApprovalFindingDone = true
+	}
+
+	issueCreatePayloadBytes, err := protojson.Marshal(issueCreatePayload)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to marshal issue payload").SetInternal(err)
+	}
+
 	issueCreateMessage := &store.IssueMessage{
 		Project:       project,
 		Title:         issueCreate.Name,
@@ -415,7 +442,7 @@ func (s *Server) createIssue(ctx context.Context, issueCreate *api.IssueCreate, 
 		Description:   issueCreate.Description,
 		Assignee:      assignee,
 		NeedAttention: issueCreate.AssigneeNeedAttention,
-		Payload:       issueCreate.Payload,
+		Payload:       string(issueCreatePayloadBytes),
 	}
 
 	if issueCreate.ValidateOnly {
@@ -440,9 +467,11 @@ func (s *Server) createIssue(ctx context.Context, issueCreate *api.IssueCreate, 
 		return nil, err
 	}
 
-	if err := s.TaskCheckScheduler.SchedulePipelineTaskCheck(ctx, project, pipeline.ID); err != nil {
+	if err := s.TaskCheckScheduler.SchedulePipelineTaskCheck(ctx, pipeline.ID); err != nil {
 		return nil, errors.Wrapf(err, "failed to schedule task check after creating the issue: %v", issue.Title)
 	}
+
+	s.stateCfg.ApprovalFinding.Store(issue.UID, issue)
 
 	createActivityPayload := api.ActivityIssueCreatePayload{
 		IssueName: issue.Title,
@@ -1093,7 +1122,7 @@ func (s *Server) createDatabaseCreateTaskList(ctx context.Context, c api.CreateD
 	case db.Snowflake:
 		// Snowflake needs to use upper case of DatabaseName.
 		databaseName = strings.ToUpper(databaseName)
-	case db.MySQL:
+	case db.MySQL, db.MariaDB:
 		// For MySQL, we need to use different case of DatabaseName depends on the variable `lower_case_table_names`.
 		// https://dev.mysql.com/doc/refman/8.0/en/identifier-case-sensitivity.html
 		// And also, meet an error in here is not a big deal, we will just use the original DatabaseName.
@@ -1234,7 +1263,7 @@ func (s *Server) createPITRTaskList(ctx context.Context, originDatabase *store.D
 func getCreateDatabaseStatement(dbType db.Type, createDatabaseContext api.CreateDatabaseContext, databaseName, adminDatasourceUser string) (string, error) {
 	var stmt string
 	switch dbType {
-	case db.MySQL, db.TiDB:
+	case db.MySQL, db.TiDB, db.MariaDB:
 		return fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s COLLATE %s;", databaseName, createDatabaseContext.CharacterSet, createDatabaseContext.Collation), nil
 	case db.MSSQL:
 		return fmt.Sprintf(`CREATE DATABASE "%s";`, databaseName), nil
@@ -1279,6 +1308,25 @@ func getCreateDatabaseStatement(dbType db.Type, createDatabaseContext api.Create
 		return fmt.Sprintf("CREATE DATABASE %s", databaseName), nil
 	case db.Oracle:
 		return fmt.Sprintf("CREATE DATABASE %s", databaseName), nil
+	case db.Redshift:
+		if adminDatasourceUser != "" && createDatabaseContext.Owner != adminDatasourceUser {
+			stmt = fmt.Sprintf("GRANT \"%s\" TO \"%s\";\n", createDatabaseContext.Owner, adminDatasourceUser)
+		}
+		if createDatabaseContext.Collation == "" {
+			stmt = fmt.Sprintf("%sCREATE DATABASE \"%s\" ENCODING '%s';", stmt, databaseName, createDatabaseContext.CharacterSet)
+		} else {
+			stmt = fmt.Sprintf("%sCREATE DATABASE \"%s\" ENCODING '%s' LC_COLLATE '%s';", stmt, databaseName, createDatabaseContext.CharacterSet, createDatabaseContext.Collation)
+		}
+		// Set the database owner.
+		// We didn't use CREATE DATABASE WITH OWNER because RDS requires the current role to be a member of the database owner.
+		// However, people can still use ALTER DATABASE to change the owner afterwards.
+		// Error string below:
+		// query: CREATE DATABASE h1 WITH OWNER hello;
+		// ERROR:  must be member of role "hello"
+		//
+		// For tenant project, the schema for the newly created database will belong to the same owner.
+		// TODO(d): alter schema "public" owner to the database owner.
+		return fmt.Sprintf("%s\nALTER DATABASE \"%s\" OWNER TO \"%s\";", stmt, databaseName, createDatabaseContext.Owner), nil
 	}
 	return "", errors.Errorf("unsupported database type %s", dbType)
 }
@@ -1360,6 +1408,10 @@ func checkCharacterSetCollationOwner(dbType db.Type, characterSet, collation, ow
 	case db.Postgres:
 		if owner == "" {
 			return errors.Errorf("database owner is required for PostgreSQL")
+		}
+	case db.Redshift:
+		if owner == "" {
+			return errors.Errorf("database owner is required for Redshift")
 		}
 	case db.SQLite, db.MongoDB, db.MSSQL:
 		// no-op.

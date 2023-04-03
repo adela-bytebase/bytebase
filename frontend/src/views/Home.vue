@@ -110,7 +110,7 @@
       $t('subscription.trial-start-modal.title', {
         plan: $t(
           `subscription.plan.${planTypeToString(
-            subscriptionStore.subscription.plan
+            subscriptionStore.currentPlan
           ).toLowerCase()}.title`
         ),
       })
@@ -128,7 +128,7 @@
                   {{
                     $t(
                       `subscription.plan.${planTypeToString(
-                        subscriptionStore.subscription.plan
+                        subscriptionStore.currentPlan
                       ).toLowerCase()}.title`
                     )
                   }}
@@ -173,7 +173,7 @@ import { useRoute, useRouter } from "vue-router";
 import EnvironmentTabFilter from "../components/EnvironmentTabFilter.vue";
 import { IssueTable } from "../components/Issue";
 import { activeEnvironment } from "../utils";
-import { Environment, Issue, planTypeToString, PlanType } from "../types";
+import { Environment, Issue, planTypeToString } from "../types";
 import {
   useCurrentUser,
   useEnvironmentStore,
@@ -215,7 +215,7 @@ const onTrialingModalClose = () => {
 const planImage = computed(() => {
   return new URL(
     `../assets/plan-${planTypeToString(
-      subscriptionStore.subscription?.plan ?? PlanType.FREE
+      subscriptionStore.currentPlan
     ).toLowerCase()}.png`,
     import.meta.url
   ).href;

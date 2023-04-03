@@ -156,6 +156,9 @@ const (
 	// MySQLIndexPKType is an advisor type for MySQL correct type of PK.
 	MySQLIndexPKType Type = "bb.plugin.advisor.mysql.index.pk-type"
 
+	// MySQLPrimaryKeyTypeAllowlist is an advisor type for MySQL primary key type allowlist.
+	MySQLPrimaryKeyTypeAllowlist Type = "bb.plugin.advisor.mysql.index.primary-key-type-allowlist"
+
 	// MySQLIndexKeyNumberLimit is an advisor type for MySQL index key number limit.
 	MySQLIndexKeyNumberLimit Type = "bb.plugin.advisor.mysql.index.key-number-limit"
 
@@ -327,6 +330,7 @@ type Advice struct {
 	Title   string `json:"title"`
 	Content string `json:"content"`
 	Line    int    `json:"line"`
+	Details string `json:"details,omitempty"`
 }
 
 // MarshalLogObject constructs a field that carries Advice.
@@ -336,6 +340,7 @@ func (a Advice) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("title", a.Title)
 	enc.AddString("content", a.Content)
 	enc.AddInt("line", a.Line)
+	enc.AddString("details", a.Details)
 	return nil
 }
 
@@ -433,7 +438,7 @@ func Check(dbType db.Type, advType Type, ctx Context, statement string) (adviceL
 // IsSyntaxCheckSupported checks the engine type if syntax check supports it.
 func IsSyntaxCheckSupported(dbType db.Type) bool {
 	switch dbType {
-	case db.MySQL, db.TiDB, db.Postgres:
+	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres:
 		return true
 	}
 	return false
@@ -442,7 +447,7 @@ func IsSyntaxCheckSupported(dbType db.Type) bool {
 // IsSQLReviewSupported checks the engine type if SQL review supports it.
 func IsSQLReviewSupported(dbType db.Type) bool {
 	switch dbType {
-	case db.MySQL, db.TiDB, db.Postgres:
+	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres:
 		return true
 	}
 	return false

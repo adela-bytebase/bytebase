@@ -52,8 +52,10 @@ import {
   useTabStore,
   useIdentityProviderStore,
   useCurrentUser,
+  useSubscriptionStore,
 } from "@/store";
 import { useConversationStore } from "@/plugins/ai/store";
+import { PlanType } from "@/types/proto/v1/subscription_service";
 
 const HOME_MODULE = "workspace.home";
 const AUTH_MODULE = "auth";
@@ -409,6 +411,22 @@ const routes: Array<RouteRecordRaw> = [
                 props: true,
               },
               {
+                path: "risk-center",
+                name: "setting.workspace.risk-center",
+                meta: { title: () => t("custom-approval.risk.risk-center") },
+                component: () =>
+                  import("../views/SettingWorkspaceRiskCenter.vue"),
+                props: true,
+              },
+              {
+                path: "custom-approval",
+                name: "setting.workspace.custom-approval",
+                meta: { title: () => t("custom-approval.self") },
+                component: () =>
+                  import("../views/SettingWorkspaceCustomApproval.vue"),
+                props: true,
+              },
+              {
                 path: "gitops",
                 name: "setting.workspace.gitops",
                 meta: { title: () => t("settings.sidebar.gitops") },
@@ -628,14 +646,27 @@ const routes: Array<RouteRecordRaw> = [
                         "bb.permission.project.change-database",
                         memberOfProject.role
                       );
-                      allowCreateDB = hasProjectPermission(
-                        "bb.permission.project.create-database",
-                        memberOfProject.role
-                      );
                       allowTransferDB = hasProjectPermission(
                         "bb.permission.project.transfer-database",
                         memberOfProject.role
                       );
+
+                      if (
+                        useSubscriptionStore().currentPlan ===
+                        PlanType.ENTERPRISE
+                      ) {
+                        // in ENTERPRISE edition
+                        // workspace developers are never allowed to create db
+                        // even if they are project owners
+                        allowCreateDB = false;
+                      } else {
+                        // See RBAC otherwise.
+                        // AKA yes if project owner.
+                        allowCreateDB = hasProjectPermission(
+                          "bb.permission.project.create-database",
+                          memberOfProject.role
+                        );
+                      }
                     }
                   }
                   if (project.id === DEFAULT_PROJECT_ID) {

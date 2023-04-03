@@ -175,16 +175,14 @@ func (s *Server) sqlCheckController(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to run sql check").SetInternal(err)
 	}
 
-	if s.MetricReporter != nil {
-		s.MetricReporter.Report(&metric.Metric{
-			Name:  metricAPI.SQLAdviseAPIMetricName,
-			Value: 1,
-			Labels: map[string]interface{}{
-				"database_type": databaseType,
-				"environment":   request.EnvironmentName,
-			},
-		})
-	}
+	s.MetricReporter.Report(&metric.Metric{
+		Name:  metricAPI.SQLAdviseAPIMetricName,
+		Value: 1,
+		Labels: map[string]interface{}{
+			"database_type": databaseType,
+			"environment":   request.EnvironmentName,
+		},
+	})
 
 	return c.JSON(http.StatusOK, adviceList)
 }
@@ -222,7 +220,7 @@ func schemaDiff(c echo.Context) error {
 	switch request.EngineType {
 	case parser.EngineType(db.Postgres):
 		engine = parser.Postgres
-	case parser.EngineType(db.MySQL):
+	case parser.EngineType(db.MySQL), parser.EngineType(db.MariaDB):
 		engine = parser.MySQL
 	default:
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid database engine %s", request.EngineType))

@@ -46,3 +46,6 @@ export * from "./schemaEditor";
 export * from "./dbSchema";
 export * from "./idp";
 export * from "./user";
+export * from "./risk";
+export * from "./workspaceApprovalSetting";
+export * from "./review";

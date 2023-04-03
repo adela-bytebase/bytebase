@@ -17,7 +17,10 @@ import (
 
 	"github.com/google/jsonapi"
 	"github.com/pkg/errors"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	// Import pg driver.
@@ -154,10 +157,16 @@ CREATE TABLE book4 (
 )
 
 type controller struct {
-	server         *server.Server
-	profile        componentConfig.Profile
-	client         *http.Client
-	cookie         string
+	server   *server.Server
+	profile  componentConfig.Profile
+	client   *http.Client
+	grpcConn *grpc.ClientConn
+
+	cookie             string
+	grpcMDAccessToken  string
+	grpcMDRefreshToken string
+	grpcMDUser         string
+
 	vcsProvider    fake.VCSProvider
 	feishuProvider *fake.Feishu
 
@@ -394,6 +403,13 @@ func (ctl *controller) start(ctx context.Context, port int) error {
 	// initialize controller clients.
 	ctl.client = &http.Client{}
 
+	// initialize grpc connection.
+	grpcConn, err := grpc.Dial(fmt.Sprintf("127.0.0.1:%d", ctl.profile.GrpcPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return errors.Wrap(err, "failed to dial grpc")
+	}
+	ctl.grpcConn = grpcConn
+
 	if err := ctl.waitForHealthz(); err != nil {
 		return errors.Wrap(err, "failed to wait for healthz")
 	}
@@ -502,11 +518,18 @@ func (ctl *controller) waitForHealthz() error {
 func (ctl *controller) Close(ctx context.Context) error {
 	var e error
 	if ctl.server != nil {
-		e = ctl.server.Shutdown(ctx)
+		if err := ctl.server.Shutdown(ctx); err != nil {
+			e = multierr.Append(e, err)
+		}
 	}
 	if ctl.vcsProvider != nil {
 		if err := ctl.vcsProvider.Close(); err != nil {
-			e = err
+			e = multierr.Append(e, err)
+		}
+	}
+	if ctl.grpcConn != nil {
+		if err := ctl.grpcConn.Close(); err != nil {
+			e = multierr.Append(e, err)
 		}
 	}
 	return e
@@ -525,106 +548,79 @@ func (*controller) provisionSQLiteInstance(rootDir, name string) (string, error)
 // get sends a GET client request.
 func (ctl *controller) get(shortURL string, params map[string]string) (io.ReadCloser, error) {
 	gURL := fmt.Sprintf("%s%s", ctl.apiURL, shortURL)
-	req, err := http.NewRequest("GET", gURL, nil)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to create a new GET request(%q)", gURL)
-	}
-	req.Header.Set("Cookie", ctl.cookie)
-	q := url.Values{}
-	for k, v := range params {
-		q.Add(k, v)
-	}
-	req.URL.RawQuery = q.Encode()
-	resp, err := ctl.client.Do(req)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to send a GET request(%q)", gURL)
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to read http response body")
-		}
-		return nil, errors.Errorf("http response error code %v body %q", resp.StatusCode, string(body))
-	}
-	return resp.Body, nil
+	return ctl.request("GET", gURL, nil, params, map[string]string{
+		"Cookie": ctl.cookie,
+	})
+}
+
+// OpenAPI sends a GET OpenAPI client request.
+func (ctl *controller) getOpenAPI(shortURL string, params map[string]string) (io.ReadCloser, error) {
+	gURL := fmt.Sprintf("%s%s", ctl.v1APIURL, shortURL)
+	return ctl.request("GET", gURL, nil, params, map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", strings.ReplaceAll(ctl.cookie, "access-token=", "")),
+	})
 }
 
 // postOpenAPI sends a openAPI POST request.
 func (ctl *controller) postOpenAPI(shortURL string, body io.Reader) (io.ReadCloser, error) {
 	url := fmt.Sprintf("%s%s", ctl.v1APIURL, shortURL)
-	req, err := http.NewRequest("POST", url, body)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to create a new POST request(%q)", url)
-	}
-	req.Header.Set("Cookie", ctl.cookie)
-	resp, err := ctl.client.Do(req)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to send a POST request(%q)", url)
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to read http response body")
-		}
-		return nil, errors.Errorf("http response error code %v body %q", resp.StatusCode, string(body))
-	}
-	return resp.Body, nil
+	return ctl.request("POST", url, body, nil, map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", strings.ReplaceAll(ctl.cookie, "access-token=", "")),
+	})
 }
 
 // post sends a POST client request.
 func (ctl *controller) post(shortURL string, body io.Reader) (io.ReadCloser, error) {
 	url := fmt.Sprintf("%s%s", ctl.apiURL, shortURL)
-	req, err := http.NewRequest("POST", url, body)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to create a new POST request(%q)", url)
-	}
-	req.Header.Set("Cookie", ctl.cookie)
-	resp, err := ctl.client.Do(req)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to send a POST request(%q)", url)
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to read http response body")
-		}
-		return nil, errors.Errorf("http response error code %v body %q", resp.StatusCode, string(body))
-	}
-	return resp.Body, nil
+	return ctl.request("POST", url, body, nil, map[string]string{
+		"Cookie": ctl.cookie,
+	})
 }
 
 // patch sends a PATCH client request.
 func (ctl *controller) patch(shortURL string, body io.Reader) (io.ReadCloser, error) {
 	url := fmt.Sprintf("%s%s", ctl.apiURL, shortURL)
-	req, err := http.NewRequest("PATCH", url, body)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to create a new PATCH request(%q)", url)
-	}
-	req.Header.Set("Cookie", ctl.cookie)
-	resp, err := ctl.client.Do(req)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fail to send a PATCH request(%q)", url)
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to read http response body")
-		}
-		return nil, errors.Errorf("http response error code %v body %q", resp.StatusCode, string(body))
-	}
-	return resp.Body, nil
+	return ctl.request("PATCH", url, body, nil, map[string]string{
+		"Cookie": ctl.cookie,
+	})
+}
+
+// patchOpenAPI sends a openAPI PATCH client request.
+func (ctl *controller) patchOpenAPI(shortURL string, body io.Reader) (io.ReadCloser, error) {
+	url := fmt.Sprintf("%s%s", ctl.v1APIURL, shortURL)
+	return ctl.request("PATCH", url, body, nil, map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", strings.ReplaceAll(ctl.cookie, "access-token=", "")),
+	})
 }
 
 func (ctl *controller) delete(shortURL string, body io.Reader) (io.ReadCloser, error) {
 	url := fmt.Sprintf("%s%s", ctl.apiURL, shortURL)
-	req, err := http.NewRequest("DELETE", url, body)
+	return ctl.request("DELETE", url, body, nil, map[string]string{
+		"Cookie": ctl.cookie,
+	})
+}
+
+func (ctl *controller) request(method, fullURL string, body io.Reader, params, header map[string]string) (io.ReadCloser, error) {
+	req, err := http.NewRequest(method, fullURL, body)
 	if err != nil {
-		return nil, errors.Wrapf(err, "fail to create a new DELETE request(%q)", url)
+		return nil, errors.Wrapf(err, "fail to create a new %s request(%q)", method, fullURL)
 	}
-	req.Header.Set("Cookie", ctl.cookie)
+
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+
+	q := url.Values{}
+	for k, v := range params {
+		q.Add(k, v)
+	}
+	if len(q) > 0 {
+		req.URL.RawQuery = q.Encode()
+	}
+
 	resp, err := ctl.client.Do(req)
 	if err != nil {
-		return nil, errors.Wrapf(err, "fail to send a DELETE request(%q)", url)
+		return nil, errors.Wrapf(err, "fail to send a %s request(%q)", method, fullURL)
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, err := io.ReadAll(resp.Body)
@@ -680,6 +676,9 @@ func (ctl *controller) Login() error {
 	}
 	ctl.cookie = cookie
 
+	ctl.grpcMDAccessToken = resp.Header.Get("grpc-metadata-bytebase-access-token")
+	ctl.grpcMDRefreshToken = resp.Header.Get("grpc-metadata-bytebase-refresh-token")
+	ctl.grpcMDUser = resp.Header.Get("grpc-metadata-bytebase-user")
 	return nil
 }
 

@@ -342,16 +342,14 @@ func (s *Scheduler) Run(ctx context.Context, wg *sync.WaitGroup) {
 									}
 								}
 
-								if s.metricReporter != nil {
-									s.metricReporter.Report(&metric.Metric{
-										Name:  metricAPI.TaskStatusMetricName,
-										Value: 1,
-										Labels: map[string]interface{}{
-											"type":  task.Type,
-											"value": taskStatusPatch.Status,
-										},
-									})
-								}
+								s.metricReporter.Report(&metric.Metric{
+									Name:  metricAPI.TaskStatusMetricName,
+									Value: 1,
+									Labels: map[string]interface{}{
+										"type":  task.Type,
+										"value": taskStatusPatch.Status,
+									},
+								})
 							}
 							return
 						}
@@ -450,20 +448,10 @@ func (s *Scheduler) PatchTask(ctx context.Context, task *store.TaskMessage, task
 			return err
 		}
 		if api.IsSyntaxCheckSupported(instance.Engine) {
-			payload, err := json.Marshal(api.TaskCheckDatabaseStatementAdvisePayload{
-				Statement: *taskPatch.Statement,
-				DbType:    instance.Engine,
-				Charset:   dbSchema.Metadata.CharacterSet,
-				Collation: dbSchema.Metadata.Collation,
-			})
-			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, errors.Wrapf(err, "failed to marshal statement advise payload: %v", task.Name))
-			}
 			if err := s.store.CreateTaskCheckRun(ctx, &store.TaskCheckRunMessage{
-				CreatorID: api.SystemBotID,
+				CreatorID: taskPatched.CreatorID,
 				TaskID:    task.ID,
 				Type:      api.TaskCheckDatabaseStatementSyntax,
-				Payload:   string(payload),
 			}); err != nil {
 				// It's OK if we failed to trigger a check, just emit an error log
 				log.Error("Failed to trigger syntax check after changing the task statement",
@@ -475,26 +463,16 @@ func (s *Scheduler) PatchTask(ctx context.Context, task *store.TaskMessage, task
 		}
 
 		if api.IsSQLReviewSupported(instance.Engine) {
-			if err := s.triggerDatabaseStatementAdviseTask(ctx, *taskPatch.Statement, instance, taskPatched); err != nil {
+			if err := s.triggerDatabaseStatementAdviseTask(ctx, taskPatched); err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, errors.Wrap(err, "failed to trigger database statement advise task")).SetInternal(err)
 			}
 		}
 
 		if api.IsStatementTypeCheckSupported(instance.Engine) {
-			payload, err := json.Marshal(api.TaskCheckDatabaseStatementTypePayload{
-				Statement: *taskPatch.Statement,
-				DbType:    instance.Engine,
-				Charset:   dbSchema.Metadata.CharacterSet,
-				Collation: dbSchema.Metadata.Collation,
-			})
-			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, errors.Wrapf(err, "failed to marshal check statement type payload: %v", task.Name))
-			}
 			if err := s.store.CreateTaskCheckRun(ctx, &store.TaskCheckRunMessage{
-				CreatorID: api.SystemBotID,
+				CreatorID: taskPatched.CreatorID,
 				TaskID:    task.ID,
 				Type:      api.TaskCheckDatabaseStatementType,
-				Payload:   string(payload),
 			}); err != nil {
 				// It's OK if we failed to trigger a check, just emit an error log
 				log.Error("Failed to trigger statement type check after changing the task statement",
@@ -502,6 +480,24 @@ func (s *Scheduler) PatchTask(ctx context.Context, task *store.TaskMessage, task
 					zap.String("task_name", task.Name),
 					zap.Error(err),
 				)
+			}
+		}
+
+		if api.IsTaskCheckReportSupported(instance.Engine) && api.IsTaskCheckReportNeededForTaskType(task.Type) {
+			if err := s.store.CreateTaskCheckRun(ctx,
+				&store.TaskCheckRunMessage{
+					CreatorID: taskPatched.CreatorID,
+					TaskID:    task.ID,
+					Type:      api.TaskCheckDatabaseStatementAffectedRowsReport,
+				},
+				&store.TaskCheckRunMessage{
+					CreatorID: taskPatched.CreatorID,
+					TaskID:    task.ID,
+					Type:      api.TaskCheckDatabaseStatementTypeReport,
+				},
+			); err != nil {
+				// It's OK if we failed to trigger a check, just emit an error log
+				log.Error("Failed to trigger task report check after changing the task statement", zap.Int("task_id", task.ID), zap.String("task_name", task.Name), zap.Error(err))
 			}
 		}
 	}
@@ -566,7 +562,7 @@ func (s *Scheduler) PatchTask(ctx context.Context, task *store.TaskMessage, task
 	return nil
 }
 
-func (s *Scheduler) triggerDatabaseStatementAdviseTask(ctx context.Context, statement string, instance *store.InstanceMessage, task *store.TaskMessage) error {
+func (s *Scheduler) triggerDatabaseStatementAdviseTask(ctx context.Context, task *store.TaskMessage) error {
 	dbSchema, err := s.store.GetDBSchema(ctx, *task.DatabaseID)
 	if err != nil {
 		return err
@@ -575,21 +571,10 @@ func (s *Scheduler) triggerDatabaseStatementAdviseTask(ctx context.Context, stat
 		return errors.Errorf("database schema ID not found %v", task.DatabaseID)
 	}
 
-	payload, err := json.Marshal(api.TaskCheckDatabaseStatementAdvisePayload{
-		Statement: statement,
-		DbType:    instance.Engine,
-		Charset:   dbSchema.Metadata.CharacterSet,
-		Collation: dbSchema.Metadata.Collation,
-	})
-	if err != nil {
-		return errors.Wrapf(err, "failed to marshal statement advise payload: %v", task.Name)
-	}
-
 	if err := s.store.CreateTaskCheckRun(ctx, &store.TaskCheckRunMessage{
 		CreatorID: api.SystemBotID,
 		TaskID:    task.ID,
 		Type:      api.TaskCheckDatabaseStatementAdvise,
-		Payload:   string(payload),
 	}); err != nil {
 		// It's OK if we failed to trigger a check, just emit an error log
 		log.Error("Failed to trigger statement advise task after changing task statement",
@@ -825,6 +810,21 @@ func (s *Scheduler) scheduleAutoApprovedTasks(ctx context.Context) error {
 			continue
 		}
 
+		issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{PipelineID: &task.PipelineID})
+		if err != nil {
+			return err
+		}
+		if issue != nil {
+			approved, err := utils.CheckIssueApproved(issue)
+			if err != nil {
+				log.Warn("taskrun scheduler: failed to check if the issue is approved when scheduling auto-deployed tasks", zap.Int("taskID", task.ID), zap.Int("issueID", issue.UID), zap.Error(err))
+				continue
+			}
+			if !approved {
+				continue
+			}
+		}
+
 		taskCheckRuns, err := s.store.ListTaskCheckRuns(ctx, &store.TaskCheckRunFind{TaskID: &task.ID})
 		if err != nil {
 			return err
@@ -934,7 +934,7 @@ func (s *Scheduler) PatchTaskStatus(ctx context.Context, task *store.TaskMessage
 	}
 
 	if issue != nil {
-		if err := s.onTaskPatched(ctx, issue, taskPatched); err != nil {
+		if err := s.onTaskStatusPatched(ctx, issue, taskPatched); err != nil {
 			return err
 		}
 	}
@@ -1216,7 +1216,7 @@ func (s *Scheduler) ChangeIssueStatus(ctx context.Context, issue *store.IssueMes
 	return nil
 }
 
-func (s *Scheduler) onTaskPatched(ctx context.Context, issue *store.IssueMessage, taskPatched *store.TaskMessage) error {
+func (s *Scheduler) onTaskStatusPatched(ctx context.Context, issue *store.IssueMessage, taskPatched *store.TaskMessage) error {
 	stages, err := s.store.ListStageV2(ctx, taskPatched.PipelineID)
 	if err != nil {
 		return err

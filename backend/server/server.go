@@ -57,11 +57,13 @@ import (
 	advisorDb "github.com/bytebase/bytebase/backend/plugin/advisor/db"
 	"github.com/bytebase/bytebase/backend/plugin/app/feishu"
 	"github.com/bytebase/bytebase/backend/plugin/db"
+	metricPlugin "github.com/bytebase/bytebase/backend/plugin/metric"
 	bbs3 "github.com/bytebase/bytebase/backend/plugin/storage/s3"
 	"github.com/bytebase/bytebase/backend/resources/mongoutil"
 	"github.com/bytebase/bytebase/backend/resources/mysqlutil"
 	"github.com/bytebase/bytebase/backend/resources/postgres"
 	"github.com/bytebase/bytebase/backend/runner/anomaly"
+	"github.com/bytebase/bytebase/backend/runner/approval"
 	"github.com/bytebase/bytebase/backend/runner/apprun"
 	"github.com/bytebase/bytebase/backend/runner/backuprun"
 	"github.com/bytebase/bytebase/backend/runner/metricreport"
@@ -95,7 +97,8 @@ import (
 	_ "github.com/bytebase/bytebase/backend/plugin/db/oracle"
 	// Register mssql driver.
 	_ "github.com/bytebase/bytebase/backend/plugin/db/mssql"
-
+	// Register redshift driver.
+	_ "github.com/bytebase/bytebase/backend/plugin/db/redshift"
 	// Register pingcap parser driver.
 	_ "github.com/pingcap/tidb/types/parser_driver"
 	// Register fake advisor.
@@ -139,6 +142,7 @@ type Server struct {
 	AnomalyScanner     *anomaly.Scanner
 	ApplicationRunner  *apprun.Runner
 	RollbackRunner     *rollbackrun.Runner
+	ApprovalRunner     *approval.Runner
 	runnerWG           sync.WaitGroup
 
 	ActivityManager *activity.Manager
@@ -320,18 +324,54 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	e.Debug = profile.Debug
 	e.HideBanner = true
 	e.HidePort = true
+	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{
+		Skipper: func(c echo.Context) bool {
+			// Skip grpc and webhook calls.
+			return strings.HasPrefix(c.Request().URL.Path, "/bytebase.v1.") ||
+				strings.HasPrefix(c.Request().URL.Path, webhookAPIPrefix) ||
+				strings.HasPrefix(c.Request().URL.Path, "/api/sheet/")
+		},
+		Timeout: 30 * time.Second,
+	}))
+	e.Use(middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
+		Store: middleware.NewRateLimiterMemoryStoreWithConfig(
+			middleware.RateLimiterMemoryStoreConfig{Rate: 30, Burst: 60, ExpiresIn: 3 * time.Minute},
+		),
+		IdentifierExtractor: func(ctx echo.Context) (string, error) {
+			id := ctx.RealIP()
+			return id, nil
+		},
+		ErrorHandler: func(context echo.Context, err error) error {
+			return context.JSON(http.StatusForbidden, nil)
+		},
+		DenyHandler: func(context echo.Context, identifier string, err error) error {
+			return context.JSON(http.StatusTooManyRequests, nil)
+		},
+	}))
 
 	// Disallow to be embedded in an iFrame.
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XFrameOptions: "DENY",
 	}))
 
+	// MetricReporter middleware.
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			defer func() {
-				if !common.HasPrefixes(c.Request().URL.Path, "/healthz", "/v1/actuator") {
-					s.profile.LastActiveTs = time.Now().Unix()
+				// only update for authorized request
+				id, ok := c.Get(getPrincipalIDContextKey()).(int)
+				if !ok || id <= 0 {
+					return
 				}
+				s.profile.LastActiveTs = time.Now().Unix()
+				s.MetricReporter.Report(&metricPlugin.Metric{
+					Name:  metric.APIRequestMetricName,
+					Value: 1,
+					Labels: map[string]interface{}{
+						"path":   c.Request().URL.Path,
+						"method": c.Request().Method,
+					},
+				})
 			}()
 			return next(c)
 		}
@@ -352,6 +392,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.s3Client = s3Client
 	}
 
+	s.MetricReporter = metricreport.NewReporter(s.store, s.licenseService, s.profile, s.GetWorkspaceID(), false)
 	if !profile.Readonly {
 		s.SchemaSyncer = schemasync.NewSyncer(storeInstance, s.dbFactory, s.stateCfg, profile)
 		// TODO(p0ny): enable Feishu provider only when it is needed.
@@ -359,6 +400,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.ApplicationRunner = apprun.NewRunner(storeInstance, s.ActivityManager, s.feishuProvider, profile)
 		s.BackupRunner = backuprun.NewRunner(storeInstance, s.dbFactory, s.s3Client, s.stateCfg, &profile)
 		s.RollbackRunner = rollbackrun.NewRunner(storeInstance, s.dbFactory, s.stateCfg)
+		s.ApprovalRunner = approval.NewRunner(storeInstance, s.dbFactory, s.stateCfg, s.licenseService)
 
 		s.TaskScheduler = taskrun.NewScheduler(storeInstance, s.ApplicationRunner, s.SchemaSyncer, s.ActivityManager, s.licenseService, s.stateCfg, profile, s.MetricReporter)
 		s.TaskScheduler.Register(api.TaskGeneral, taskrun.NewDefaultExecutor())
@@ -374,7 +416,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.TaskScheduler.Register(api.TaskDatabaseRestorePITRCutover, taskrun.NewPITRCutoverExecutor(storeInstance, s.dbFactory, s.SchemaSyncer, s.BackupRunner, s.ActivityManager, profile))
 
 		s.TaskCheckScheduler = taskcheck.NewScheduler(storeInstance, s.licenseService, s.stateCfg)
-		statementSimpleExecutor := taskcheck.NewStatementAdvisorSimpleExecutor()
+		statementSimpleExecutor := taskcheck.NewStatementAdvisorSimpleExecutor(storeInstance)
 		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementFakeAdvise, statementSimpleExecutor)
 		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementSyntax, statementSimpleExecutor)
 		statementCompositeExecutor := taskcheck.NewStatementAdvisorCompositeExecutor(storeInstance, s.dbFactory)
@@ -383,14 +425,14 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementType, statementTypeExecutor)
 		databaseConnectExecutor := taskcheck.NewDatabaseConnectExecutor(storeInstance, s.dbFactory)
 		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseConnect, databaseConnectExecutor)
-		migrationSchemaExecutor := taskcheck.NewMigrationSchemaExecutor(storeInstance, s.dbFactory)
-		s.TaskCheckScheduler.Register(api.TaskCheckInstanceMigrationSchema, migrationSchemaExecutor)
 		ghostSyncExecutor := taskcheck.NewGhostSyncExecutor(storeInstance, s.secret)
 		s.TaskCheckScheduler.Register(api.TaskCheckGhostSync, ghostSyncExecutor)
-		checkLGTMExecutor := taskcheck.NewLGTMExecutor(storeInstance)
-		s.TaskCheckScheduler.Register(api.TaskCheckIssueLGTM, checkLGTMExecutor)
 		pitrMySQLExecutor := taskcheck.NewPITRMySQLExecutor(storeInstance, s.dbFactory)
 		s.TaskCheckScheduler.Register(api.TaskCheckPITRMySQL, pitrMySQLExecutor)
+		statementTypeReportExecutor := taskcheck.NewStatementTypeReportExecutor(storeInstance)
+		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementTypeReport, statementTypeReportExecutor)
+		statementAffectedRowsExecutor := taskcheck.NewStatementAffectedRowsReportExecutor(storeInstance, s.dbFactory)
+		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementAffectedRowsReport, statementAffectedRowsExecutor)
 
 		// Anomaly scanner
 		s.AnomalyScanner = anomaly.NewScanner(storeInstance, s.dbFactory, s.licenseService)
@@ -400,10 +442,12 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	}
 
 	// Middleware
+	//
+	// Error recorder middleware.
 	e.HTTPErrorHandler = func(err error, c echo.Context) {
 		errorRecorderMiddleware(err, s, c, e)
 	}
-
+	// API logger middleware.
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Skipper: func(c echo.Context) bool {
 			if s.profile.Mode == common.ReleaseModeProd && !s.profile.Debug {
@@ -415,6 +459,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 			`"method":"${method}","uri":"${uri}",` +
 			`"status":${status},"error":"${error}"}` + "\n",
 	}))
+	// Panic recovery middleware.
 	e.Use(recoverMiddleware)
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
@@ -422,6 +467,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	s.registerWebhookRoutes(webhookGroup)
 
 	apiGroup := e.Group(internalAPIPrefix)
+	// API JWT authentication middleware.
 	apiGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return JWTMiddleware(internalAPIPrefix, s.store, next, profile.Mode, config.secret)
 	})
@@ -459,7 +505,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	s.registerBookmarkRoutes(apiGroup)
 	s.registerSQLRoutes(apiGroup)
 	s.registerVCSRoutes(apiGroup)
-	s.registerSubscriptionRoutes(apiGroup)
 	s.registerPlanRoutes(apiGroup)
 	s.registerSheetRoutes(apiGroup)
 	s.registerSheetOrganizerRoutes(apiGroup)
@@ -490,6 +535,12 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 			return nil
 		}))
 	v1pb.RegisterActuatorServiceServer(s.grpcServer, v1.NewActuatorService(s.store, &s.profile))
+	v1pb.RegisterSubscriptionServiceServer(s.grpcServer, v1.NewSubscriptionService(
+		s.workspaceID,
+		s.store,
+		&s.profile,
+		s.MetricReporter,
+		s.licenseService))
 	v1pb.RegisterEnvironmentServiceServer(s.grpcServer, v1.NewEnvironmentService(s.store, s.licenseService))
 	v1pb.RegisterInstanceServiceServer(s.grpcServer, v1.NewInstanceService(s.store, s.licenseService, s.secret))
 	v1pb.RegisterProjectServiceServer(s.grpcServer, v1.NewProjectService(s.store))
@@ -497,10 +548,12 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	v1pb.RegisterInstanceRoleServiceServer(s.grpcServer, v1.NewInstanceRoleService(s.store, s.dbFactory))
 	v1pb.RegisterOrgPolicyServiceServer(s.grpcServer, v1.NewOrgPolicyService(s.store, s.licenseService))
 	v1pb.RegisterIdentityProviderServiceServer(s.grpcServer, v1.NewIdentityProviderService(s.store, s.licenseService))
-	v1pb.RegisterSettingServiceServer(s.grpcServer, v1.NewSettingService(s.store, &s.profile))
+	v1pb.RegisterSettingServiceServer(s.grpcServer, v1.NewSettingService(s.store, &s.profile, s.licenseService))
 	v1pb.RegisterAnomalyServiceServer(s.grpcServer, v1.NewAnomalyService(s.store))
 	v1pb.RegisterSQLServiceServer(s.grpcServer, v1.NewSQLService())
 	v1pb.RegisterExternalVersionControlServiceServer(s.grpcServer, v1.NewExternalVersionControlService(s.store))
+	v1pb.RegisterRiskServiceServer(s.grpcServer, v1.NewRiskService(s.store, s.licenseService))
+	v1pb.RegisterReviewServiceServer(s.grpcServer, v1.NewReviewService(s.store, s.ActivityManager, s.stateCfg))
 	reflection.Register(s.grpcServer)
 
 	// REST gateway proxy.
@@ -514,6 +567,9 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		return nil, err
 	}
 	if err := v1pb.RegisterActuatorServiceHandler(ctx, mux, grpcConn); err != nil {
+		return nil, err
+	}
+	if err := v1pb.RegisterSubscriptionServiceHandler(ctx, mux, grpcConn); err != nil {
 		return nil, err
 	}
 	if err := v1pb.RegisterEnvironmentServiceHandler(ctx, mux, grpcConn); err != nil {
@@ -595,18 +651,16 @@ func (s *Server) registerOpenAPIRoutes(e *echo.Echo, ce *casbin.Enforcer, prof c
 // initMetricReporter will initial the metric scheduler.
 func (s *Server) initMetricReporter(workspaceID string) {
 	enabled := s.profile.Mode == common.ReleaseModeProd && s.profile.DemoName != "" && !s.profile.DisableMetric
-	if enabled {
-		metricReporter := metricreport.NewReporter(s.store, s.licenseService, s.profile, workspaceID)
-		metricReporter.Register(metric.InstanceCountMetricName, metricCollector.NewInstanceCountCollector(s.store))
-		metricReporter.Register(metric.IssueCountMetricName, metricCollector.NewIssueCountCollector(s.store))
-		metricReporter.Register(metric.ProjectCountMetricName, metricCollector.NewProjectCountCollector(s.store))
-		metricReporter.Register(metric.PolicyCountMetricName, metricCollector.NewPolicyCountCollector(s.store))
-		metricReporter.Register(metric.TaskCountMetricName, metricCollector.NewTaskCountCollector(s.store))
-		metricReporter.Register(metric.DatabaseCountMetricName, metricCollector.NewDatabaseCountCollector(s.store))
-		metricReporter.Register(metric.SheetCountMetricName, metricCollector.NewSheetCountCollector(s.store))
-		metricReporter.Register(metric.MemberCountMetricName, metricCollector.NewMemberCountCollector(s.store))
-		s.MetricReporter = metricReporter
-	}
+	metricReporter := metricreport.NewReporter(s.store, s.licenseService, s.profile, workspaceID, enabled)
+	metricReporter.Register(metric.InstanceCountMetricName, metricCollector.NewInstanceCountCollector(s.store))
+	metricReporter.Register(metric.IssueCountMetricName, metricCollector.NewIssueCountCollector(s.store))
+	metricReporter.Register(metric.ProjectCountMetricName, metricCollector.NewProjectCountCollector(s.store))
+	metricReporter.Register(metric.PolicyCountMetricName, metricCollector.NewPolicyCountCollector(s.store))
+	metricReporter.Register(metric.TaskCountMetricName, metricCollector.NewTaskCountCollector(s.store))
+	metricReporter.Register(metric.DatabaseCountMetricName, metricCollector.NewDatabaseCountCollector(s.store))
+	metricReporter.Register(metric.SheetCountMetricName, metricCollector.NewSheetCountCollector(s.store))
+	metricReporter.Register(metric.MemberCountMetricName, metricCollector.NewMemberCountCollector(s.store))
+	s.MetricReporter = metricReporter
 }
 
 // retrieved via the SettingService upon startup.
@@ -693,6 +747,27 @@ func (s *Server) getInitSetting(ctx context.Context, datastore *store.Store) (*w
 	}, api.SystemBotID); err != nil {
 		return nil, err
 	}
+	if _, _, err := datastore.CreateSettingIfNotExistV2(ctx, &store.SettingMessage{
+		Name:        api.SettingPluginOpenAIEndpoint,
+		Value:       "",
+		Description: "API Endpoint for OpenAI",
+	}, api.SystemBotID); err != nil {
+		return nil, err
+	}
+
+	// initial workspace approval setting
+	approvalSettingValue, err := protojson.Marshal(&storepb.WorkspaceApprovalSetting{})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal initial workspace approval setting")
+	}
+	if _, _, err := datastore.CreateSettingIfNotExistV2(ctx, &store.SettingMessage{
+		Name: api.SettingWorkspaceApproval,
+		// Value is ""
+		Value:       string(approvalSettingValue),
+		Description: "The workspace approval setting",
+	}, api.SystemBotID); err != nil {
+		return nil, err
+	}
 
 	// initial workspace profile setting
 	settingName := api.SettingWorkspaceProfile
@@ -757,11 +832,11 @@ func (s *Server) Run(ctx context.Context, port int) error {
 		go s.ApplicationRunner.Run(ctx, &s.runnerWG)
 		s.runnerWG.Add(1)
 		go s.RollbackRunner.Run(ctx, &s.runnerWG)
+		s.runnerWG.Add(1)
+		go s.ApprovalRunner.Run(ctx, &s.runnerWG)
 
-		if s.MetricReporter != nil {
-			s.runnerWG.Add(1)
-			go s.MetricReporter.Run(ctx, &s.runnerWG)
-		}
+		s.runnerWG.Add(1)
+		go s.MetricReporter.Run(ctx, &s.runnerWG)
 	}
 
 	listen, err := net.Listen("tcp", fmt.Sprintf(":%d", port+1))
@@ -846,8 +921,8 @@ func getSampleSQLReviewPolicy() *advisor.SQLReviewPolicy {
 
 	ruleList := []*advisor.SQLReviewRule{}
 
-	// Add DropEmptyDatabase rule for MySQL and TiDB.
-	for _, e := range []advisorDb.Type{advisorDb.MySQL, advisorDb.TiDB} {
+	// Add DropEmptyDatabase rule for MySQL, TiDB, MariaDB.
+	for _, e := range []advisorDb.Type{advisorDb.MySQL, advisorDb.TiDB, advisorDb.MariaDB} {
 		ruleList = append(ruleList, &advisor.SQLReviewRule{
 			Type:    advisor.SchemaRuleDropEmptyDatabase,
 			Level:   advisor.SchemaRuleLevelError,
@@ -856,8 +931,8 @@ func getSampleSQLReviewPolicy() *advisor.SQLReviewPolicy {
 		})
 	}
 
-	// Add ColumnNotNull rule for MySQL, TiDB and Postgres.
-	for _, e := range []advisorDb.Type{advisorDb.MySQL, advisorDb.TiDB, advisorDb.Postgres} {
+	// Add ColumnNotNull rule for MySQL, TiDB, MariaDB, Postgres.
+	for _, e := range []advisorDb.Type{advisorDb.MySQL, advisorDb.TiDB, advisorDb.MariaDB, advisorDb.Postgres} {
 		ruleList = append(ruleList, &advisor.SQLReviewRule{
 			Type:    advisor.SchemaRuleColumnNotNull,
 			Level:   advisor.SchemaRuleLevelWarning,
@@ -866,8 +941,8 @@ func getSampleSQLReviewPolicy() *advisor.SQLReviewPolicy {
 		})
 	}
 
-	// Add TableDropNamingConvention rule for MySQL, TiDB and Postgres.
-	for _, e := range []advisorDb.Type{advisorDb.MySQL, advisorDb.TiDB, advisorDb.Postgres} {
+	// Add TableDropNamingConvention rule for MySQL, TiDB, MariaDB Postgres.
+	for _, e := range []advisorDb.Type{advisorDb.MySQL, advisorDb.TiDB, advisorDb.MariaDB, advisorDb.Postgres} {
 		ruleList = append(ruleList, &advisor.SQLReviewRule{
 			Type:    advisor.SchemaRuleTableDropNamingConvention,
 			Level:   advisor.SchemaRuleLevelError,
@@ -1206,6 +1281,6 @@ func (s *Server) backfillInstanceChangeHistory(ctx context.Context) {
 	}()
 
 	if err != nil {
-		log.Error("failed to backfill migration history", zap.Error(err))
+		log.Warn("failed to backfill migration history", zap.Error(err))
 	}
 }

@@ -5,13 +5,28 @@
 
 - [store/activity.proto](#store_activity-proto)
     - [ActivityIssueCommentCreatePayload](#bytebase-store-ActivityIssueCommentCreatePayload)
+    - [ActivityIssueCommentCreatePayload.ApprovalEvent](#bytebase-store-ActivityIssueCommentCreatePayload-ApprovalEvent)
     - [ActivityIssueCommentCreatePayload.ExternalApprovalEvent](#bytebase-store-ActivityIssueCommentCreatePayload-ExternalApprovalEvent)
     - [ActivityIssueCommentCreatePayload.TaskRollbackBy](#bytebase-store-ActivityIssueCommentCreatePayload-TaskRollbackBy)
     - [ActivityIssueCreatePayload](#bytebase-store-ActivityIssueCreatePayload)
     - [ActivityPayload](#bytebase-store-ActivityPayload)
   
+    - [ActivityIssueCommentCreatePayload.ApprovalEvent.Status](#bytebase-store-ActivityIssueCommentCreatePayload-ApprovalEvent-Status)
     - [ActivityIssueCommentCreatePayload.ExternalApprovalEvent.Action](#bytebase-store-ActivityIssueCommentCreatePayload-ExternalApprovalEvent-Action)
     - [ActivityIssueCommentCreatePayload.ExternalApprovalEvent.Type](#bytebase-store-ActivityIssueCommentCreatePayload-ExternalApprovalEvent-Type)
+  
+- [store/approval.proto](#store_approval-proto)
+    - [ApprovalFlow](#bytebase-store-ApprovalFlow)
+    - [ApprovalNode](#bytebase-store-ApprovalNode)
+    - [ApprovalStep](#bytebase-store-ApprovalStep)
+    - [ApprovalTemplate](#bytebase-store-ApprovalTemplate)
+    - [IssuePayloadApproval](#bytebase-store-IssuePayloadApproval)
+    - [IssuePayloadApproval.Approver](#bytebase-store-IssuePayloadApproval-Approver)
+  
+    - [ApprovalNode.GroupValue](#bytebase-store-ApprovalNode-GroupValue)
+    - [ApprovalNode.Type](#bytebase-store-ApprovalNode-Type)
+    - [ApprovalStep.Type](#bytebase-store-ApprovalStep-Type)
+    - [IssuePayloadApproval.Approver.Status](#bytebase-store-IssuePayloadApproval-Approver-Status)
   
 - [store/data_source.proto](#store_data_source-proto)
     - [DataSourceOptions](#bytebase-store-DataSourceOptions)
@@ -19,6 +34,7 @@
 - [store/database.proto](#store_database-proto)
     - [ColumnMetadata](#bytebase-store-ColumnMetadata)
     - [DatabaseMetadata](#bytebase-store-DatabaseMetadata)
+    - [DependentColumn](#bytebase-store-DependentColumn)
     - [ExtensionMetadata](#bytebase-store-ExtensionMetadata)
     - [ForeignKeyMetadata](#bytebase-store-ForeignKeyMetadata)
     - [IndexMetadata](#bytebase-store-IndexMetadata)
@@ -36,8 +52,13 @@
   
     - [IdentityProviderType](#bytebase-store-IdentityProviderType)
   
+- [store/issue.proto](#store_issue-proto)
+    - [IssuePayload](#bytebase-store-IssuePayload)
+  
 - [store/setting.proto](#store_setting-proto)
     - [AgentPluginSetting](#bytebase-store-AgentPluginSetting)
+    - [WorkspaceApprovalSetting](#bytebase-store-WorkspaceApprovalSetting)
+    - [WorkspaceApprovalSetting.Rule](#bytebase-store-WorkspaceApprovalSetting-Rule)
     - [WorkspaceProfileSetting](#bytebase-store-WorkspaceProfileSetting)
   
 - [store/user.proto](#store_user-proto)
@@ -64,7 +85,23 @@ ActivityIssueCommentCreatePayload is the payloads for creating issue comments.
 | ----- | ---- | ----- | ----------- |
 | external_approval_event | [ActivityIssueCommentCreatePayload.ExternalApprovalEvent](#bytebase-store-ActivityIssueCommentCreatePayload-ExternalApprovalEvent) |  |  |
 | task_rollback_by | [ActivityIssueCommentCreatePayload.TaskRollbackBy](#bytebase-store-ActivityIssueCommentCreatePayload-TaskRollbackBy) |  |  |
+| approval_event | [ActivityIssueCommentCreatePayload.ApprovalEvent](#bytebase-store-ActivityIssueCommentCreatePayload-ApprovalEvent) |  |  |
 | issue_name | [string](#string) |  | Used by inbox to display info without paying the join cost |
+
+
+
+
+
+
+<a name="bytebase-store-ActivityIssueCommentCreatePayload-ApprovalEvent"></a>
+
+### ActivityIssueCommentCreatePayload.ApprovalEvent
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| status | [ActivityIssueCommentCreatePayload.ApprovalEvent.Status](#bytebase-store-ActivityIssueCommentCreatePayload-ApprovalEvent-Status) |  | The new status. |
 
 
 
@@ -144,6 +181,19 @@ convert to the expected struct there.
  
 
 
+<a name="bytebase-store-ActivityIssueCommentCreatePayload-ApprovalEvent-Status"></a>
+
+### ActivityIssueCommentCreatePayload.ApprovalEvent.Status
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| STATUS_UNSPECIFIED | 0 |  |
+| PENDING | 1 |  |
+| APPROVED | 2 |  |
+
+
+
 <a name="bytebase-store-ActivityIssueCommentCreatePayload-ExternalApprovalEvent-Action"></a>
 
 ### ActivityIssueCommentCreatePayload.ExternalApprovalEvent.Action
@@ -166,6 +216,185 @@ convert to the expected struct there.
 | ---- | ------ | ----------- |
 | TYPE_UNSPECIFIED | 0 |  |
 | TYPE_FEISHU | 1 |  |
+
+
+ 
+
+ 
+
+ 
+
+
+
+<a name="store_approval-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## store/approval.proto
+
+
+
+<a name="bytebase-store-ApprovalFlow"></a>
+
+### ApprovalFlow
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| steps | [ApprovalStep](#bytebase-store-ApprovalStep) | repeated |  |
+
+
+
+
+
+
+<a name="bytebase-store-ApprovalNode"></a>
+
+### ApprovalNode
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| type | [ApprovalNode.Type](#bytebase-store-ApprovalNode-Type) |  |  |
+| group_value | [ApprovalNode.GroupValue](#bytebase-store-ApprovalNode-GroupValue) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-ApprovalStep"></a>
+
+### ApprovalStep
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| type | [ApprovalStep.Type](#bytebase-store-ApprovalStep-Type) |  |  |
+| nodes | [ApprovalNode](#bytebase-store-ApprovalNode) | repeated |  |
+
+
+
+
+
+
+<a name="bytebase-store-ApprovalTemplate"></a>
+
+### ApprovalTemplate
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| flow | [ApprovalFlow](#bytebase-store-ApprovalFlow) |  |  |
+| title | [string](#string) |  |  |
+| description | [string](#string) |  |  |
+| creator_id | [int32](#int32) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-IssuePayloadApproval"></a>
+
+### IssuePayloadApproval
+IssuePayloadApproval is a part of the payload of an issue.
+IssuePayloadApproval records the approval template used and the approval history.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| approval_templates | [ApprovalTemplate](#bytebase-store-ApprovalTemplate) | repeated |  |
+| approvers | [IssuePayloadApproval.Approver](#bytebase-store-IssuePayloadApproval-Approver) | repeated |  |
+| approval_finding_done | [bool](#bool) |  | If the value is `false`, it means that the backend is still finding matching approval templates. If `true`, other fields are available. |
+| approval_finding_error | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-IssuePayloadApproval-Approver"></a>
+
+### IssuePayloadApproval.Approver
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| status | [IssuePayloadApproval.Approver.Status](#bytebase-store-IssuePayloadApproval-Approver-Status) |  | The new status. |
+| principal_id | [int32](#int32) |  | The principal id of the approver. |
+
+
+
+
+
+ 
+
+
+<a name="bytebase-store-ApprovalNode-GroupValue"></a>
+
+### ApprovalNode.GroupValue
+GroupValue is used if ApprovalNode Type is ANY_IN_GROUP
+The predefined user groups are:
+- WORKSPACE_OWNER
+- WORKSPACE_DBA
+- PROJECT_OWNER
+- PROJECT_MEMBER
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| GROUP_VALUE_UNSPECIFILED | 0 |  |
+| WORKSPACE_OWNER | 1 |  |
+| WORKSPACE_DBA | 2 |  |
+| PROJECT_OWNER | 3 |  |
+| PROJECT_MEMBER | 4 |  |
+
+
+
+<a name="bytebase-store-ApprovalNode-Type"></a>
+
+### ApprovalNode.Type
+Type of the ApprovalNode.
+type determines who should approve this node.
+ANY_IN_GROUP means the ApprovalNode can be approved by an user from our predefined user group.
+See GroupValue below for the predefined user groups.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TYPE_UNSPECIFIED | 0 |  |
+| ANY_IN_GROUP | 1 |  |
+
+
+
+<a name="bytebase-store-ApprovalStep-Type"></a>
+
+### ApprovalStep.Type
+Type of the ApprovalStep
+ALL means every node must be approved to proceed.
+ANY means approving any node will proceed.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TYPE_UNSPECIFIED | 0 |  |
+| ALL | 1 |  |
+| ANY | 2 |  |
+
+
+
+<a name="bytebase-store-IssuePayloadApproval-Approver-Status"></a>
+
+### IssuePayloadApproval.Approver.Status
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| STATUS_UNSPECIFIED | 0 |  |
+| PENDING | 1 |  |
+| APPROVED | 2 |  |
 
 
  
@@ -252,6 +481,23 @@ DatabaseMetadata is the metadata for databases.
 | character_set | [string](#string) |  | The character_set is the character set of a database. |
 | collation | [string](#string) |  | The collation is the collation of a database. |
 | extensions | [ExtensionMetadata](#bytebase-store-ExtensionMetadata) | repeated | The extensions is the list of extensions in a database. |
+
+
+
+
+
+
+<a name="bytebase-store-DependentColumn"></a>
+
+### DependentColumn
+DependentColumn is the metadata for dependent columns.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| schema | [string](#string) |  | The schema is the schema of a reference column. |
+| table | [string](#string) |  | The table is the table of a reference column. |
+| column | [string](#string) |  | The column is the name of a reference column. |
 
 
 
@@ -390,6 +636,7 @@ ViewMetadata is the metadata for views.
 | name | [string](#string) |  | The name is the name of a view. |
 | definition | [string](#string) |  | The definition is the definition of a view. |
 | comment | [string](#string) |  | The comment is the comment of a view. |
+| dependent_columns | [DependentColumn](#bytebase-store-DependentColumn) | repeated | The dependent_columns is the list of dependent columns of a view. |
 
 
 
@@ -530,6 +777,37 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 
 
 
+<a name="store_issue-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## store/issue.proto
+
+
+
+<a name="bytebase-store-IssuePayload"></a>
+
+### IssuePayload
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| approval | [IssuePayloadApproval](#bytebase-store-IssuePayloadApproval) |  |  |
+
+
+
+
+
+ 
+
+ 
+
+ 
+
+ 
+
+
+
 <a name="store_setting-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
@@ -547,6 +825,37 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 | ----- | ---- | ----- | ----------- |
 | url | [string](#string) |  | The URL for the agent API. |
 | token | [string](#string) |  | The token for the agent. |
+
+
+
+
+
+
+<a name="bytebase-store-WorkspaceApprovalSetting"></a>
+
+### WorkspaceApprovalSetting
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| rules | [WorkspaceApprovalSetting.Rule](#bytebase-store-WorkspaceApprovalSetting-Rule) | repeated |  |
+
+
+
+
+
+
+<a name="bytebase-store-WorkspaceApprovalSetting-Rule"></a>
+
+### WorkspaceApprovalSetting.Rule
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| expression | [google.api.expr.v1alpha1.ParsedExpr](#google-api-expr-v1alpha1-ParsedExpr) |  |  |
+| template | [ApprovalTemplate](#bytebase-store-ApprovalTemplate) |  |  |
 
 
 

@@ -4,6 +4,7 @@ package utils
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -15,13 +16,16 @@ import (
 	ghostsql "github.com/github/gh-ost/go/sql"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/bytebase/bytebase/backend/common"
 	"github.com/bytebase/bytebase/backend/common/log"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/db"
+	"github.com/bytebase/bytebase/backend/plugin/db/oracle"
 	"github.com/bytebase/bytebase/backend/plugin/db/util"
 	"github.com/bytebase/bytebase/backend/store"
+	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 )
 
 // GetLatestSchemaVersion gets the latest schema version for a database.
@@ -395,14 +399,6 @@ func PassAllCheck(task *store.TaskMessage, allowedStatus api.TaskCheckStatus, ta
 			return false, nil
 		}
 
-		pass, err = passCheck(runs, api.TaskCheckInstanceMigrationSchema, allowedStatus)
-		if err != nil {
-			return false, err
-		}
-		if !pass {
-			return false, nil
-		}
-
 		if api.IsSyntaxCheckSupported(engine) {
 			ok, err := passCheck(runs, api.TaskCheckDatabaseStatementSyntax, allowedStatus)
 			if err != nil {
@@ -478,7 +474,7 @@ func passCheck(taskCheckRunList []*store.TaskCheckRunMessage, checkType api.Task
 }
 
 // ExecuteMigration executes migration.
-func ExecuteMigration(ctx context.Context, store *store.Store, driver db.Driver, m *db.MigrationInfo, statement string) (migrationHistoryID string, updatedSchema string, resErr error) {
+func ExecuteMigration(ctx context.Context, store *store.Store, driver db.Driver, m *db.MigrationInfo, statement string, executeBeforeCommitTx func(tx *sql.Tx) error) (migrationHistoryID string, updatedSchema string, resErr error) {
 	var prevSchemaBuf bytes.Buffer
 	// Don't record schema if the database hasn't existed yet or is schemaless (e.g. Mongo).
 	if !m.CreateDatabase {
@@ -520,8 +516,18 @@ func ExecuteMigration(ctx context.Context, store *store.Store, driver db.Driver,
 		doMigrate = false
 	}
 	if doMigrate {
-		if _, _, err := driver.ExecuteMigration(ctx, m, statement); err != nil {
-			return "", "", err
+		if driver.GetType() == db.Oracle && executeBeforeCommitTx != nil {
+			oracleDriver, ok := driver.(*oracle.Driver)
+			if !ok {
+				return "", "", errors.New("failed to cast driver to oracle driver")
+			}
+			if _, _, err := oracleDriver.ExecuteMigrationWithBeforeCommitTxFunc(ctx, m, statement, executeBeforeCommitTx); err != nil {
+				return "", "", err
+			}
+		} else {
+			if _, _, err := driver.ExecuteMigration(ctx, m, statement); err != nil {
+				return "", "", err
+			}
 		}
 	}
 
@@ -619,4 +625,35 @@ func EndMigration(ctx context.Context, store *store.Store, startedNs int64, inse
 		err = store.UpdateInstanceChangeHistoryAsFailed(ctx, migrationDurationNs, insertedID)
 	}
 	return err
+}
+
+// FindNextPendingStep finds the next pending step in the approval flow.
+func FindNextPendingStep(template *storepb.ApprovalTemplate, approvers []*storepb.IssuePayloadApproval_Approver) *storepb.ApprovalStep {
+	// We can do the finding like this for now because we are presuming that
+	// one step is approved by one approver.
+	if len(approvers) >= len(template.Flow.Steps) {
+		return nil
+	}
+	return template.Flow.Steps[len(approvers)]
+}
+
+// CheckIssueApproved checks if the issue is approved.
+func CheckIssueApproved(issue *store.IssueMessage) (bool, error) {
+	issuePayload := &storepb.IssuePayload{}
+	if err := protojson.Unmarshal([]byte(issue.Payload), issuePayload); err != nil {
+		return false, errors.Wrap(err, "failed to unmarshal issue payload")
+	}
+	if issuePayload.Approval == nil || !issuePayload.Approval.ApprovalFindingDone {
+		return false, nil
+	}
+	if issuePayload.Approval.ApprovalFindingError != "" {
+		return false, nil
+	}
+	if len(issuePayload.Approval.ApprovalTemplates) == 0 {
+		return true, nil
+	}
+	if len(issuePayload.Approval.ApprovalTemplates) != 1 {
+		return false, errors.Errorf("expecting one approval template but got %d", len(issuePayload.Approval.ApprovalTemplates))
+	}
+	return FindNextPendingStep(issuePayload.Approval.ApprovalTemplates[0], issuePayload.Approval.Approvers) == nil, nil
 }

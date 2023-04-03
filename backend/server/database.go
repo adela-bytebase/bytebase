@@ -252,7 +252,7 @@ func (s *Server) registerDatabaseRoutes(g *echo.Group) {
 			// We only support MySQL now.
 			var engineType parser.EngineType
 			switch instance.Engine {
-			case db.MySQL:
+			case db.MySQL, db.TiDB, db.MariaDB:
 				engineType = parser.MySQL
 			default:
 				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Not support SDL format for %s instance", instance.Engine))
@@ -630,6 +630,7 @@ func (s *Server) registerDatabaseRoutes(g *echo.Group) {
 			Username:      dataSourcePatch.Username,
 			Host:          dataSourcePatch.Host,
 			Port:          dataSourcePatch.Port,
+			Database:      dataSourcePatch.Database,
 		}
 		if dataSourcePatch.Password != nil {
 			obfuscated := common.Obfuscate(*dataSourcePatch.Password, s.secret)

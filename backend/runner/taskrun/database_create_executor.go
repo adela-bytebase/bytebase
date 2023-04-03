@@ -202,7 +202,7 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 
 	mi.DatabaseID = &database.UID
 
-	migrationID, _, err := utils.ExecuteMigration(ctx, exec.store, driver, mi, statement)
+	migrationID, _, err := utils.ExecuteMigration(ctx, exec.store, driver, mi, statement, nil /* executeBeforeCommitTx */)
 	if err != nil {
 		return true, nil, err
 	}
@@ -250,7 +250,7 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 
 func getConnectionStatement(dbType db.Type, databaseName string) (string, error) {
 	switch dbType {
-	case db.MySQL, db.TiDB:
+	case db.MySQL, db.TiDB, db.MariaDB:
 		return fmt.Sprintf("USE `%s`;\n", databaseName), nil
 	case db.MSSQL:
 		return fmt.Sprintf(`USE "%s";\n`, databaseName), nil
@@ -266,6 +266,8 @@ func getConnectionStatement(dbType db.Type, databaseName string) (string, error)
 		// We embed mongosh to execute the mongodb statement, and `use` statement is not effective in mongosh.
 		// We will connect to the specified database by specifying the database name in the connection string.
 		return "", nil
+	case db.Redshift:
+		return fmt.Sprintf("\\connect \"%s\";\n", databaseName), nil
 	}
 
 	return "", errors.Errorf("unsupported database type %s", dbType)

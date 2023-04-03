@@ -7,6 +7,27 @@ import {
   languageOfEngine,
   MaybeRef,
 } from "../types";
+import { isDev } from "./util";
+
+export const supportedEngineList = () => {
+  const engines: EngineType[] = [
+    "MYSQL",
+    "POSTGRES",
+    "TIDB",
+    "SNOWFLAKE",
+    "CLICKHOUSE",
+    "MONGODB",
+    "SPANNER",
+    "REDIS",
+    "ORACLE",
+    "MSSQL",
+    "MARIADB",
+  ];
+  if (isDev()) {
+    engines.push("REDSHIFT");
+  }
+  return engines;
+};
 
 export function instanceName(instance: Instance) {
   let name = instance.name;
@@ -67,6 +88,7 @@ export const instanceHasBackupRestore = (instance: Instance): boolean => {
   if (engine === "MONGODB") return false;
   if (engine === "REDIS") return false;
   if (engine === "SPANNER") return false;
+  if (engine === "REDSHIFT") return false;
   return true;
 };
 
@@ -80,6 +102,7 @@ export const instanceHasReadonlyMode = (instance: Instance): boolean => {
 export const instanceHasCreateDatabase = (instance: Instance): boolean => {
   const { engine } = instance;
   if (engine === "REDIS") return false;
+  if (engine === "ORACLE") return false;
   return true;
 };
 
@@ -106,5 +129,6 @@ export const instanceHasSSL = (
     "POSTGRES",
     "REDIS",
     "ORACLE",
+    "MARIADB",
   ].includes(engine);
 };

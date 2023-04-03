@@ -1,31 +1,34 @@
 <template>
   <div class="space-y-6 divide-y divide-block-border">
     <div class="divide-y divide-block-border w-[850px]">
-      <div
-        v-if="isCreating"
-        class="w-full mt-4 mb-6 grid grid-cols-1 gap-4"
-        :class="[isDev() ? 'sm:grid-cols-5' : 'sm:grid-cols-4']"
-      >
+      <div v-if="isCreating" class="w-full mt-4 mb-6 grid grid-cols-5 gap-2">
         <template v-for="engine in engineList" :key="engine">
           <div
-            class="flex relative justify-center px-2 py-4 border border-control-border hover:bg-control-bg-hover cursor-pointer"
+            class="flex relative justify-start p-2 border rounded cursor-pointer hover:bg-control-bg-hover"
+            :class="
+              basicInformation.engine === engine &&
+              'font-medium bg-control-bg-hover'
+            "
             @click.capture="changeInstanceEngine(engine)"
           >
-            <div class="flex flex-col items-center">
-              <img class="h-8 w-auto" :src="EngineIconPath[engine]" />
-              <p class="mt-2 text-center textlabel">
+            <div class="flex flex-row justify-start items-center">
+              <input
+                type="radio"
+                class="btn mr-2"
+                :checked="basicInformation.engine == engine"
+              />
+              <img
+                class="w-5 h-auto max-h-[20px] object-contain mr-1"
+                :src="EngineIconPath[engine]"
+              />
+              <p class="text-center text-sm">
                 {{ engineName(engine) }}
               </p>
               <template v-if="isEngineBeta(engine)">
-                <BBBetaBadge class="absolute right-0.5 top-1" />
-              </template>
-              <div class="mt-4 radio text-sm">
-                <input
-                  type="radio"
-                  class="btn"
-                  :checked="basicInformation.engine == engine"
+                <BBBetaBadge
+                  class="absolute -top-px -right-px rounded text-xs !bg-gray-500 px-1 !py-0"
                 />
-              </div>
+              </template>
             </div>
           </div>
         </template>
@@ -550,6 +553,7 @@ import {
   instanceSlug,
   isDev,
   isValidSpannerHost,
+  supportedEngineList,
 } from "../utils";
 import {
   InstancePatch,
@@ -730,21 +734,7 @@ watch(
 );
 
 const engineList = computed(() => {
-  const engines: EngineType[] = [
-    "MYSQL",
-    "POSTGRES",
-    "TIDB",
-    "SNOWFLAKE",
-    "CLICKHOUSE",
-    "MONGODB",
-    "SPANNER",
-    "REDIS",
-    "ORACLE",
-  ];
-  if (isDev()) {
-    engines.push("MSSQL");
-  }
-  return engines;
+  return supportedEngineList();
 });
 
 const EngineIconPath = {
@@ -758,6 +748,8 @@ const EngineIconPath = {
   REDIS: new URL("../assets/db-redis.png", import.meta.url).href,
   ORACLE: new URL("../assets/db-oracle.svg", import.meta.url).href,
   MSSQL: new URL("../assets/db-mssql.svg", import.meta.url).href,
+  REDSHIFT: new URL("../assets/db-redshift.svg", import.meta.url).href,
+  MARIADB: new URL("../assets/db-mariadb.png", import.meta.url).href,
 };
 
 const mongodbConnectionStringSchemaList = ["mongodb://", "mongodb+srv://"];
@@ -847,6 +839,10 @@ const defaultPort = computed(() => {
       return "";
     }
     return "27017";
+  } else if (basicInformation.value.engine == "REDSHIFT") {
+    return "5439";
+  } else if (basicInformation.value.engine == "MARIADB") {
+    return "3306";
   }
   return "3306";
 });
@@ -889,7 +885,8 @@ const hasReadonlyReplicaPort = computed((): boolean => {
 
 const showDatabase = computed((): boolean => {
   return (
-    basicInformation.value.engine === "POSTGRES" &&
+    (basicInformation.value.engine === "POSTGRES" ||
+      basicInformation.value.engine === "REDSHIFT") &&
     state.currentDataSourceType === "ADMIN"
   );
 });
@@ -921,7 +918,7 @@ const allowUpdate = computed((): boolean => {
 });
 
 const isEngineBeta = (engine: EngineType): boolean => {
-  return ["MONGODB", "SPANNER", "REDIS", "ORACLE"].includes(engine);
+  return ["ORACLE", "MSSQL", "REDSHIFT", "MARIADB"].includes(engine);
 };
 
 // The default host name is 127.0.0.1 or host.docker.internal which is not applicable to Snowflake, so we change
@@ -1232,7 +1229,8 @@ const doCreate = async () => {
 
   if (
     instanceCreate.engine !== "POSTGRES" &&
-    instanceCreate.engine !== "MONGODB"
+    instanceCreate.engine !== "MONGODB" &&
+    instanceCreate.engine !== "REDSHIFT"
   ) {
     // Clear the `database` field if not needed.
     instanceCreate.database = "";

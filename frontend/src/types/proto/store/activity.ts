@@ -24,8 +24,9 @@ export interface ActivityIssueCreatePayload {
 /** ActivityIssueCommentCreatePayload is the payloads for creating issue comments. */
 export interface ActivityIssueCommentCreatePayload {
   externalApprovalEvent?: ActivityIssueCommentCreatePayload_ExternalApprovalEvent | undefined;
-  taskRollbackBy?:
-    | ActivityIssueCommentCreatePayload_TaskRollbackBy
+  taskRollbackBy?: ActivityIssueCommentCreatePayload_TaskRollbackBy | undefined;
+  approvalEvent?:
+    | ActivityIssueCommentCreatePayload_ApprovalEvent
     | undefined;
   /** Used by inbox to display info without paying the join cost */
   issueName: string;
@@ -128,6 +129,54 @@ export function activityIssueCommentCreatePayload_ExternalApprovalEvent_ActionTo
   }
 }
 
+export interface ActivityIssueCommentCreatePayload_ApprovalEvent {
+  /** The new status. */
+  status: ActivityIssueCommentCreatePayload_ApprovalEvent_Status;
+}
+
+export enum ActivityIssueCommentCreatePayload_ApprovalEvent_Status {
+  STATUS_UNSPECIFIED = 0,
+  PENDING = 1,
+  APPROVED = 2,
+  UNRECOGNIZED = -1,
+}
+
+export function activityIssueCommentCreatePayload_ApprovalEvent_StatusFromJSON(
+  object: any,
+): ActivityIssueCommentCreatePayload_ApprovalEvent_Status {
+  switch (object) {
+    case 0:
+    case "STATUS_UNSPECIFIED":
+      return ActivityIssueCommentCreatePayload_ApprovalEvent_Status.STATUS_UNSPECIFIED;
+    case 1:
+    case "PENDING":
+      return ActivityIssueCommentCreatePayload_ApprovalEvent_Status.PENDING;
+    case 2:
+    case "APPROVED":
+      return ActivityIssueCommentCreatePayload_ApprovalEvent_Status.APPROVED;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return ActivityIssueCommentCreatePayload_ApprovalEvent_Status.UNRECOGNIZED;
+  }
+}
+
+export function activityIssueCommentCreatePayload_ApprovalEvent_StatusToJSON(
+  object: ActivityIssueCommentCreatePayload_ApprovalEvent_Status,
+): string {
+  switch (object) {
+    case ActivityIssueCommentCreatePayload_ApprovalEvent_Status.STATUS_UNSPECIFIED:
+      return "STATUS_UNSPECIFIED";
+    case ActivityIssueCommentCreatePayload_ApprovalEvent_Status.PENDING:
+      return "PENDING";
+    case ActivityIssueCommentCreatePayload_ApprovalEvent_Status.APPROVED:
+      return "APPROVED";
+    case ActivityIssueCommentCreatePayload_ApprovalEvent_Status.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 function createBaseActivityPayload(): ActivityPayload {
   return { issueCreatePayload: undefined, issueCommentCreatePayload: undefined };
 }
@@ -144,22 +193,31 @@ export const ActivityPayload = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): ActivityPayload {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseActivityPayload();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
+          if (tag != 10) {
+            break;
+          }
+
           message.issueCreatePayload = ActivityIssueCreatePayload.decode(reader, reader.uint32());
-          break;
+          continue;
         case 2:
+          if (tag != 18) {
+            break;
+          }
+
           message.issueCommentCreatePayload = ActivityIssueCommentCreatePayload.decode(reader, reader.uint32());
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
+          continue;
       }
+      if ((tag & 7) == 4 || tag == 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
     }
     return message;
   },
@@ -185,6 +243,10 @@ export const ActivityPayload = {
         ? ActivityIssueCommentCreatePayload.toJSON(message.issueCommentCreatePayload)
         : undefined);
     return obj;
+  },
+
+  create(base?: DeepPartial<ActivityPayload>): ActivityPayload {
+    return ActivityPayload.fromPartial(base ?? {});
   },
 
   fromPartial(object: DeepPartial<ActivityPayload>): ActivityPayload {
@@ -213,19 +275,24 @@ export const ActivityIssueCreatePayload = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): ActivityIssueCreatePayload {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseActivityIssueCreatePayload();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
+          if (tag != 10) {
+            break;
+          }
+
           message.issueName = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
+          continue;
       }
+      if ((tag & 7) == 4 || tag == 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
     }
     return message;
   },
@@ -240,6 +307,10 @@ export const ActivityIssueCreatePayload = {
     return obj;
   },
 
+  create(base?: DeepPartial<ActivityIssueCreatePayload>): ActivityIssueCreatePayload {
+    return ActivityIssueCreatePayload.fromPartial(base ?? {});
+  },
+
   fromPartial(object: DeepPartial<ActivityIssueCreatePayload>): ActivityIssueCreatePayload {
     const message = createBaseActivityIssueCreatePayload();
     message.issueName = object.issueName ?? "";
@@ -248,7 +319,7 @@ export const ActivityIssueCreatePayload = {
 };
 
 function createBaseActivityIssueCommentCreatePayload(): ActivityIssueCommentCreatePayload {
-  return { externalApprovalEvent: undefined, taskRollbackBy: undefined, issueName: "" };
+  return { externalApprovalEvent: undefined, taskRollbackBy: undefined, approvalEvent: undefined, issueName: "" };
 }
 
 export const ActivityIssueCommentCreatePayload = {
@@ -263,35 +334,58 @@ export const ActivityIssueCommentCreatePayload = {
       ActivityIssueCommentCreatePayload_TaskRollbackBy.encode(message.taskRollbackBy, writer.uint32(18).fork())
         .ldelim();
     }
+    if (message.approvalEvent !== undefined) {
+      ActivityIssueCommentCreatePayload_ApprovalEvent.encode(message.approvalEvent, writer.uint32(26).fork()).ldelim();
+    }
     if (message.issueName !== "") {
-      writer.uint32(26).string(message.issueName);
+      writer.uint32(34).string(message.issueName);
     }
     return writer;
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): ActivityIssueCommentCreatePayload {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseActivityIssueCommentCreatePayload();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
+          if (tag != 10) {
+            break;
+          }
+
           message.externalApprovalEvent = ActivityIssueCommentCreatePayload_ExternalApprovalEvent.decode(
             reader,
             reader.uint32(),
           );
-          break;
+          continue;
         case 2:
+          if (tag != 18) {
+            break;
+          }
+
           message.taskRollbackBy = ActivityIssueCommentCreatePayload_TaskRollbackBy.decode(reader, reader.uint32());
-          break;
+          continue;
         case 3:
+          if (tag != 26) {
+            break;
+          }
+
+          message.approvalEvent = ActivityIssueCommentCreatePayload_ApprovalEvent.decode(reader, reader.uint32());
+          continue;
+        case 4:
+          if (tag != 34) {
+            break;
+          }
+
           message.issueName = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
+          continue;
       }
+      if ((tag & 7) == 4 || tag == 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
     }
     return message;
   },
@@ -303,6 +397,9 @@ export const ActivityIssueCommentCreatePayload = {
         : undefined,
       taskRollbackBy: isSet(object.taskRollbackBy)
         ? ActivityIssueCommentCreatePayload_TaskRollbackBy.fromJSON(object.taskRollbackBy)
+        : undefined,
+      approvalEvent: isSet(object.approvalEvent)
+        ? ActivityIssueCommentCreatePayload_ApprovalEvent.fromJSON(object.approvalEvent)
         : undefined,
       issueName: isSet(object.issueName) ? String(object.issueName) : "",
     };
@@ -316,8 +413,15 @@ export const ActivityIssueCommentCreatePayload = {
     message.taskRollbackBy !== undefined && (obj.taskRollbackBy = message.taskRollbackBy
       ? ActivityIssueCommentCreatePayload_TaskRollbackBy.toJSON(message.taskRollbackBy)
       : undefined);
+    message.approvalEvent !== undefined && (obj.approvalEvent = message.approvalEvent
+      ? ActivityIssueCommentCreatePayload_ApprovalEvent.toJSON(message.approvalEvent)
+      : undefined);
     message.issueName !== undefined && (obj.issueName = message.issueName);
     return obj;
+  },
+
+  create(base?: DeepPartial<ActivityIssueCommentCreatePayload>): ActivityIssueCommentCreatePayload {
+    return ActivityIssueCommentCreatePayload.fromPartial(base ?? {});
   },
 
   fromPartial(object: DeepPartial<ActivityIssueCommentCreatePayload>): ActivityIssueCommentCreatePayload {
@@ -328,6 +432,9 @@ export const ActivityIssueCommentCreatePayload = {
         : undefined;
     message.taskRollbackBy = (object.taskRollbackBy !== undefined && object.taskRollbackBy !== null)
       ? ActivityIssueCommentCreatePayload_TaskRollbackBy.fromPartial(object.taskRollbackBy)
+      : undefined;
+    message.approvalEvent = (object.approvalEvent !== undefined && object.approvalEvent !== null)
+      ? ActivityIssueCommentCreatePayload_ApprovalEvent.fromPartial(object.approvalEvent)
       : undefined;
     message.issueName = object.issueName ?? "";
     return message;
@@ -359,28 +466,45 @@ export const ActivityIssueCommentCreatePayload_TaskRollbackBy = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): ActivityIssueCommentCreatePayload_TaskRollbackBy {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseActivityIssueCommentCreatePayload_TaskRollbackBy();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
+          if (tag != 8) {
+            break;
+          }
+
           message.issueId = longToNumber(reader.int64() as Long);
-          break;
+          continue;
         case 2:
+          if (tag != 16) {
+            break;
+          }
+
           message.taskId = longToNumber(reader.int64() as Long);
-          break;
+          continue;
         case 3:
+          if (tag != 24) {
+            break;
+          }
+
           message.rollbackByIssueId = longToNumber(reader.int64() as Long);
-          break;
+          continue;
         case 4:
+          if (tag != 32) {
+            break;
+          }
+
           message.rollbackByTaskId = longToNumber(reader.int64() as Long);
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
+          continue;
       }
+      if ((tag & 7) == 4 || tag == 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
     }
     return message;
   },
@@ -401,6 +525,12 @@ export const ActivityIssueCommentCreatePayload_TaskRollbackBy = {
     message.rollbackByIssueId !== undefined && (obj.rollbackByIssueId = Math.round(message.rollbackByIssueId));
     message.rollbackByTaskId !== undefined && (obj.rollbackByTaskId = Math.round(message.rollbackByTaskId));
     return obj;
+  },
+
+  create(
+    base?: DeepPartial<ActivityIssueCommentCreatePayload_TaskRollbackBy>,
+  ): ActivityIssueCommentCreatePayload_TaskRollbackBy {
+    return ActivityIssueCommentCreatePayload_TaskRollbackBy.fromPartial(base ?? {});
   },
 
   fromPartial(
@@ -437,25 +567,38 @@ export const ActivityIssueCommentCreatePayload_ExternalApprovalEvent = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): ActivityIssueCommentCreatePayload_ExternalApprovalEvent {
-    const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseActivityIssueCommentCreatePayload_ExternalApprovalEvent();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
+          if (tag != 8) {
+            break;
+          }
+
           message.type = reader.int32() as any;
-          break;
+          continue;
         case 2:
+          if (tag != 16) {
+            break;
+          }
+
           message.action = reader.int32() as any;
-          break;
+          continue;
         case 3:
+          if (tag != 26) {
+            break;
+          }
+
           message.stageName = reader.string();
-          break;
-        default:
-          reader.skipType(tag & 7);
-          break;
+          continue;
       }
+      if ((tag & 7) == 4 || tag == 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
     }
     return message;
   },
@@ -480,6 +623,12 @@ export const ActivityIssueCommentCreatePayload_ExternalApprovalEvent = {
     return obj;
   },
 
+  create(
+    base?: DeepPartial<ActivityIssueCommentCreatePayload_ExternalApprovalEvent>,
+  ): ActivityIssueCommentCreatePayload_ExternalApprovalEvent {
+    return ActivityIssueCommentCreatePayload_ExternalApprovalEvent.fromPartial(base ?? {});
+  },
+
   fromPartial(
     object: DeepPartial<ActivityIssueCommentCreatePayload_ExternalApprovalEvent>,
   ): ActivityIssueCommentCreatePayload_ExternalApprovalEvent {
@@ -491,10 +640,76 @@ export const ActivityIssueCommentCreatePayload_ExternalApprovalEvent = {
   },
 };
 
+function createBaseActivityIssueCommentCreatePayload_ApprovalEvent(): ActivityIssueCommentCreatePayload_ApprovalEvent {
+  return { status: 0 };
+}
+
+export const ActivityIssueCommentCreatePayload_ApprovalEvent = {
+  encode(
+    message: ActivityIssueCommentCreatePayload_ApprovalEvent,
+    writer: _m0.Writer = _m0.Writer.create(),
+  ): _m0.Writer {
+    if (message.status !== 0) {
+      writer.uint32(8).int32(message.status);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ActivityIssueCommentCreatePayload_ApprovalEvent {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseActivityIssueCommentCreatePayload_ApprovalEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag != 8) {
+            break;
+          }
+
+          message.status = reader.int32() as any;
+          continue;
+      }
+      if ((tag & 7) == 4 || tag == 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ActivityIssueCommentCreatePayload_ApprovalEvent {
+    return {
+      status: isSet(object.status) ? activityIssueCommentCreatePayload_ApprovalEvent_StatusFromJSON(object.status) : 0,
+    };
+  },
+
+  toJSON(message: ActivityIssueCommentCreatePayload_ApprovalEvent): unknown {
+    const obj: any = {};
+    message.status !== undefined &&
+      (obj.status = activityIssueCommentCreatePayload_ApprovalEvent_StatusToJSON(message.status));
+    return obj;
+  },
+
+  create(
+    base?: DeepPartial<ActivityIssueCommentCreatePayload_ApprovalEvent>,
+  ): ActivityIssueCommentCreatePayload_ApprovalEvent {
+    return ActivityIssueCommentCreatePayload_ApprovalEvent.fromPartial(base ?? {});
+  },
+
+  fromPartial(
+    object: DeepPartial<ActivityIssueCommentCreatePayload_ApprovalEvent>,
+  ): ActivityIssueCommentCreatePayload_ApprovalEvent {
+    const message = createBaseActivityIssueCommentCreatePayload_ApprovalEvent();
+    message.status = object.status ?? 0;
+    return message;
+  },
+};
+
 declare var self: any | undefined;
 declare var window: any | undefined;
 declare var global: any | undefined;
-var globalThis: any = (() => {
+var tsProtoGlobalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
@@ -519,7 +734,7 @@ export type DeepPartial<T> = T extends Builtin ? T
 
 function longToNumber(long: Long): number {
   if (long.gt(Number.MAX_SAFE_INTEGER)) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
+    throw new tsProtoGlobalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
   }
   return long.toNumber();
 }

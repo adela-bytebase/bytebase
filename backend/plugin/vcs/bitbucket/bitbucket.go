@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,8 +52,11 @@ func newProvider(config vcs.ProviderConfig) vcs.Provider {
 }
 
 // APIURL returns the API URL path of Bitbucket Cloud.
-func (*Provider) APIURL(string) string {
-	return "https://api.bitbucket.org/2.0"
+func (*Provider) APIURL(instanceURL string) string {
+	if instanceURL == bitbucketCloudURL {
+		return "https://api.bitbucket.org/2.0"
+	}
+	return fmt.Sprintf("%s/2.0", instanceURL)
 }
 
 // oauthResponse is a Bitbucket Cloud OAuth response.
@@ -125,6 +129,7 @@ func (*Provider) TryLogin(context.Context, common.OauthContext, string) (*vcs.Us
 // User represents a Bitbucket Cloud API response for a user.
 type User struct {
 	DisplayName string `json:"display_name"`
+	Nickname    string `json:"nickname"`
 }
 
 // CommitAuthor represents a Bitbucket Cloud API response for a commit author.
@@ -186,11 +191,7 @@ func (p *Provider) FetchCommitByID(ctx context.Context, oauthCtx common.OauthCon
 // CommitFile represents a Bitbucket Cloud API response for a file at a commit.
 type CommitFile struct {
 	Path  string `json:"path"`
-	Links struct {
-		Self struct {
-			Href string `json:"href"`
-		} `json:"self"`
-	} `json:"links"`
+	Links Links  `json:"links"`
 }
 
 // CommitDiffStat represents a Bitbucket Cloud API response for commit diff stat.
@@ -208,7 +209,13 @@ func (p *Provider) GetDiffFileList(ctx context.Context, oauthCtx common.OauthCon
 	var bbcDiffs []*CommitDiffStat
 	page := 1
 	for {
-		url := fmt.Sprintf("%s/repositories/%s/diffstat/%s..%s?page=%d&pagelen=%d", p.APIURL(instanceURL), url.PathEscape(repositoryID), afterCommit, beforeCommit, page, apiPageSize)
+		params := url.Values{}
+		params.Add("pagelen", strconv.Itoa(apiPageSize))
+		if page > 1 {
+			params.Add("page", strconv.Itoa(page))
+		}
+
+		url := fmt.Sprintf("%s/repositories/%s/diffstat/%s..%s?%s", p.APIURL(instanceURL), repositoryID, afterCommit, beforeCommit, params.Encode())
 		diffs, hasNextPage, err := p.fetchPaginatedDiffFileList(ctx, oauthCtx, instanceURL, url)
 		if err != nil {
 			return nil, errors.Wrap(err, "fetch paginated list")
@@ -287,6 +294,7 @@ type Repository struct {
 	UUID     string `json:"uuid"`
 	Name     string `json:"name"`
 	FullName string `json:"full_name"`
+	Links    Links  `json:"links"`
 }
 
 // RepositoryPermission represents a Bitbucket Cloud API response for a
@@ -333,7 +341,13 @@ func (p *Provider) FetchAllRepositoryList(ctx context.Context, oauthCtx common.O
 // user has admin access to in given page. It returns the paginated results
 // along with a boolean indicating whether the next page exists.
 func (p *Provider) fetchPaginatedRepositoryList(ctx context.Context, oauthCtx common.OauthContext, instanceURL string, page int) (repos []*Repository, hasNextPage bool, err error) {
-	url := fmt.Sprintf(`%s/user/permissions/repositories?q=%s&page=%d&pagelen=%d`, p.APIURL(instanceURL), url.PathEscape(`permission="admin"`), page, apiPageSize)
+	params := url.Values{}
+	params.Add("q", `permission="admin"`)
+	params.Add("pagelen", strconv.Itoa(apiPageSize))
+	if page > 1 {
+		params.Add("page", strconv.Itoa(page))
+	}
+	url := fmt.Sprintf(`%s/user/permissions/repositories?%s`, p.APIURL(instanceURL), params.Encode())
 	code, _, body, err := oauth.Get(
 		ctx,
 		p.client,
@@ -429,9 +443,16 @@ func (p *Provider) FetchRepositoryFileList(ctx context.Context, oauthCtx common.
 // recursively in given page. It returns the paginated results along with a
 // boolean indicating whether the next page exists.
 func (p *Provider) fetchPaginatedRepositoryFileList(ctx context.Context, oauthCtx common.OauthContext, instanceURL, repositoryID, ref, filePath string, page int) (_ []*TreeEntry, hasNextPage bool, err error) {
+	params := url.Values{}
 	// NOTE: There is no way to ask the Bitbucket Cloud API to return all
 	// subdirectories recursively, 10 levels down is just a good guess.
-	url := fmt.Sprintf("%s/repositories/%s/src/%s/%s?max_depth=10&q=%s&page=%d&pagelen=%d", p.APIURL(instanceURL), repositoryID, ref, url.PathEscape(filePath), url.QueryEscape(`type="commit_file"`), page, apiPageSize)
+	params.Add("max_depth", "10")
+	params.Add("q", `type="commit_file"`)
+	params.Add("pagelen", strconv.Itoa(apiPageSize))
+	if page > 1 {
+		params.Add("page", strconv.Itoa(page))
+	}
+	url := fmt.Sprintf("%s/repositories/%s/src/%s/%s?%s", p.APIURL(instanceURL), repositoryID, url.PathEscape(ref), url.PathEscape(filePath), params.Encode())
 	code, _, body, err := oauth.Get(
 		ctx,
 		p.client,
@@ -478,7 +499,7 @@ func (p *Provider) fetchPaginatedRepositoryFileList(ctx context.Context, oauthCt
 func (p *Provider) CreateFile(ctx context.Context, oauthCtx common.OauthContext, instanceURL, repositoryID, filePath string, fileCommitCreate vcs.FileCommitCreate) error {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
-	part, err := w.CreateFormFile("filename", filePath)
+	part, err := w.CreateFormField(filePath)
 	if err != nil {
 		return errors.Wrap(err, "failed to create form file")
 	}
@@ -486,15 +507,13 @@ func (p *Provider) CreateFile(ctx context.Context, oauthCtx common.OauthContext,
 	if err != nil {
 		return errors.Wrap(err, "failed to write file to form")
 	}
+	_ = w.WriteField("message", fileCommitCreate.CommitMessage)
+	_ = w.WriteField("parents", fileCommitCreate.LastCommitID)
+	_ = w.WriteField("branch", fileCommitCreate.Branch)
 	_ = w.Close()
 
-	urlParams := &url.Values{}
-	urlParams.Set("message", url.QueryEscape(fileCommitCreate.CommitMessage))
-	urlParams.Set("parents", fileCommitCreate.LastCommitID)
-	urlParams.Set("branch", fileCommitCreate.Branch)
-
-	url := fmt.Sprintf("%s/repositories/%s/src?%s", p.APIURL(instanceURL), repositoryID, urlParams.Encode())
-	code, _, resp, err := oauth.Post(
+	url := fmt.Sprintf("%s/repositories/%s/src", p.APIURL(instanceURL), repositoryID)
+	code, _, resp, err := oauth.PostWithHeader(
 		ctx,
 		p.client,
 		url,
@@ -509,6 +528,9 @@ func (p *Provider) CreateFile(ctx context.Context, oauthCtx common.OauthContext,
 			},
 			oauthCtx.Refresher,
 		),
+		map[string]string{
+			"Content-Type": w.FormDataContentType(),
+		},
 	)
 	if err != nil {
 		return errors.Wrapf(err, "POST %s", url)
@@ -537,7 +559,7 @@ func (p *Provider) OverwriteFile(ctx context.Context, oauthCtx common.OauthConte
 //
 // Docs: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/#file-meta-data
 func (p *Provider) ReadFileMeta(ctx context.Context, oauthCtx common.OauthContext, instanceURL, repositoryID, filePath, ref string) (*vcs.FileMeta, error) {
-	url := fmt.Sprintf("%s/repositories/%s/src/%s/%s?format=meta", p.APIURL(instanceURL), repositoryID, ref, url.PathEscape(filePath))
+	url := fmt.Sprintf("%s/repositories/%s/src/%s/%s?format=meta", p.APIURL(instanceURL), repositoryID, url.PathEscape(ref), url.PathEscape(filePath))
 	code, _, body, err := oauth.Get(
 		ctx,
 		p.client,
@@ -589,7 +611,7 @@ func (p *Provider) ReadFileMeta(ctx context.Context, oauthCtx common.OauthContex
 //
 // Docs: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/#raw-file-contents
 func (p *Provider) ReadFileContent(ctx context.Context, oauthCtx common.OauthContext, instanceURL, repositoryID, filePath, ref string) (string, error) {
-	url := fmt.Sprintf("%s/repositories/%s/src/%s/%s", p.APIURL(instanceURL), repositoryID, ref, url.PathEscape(filePath))
+	url := fmt.Sprintf("%s/repositories/%s/src/%s/%s", p.APIURL(instanceURL), repositoryID, url.PathEscape(ref), url.PathEscape(filePath))
 	code, _, body, err := oauth.Get(
 		ctx,
 		p.client,
@@ -622,12 +644,15 @@ func (p *Provider) ReadFileContent(ctx context.Context, oauthCtx common.OauthCon
 	return body, nil
 }
 
+// Target is the API message for Bitbucket Cloud target.
+type Target struct {
+	Hash string `json:"hash"`
+}
+
 // Branch is the API message for Bitbucket Cloud branch.
 type Branch struct {
 	Name   string `json:"name"`
-	Target struct {
-		Hash string `json:"hash"`
-	} `json:"target"`
+	Target Target `json:"target"`
 }
 
 // GetBranch gets the given branch in the repository.
@@ -738,7 +763,13 @@ func (p *Provider) ListPullRequestFile(ctx context.Context, oauthCtx common.Oaut
 	var bbcDiffs []*CommitDiffStat
 	page := 1
 	for {
-		url := fmt.Sprintf("%s/repositories/%s/pullrequests/%s/diffstat?page=%d&pagelen=%d", p.APIURL(instanceURL), url.PathEscape(repositoryID), pullRequestID, page, apiPageSize)
+		params := url.Values{}
+		params.Add("pagelen", strconv.Itoa(apiPageSize))
+		if page > 1 {
+			params.Add("page", strconv.Itoa(page))
+		}
+
+		url := fmt.Sprintf("%s/repositories/%s/pullrequests/%s/diffstat?%s", p.APIURL(instanceURL), url.PathEscape(repositoryID), pullRequestID, params.Encode())
 		diffs, hasNextPage, err := p.fetchPaginatedDiffFileList(ctx, oauthCtx, instanceURL, url)
 		if err != nil {
 			return nil, errors.Wrap(err, "fetch paginated list")
@@ -865,6 +896,67 @@ func (*Provider) UpsertEnvironmentVariable(context.Context, common.OauthContext,
 	return errors.New("not supported")
 }
 
+// Link is the API message for link.
+type Link struct {
+	Href string `json:"href"`
+}
+
+// Links is the API message for links.
+type Links struct {
+	Self Link `json:"self"`
+	HTML Link `json:"html"`
+}
+
+// Author is the API message for author.
+type Author struct {
+	Raw  string `json:"raw"`
+	User User   `json:"user"`
+}
+
+// WebhookCommit is the API message for webhook commit.
+type WebhookCommit struct {
+	Hash    string    `json:"hash"`
+	Date    time.Time `json:"date"`
+	Author  Author    `json:"author"`
+	Message string    `json:"message"`
+	Links   Links     `json:"links"`
+	Parents []Target  `json:"parents"`
+}
+
+// WebhookPushChange is the API message for webhook push change.
+type WebhookPushChange struct {
+	Old     Branch          `json:"old"`
+	New     Branch          `json:"new"`
+	Commits []WebhookCommit `json:"commits"`
+}
+
+// WebhookPush is the API message for webhook push.
+type WebhookPush struct {
+	Changes []WebhookPushChange `json:"changes"`
+}
+
+// WebhookPushEvent is the API message for webhook push event.
+type WebhookPushEvent struct {
+	Push       WebhookPush `json:"push"`
+	Repository Repository  `json:"repository"`
+	Actor      User        `json:"actor"`
+}
+
+// WebhookCreateOrUpdate represents a Bitbucket API request for creating or
+// updating a webhook.
+type WebhookCreateOrUpdate struct {
+	Description string   `json:"description"`
+	URL         string   `json:"url"`
+	Active      bool     `json:"active"`
+	Events      []string `json:"events"`
+}
+
+// Webhook represents a Bitbucket Cloud API response for the webhook
+// information.
+type Webhook struct {
+	UUID string `json:"uuid"`
+}
+
 // CreateWebhook creates a webhook in the repository with given payload.
 //
 // Docs: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-repositories/#api-repositories-workspace-repo-slug-hooks-post
@@ -904,9 +996,7 @@ func (p *Provider) CreateWebhook(ctx context.Context, oauthCtx common.OauthConte
 		)
 	}
 
-	var resp struct {
-		UUID string `json:"uuid"`
-	}
+	var resp Webhook
 	if err = json.Unmarshal([]byte(body), &resp); err != nil {
 		return "", errors.Wrap(err, "unmarshal body")
 	}

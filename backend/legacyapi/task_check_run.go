@@ -67,14 +67,14 @@ const (
 	TaskCheckDatabaseStatementAdvise TaskCheckType = "bb.task-check.database.statement.advise"
 	// TaskCheckDatabaseStatementType is the task check type for statement type.
 	TaskCheckDatabaseStatementType TaskCheckType = "bb.task-check.database.statement.type"
+	// TaskCheckDatabaseStatementTypeReport is the task check type for statement type report.
+	TaskCheckDatabaseStatementTypeReport TaskCheckType = "bb.task-check.database.statement.type.report"
+	// TaskCheckDatabaseStatementAffectedRowsReport is the task check type for statement affected rows.
+	TaskCheckDatabaseStatementAffectedRowsReport TaskCheckType = "bb.task-check.database.statement.affected-rows.report"
 	// TaskCheckDatabaseConnect is the task check type for database connection.
 	TaskCheckDatabaseConnect TaskCheckType = "bb.task-check.database.connect"
-	// TaskCheckInstanceMigrationSchema is the task check type for migrating schemas.
-	TaskCheckInstanceMigrationSchema TaskCheckType = "bb.task-check.instance.migration-schema"
 	// TaskCheckGhostSync is the task check type for the gh-ost sync task.
 	TaskCheckGhostSync TaskCheckType = "bb.task-check.database.ghost.sync"
-	// TaskCheckIssueLGTM is the task check type for LGTM comments.
-	TaskCheckIssueLGTM TaskCheckType = "bb.task-check.issue.lgtm"
 	// TaskCheckPITRMySQL is the task check type for MySQL PITR.
 	TaskCheckPITRMySQL TaskCheckType = "bb.task-check.pitr.mysql"
 )
@@ -82,24 +82,6 @@ const (
 // TaskCheckEarliestAllowedTimePayload is the task check payload for earliest allowed time.
 type TaskCheckEarliestAllowedTimePayload struct {
 	EarliestAllowedTs int64 `json:"earliestAllowedTs,omitempty"`
-}
-
-// TaskCheckDatabaseStatementAdvisePayload is the task check payload for database statement advise.
-type TaskCheckDatabaseStatementAdvisePayload struct {
-	Statement string  `json:"statement,omitempty"`
-	DbType    db.Type `json:"dbType,omitempty"`
-	Charset   string  `json:"charset,omitempty"`
-	Collation string  `json:"collation,omitempty"`
-}
-
-// TaskCheckDatabaseStatementTypePayload is the task check payload for SQL type.
-type TaskCheckDatabaseStatementTypePayload struct {
-	Statement string  `json:"statement,omitempty"`
-	DbType    db.Type `json:"dbType,omitempty"`
-
-	// MySQL special fields.
-	Charset   string `json:"charset,omitempty"`
-	Collation string `json:"collation,omitempty"`
 }
 
 // Namespace is the namespace for task check result.
@@ -120,6 +102,7 @@ type TaskCheckResult struct {
 	Title     string          `json:"title,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	Line      int             `json:"line,omitempty"`
+	Details   string          `json:"details,omitempty"`
 }
 
 // TaskCheckRunResultPayload is the result payload of a task check run.
@@ -154,7 +137,7 @@ type TaskCheckRun struct {
 
 // IsSyntaxCheckSupported checks the engine type if syntax check supports it.
 func IsSyntaxCheckSupported(dbType db.Type) bool {
-	if dbType == db.Postgres || dbType == db.MySQL || dbType == db.TiDB {
+	if dbType == db.Postgres || dbType == db.MySQL || dbType == db.TiDB || dbType == db.MariaDB {
 		advisorDB, err := advisorDB.ConvertToAdvisorDBType(string(dbType))
 		if err != nil {
 			return false
@@ -168,7 +151,7 @@ func IsSyntaxCheckSupported(dbType db.Type) bool {
 
 // IsSQLReviewSupported checks the engine type if SQL review supports it.
 func IsSQLReviewSupported(dbType db.Type) bool {
-	if dbType == db.Postgres || dbType == db.MySQL || dbType == db.TiDB {
+	if dbType == db.Postgres || dbType == db.MySQL || dbType == db.TiDB || dbType == db.MariaDB {
 		advisorDB, err := advisorDB.ConvertToAdvisorDBType(string(dbType))
 		if err != nil {
 			return false
@@ -183,7 +166,27 @@ func IsSQLReviewSupported(dbType db.Type) bool {
 // IsStatementTypeCheckSupported checks the engine type if statement type check supports it.
 func IsStatementTypeCheckSupported(dbType db.Type) bool {
 	switch dbType {
+	case db.Postgres, db.TiDB, db.MySQL, db.MariaDB:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsTaskCheckReportSupported checks if the task report supports the engine type.
+func IsTaskCheckReportSupported(dbType db.Type) bool {
+	switch dbType {
 	case db.Postgres, db.TiDB, db.MySQL:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsTaskCheckReportNeededForTaskType checks if the task report is needed for the task type.
+func IsTaskCheckReportNeededForTaskType(taskType TaskType) bool {
+	switch taskType {
+	case TaskDatabaseSchemaUpdate, TaskDatabaseSchemaUpdateSDL, TaskDatabaseSchemaUpdateGhostSync, TaskDatabaseDataUpdate:
 		return true
 	default:
 		return false

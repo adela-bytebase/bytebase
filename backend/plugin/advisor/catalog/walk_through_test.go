@@ -57,6 +57,41 @@ func TestPostgreSQLWalkThrough(t *testing.T) {
 		Schemas: []*storepb.SchemaMetadata{
 			{
 				Name: "public",
+				Tables: []*storepb.TableMetadata{
+					{
+						Name: "test",
+						Columns: []*storepb.ColumnMetadata{
+							{
+								Name:     "id",
+								Type:     "int",
+								Nullable: false,
+							},
+							{
+								Name:     "name",
+								Type:     "varchar(20)",
+								Nullable: true,
+							},
+						},
+					},
+				},
+				Views: []*storepb.ViewMetadata{
+					{
+						Name:       "v1",
+						Definition: "SELECT id, name FROM test",
+						DependentColumns: []*storepb.DependentColumn{
+							{
+								Schema: "public",
+								Table:  "test",
+								Column: "id",
+							},
+							{
+								Schema: "public",
+								Table:  "test",
+								Column: "name",
+							},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -68,6 +103,14 @@ func TestPostgreSQLWalkThrough(t *testing.T) {
 	for _, test := range tests {
 		runWalkThroughTest(t, test, db.Postgres, originDatabase, false /* record */)
 	}
+}
+
+func convertInterfaceSliceToStringSlice(slice []interface{}) []string {
+	var res []string
+	for _, item := range slice {
+		res = append(res, item.(string))
+	}
+	return res
 }
 
 func runWalkThroughTest(t *testing.T, file string, engineType db.Type, originDatabase *storepb.DatabaseMetadata, record bool) {
@@ -92,13 +135,25 @@ func runWalkThroughTest(t *testing.T, file string, engineType db.Type, originDat
 		}
 
 		err := state.WalkThrough(test.Statement)
-		if test.Err != nil {
+		if err != nil {
 			if record {
 				walkThroughError, ok := err.(*WalkThroughError)
 				require.True(t, ok)
 				tests[i].Err = walkThroughError
 			} else {
-				require.Equal(t, err, test.Err)
+				err, yes := err.(*WalkThroughError)
+				require.True(t, yes)
+				if err.Payload != nil {
+					actualPayloadText, yes := err.Payload.([]string)
+					require.True(t, yes)
+					expectedPayloadText := convertInterfaceSliceToStringSlice(test.Err.Payload.([]interface{}))
+					err.Payload = nil
+					test.Err.Payload = nil
+					require.Equal(t, test.Err, err)
+					require.Equal(t, expectedPayloadText, actualPayloadText)
+				} else {
+					require.Equal(t, test.Err, err)
+				}
 			}
 			continue
 		}

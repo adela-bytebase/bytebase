@@ -26,6 +26,7 @@ import (
 	"github.com/bytebase/bytebase/backend/plugin/advisor"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/plugin/vcs"
+	"github.com/bytebase/bytebase/backend/plugin/vcs/bitbucket"
 	"github.com/bytebase/bytebase/backend/plugin/vcs/github"
 	"github.com/bytebase/bytebase/backend/plugin/vcs/gitlab"
 	"github.com/bytebase/bytebase/backend/resources/mysql"
@@ -346,6 +347,69 @@ func TestVCS(t *testing.T) {
 						Login: "fake_github_author",
 					},
 					Commits: commits,
+				}
+			},
+		},
+		{
+			name:               "Bitbucket",
+			vcsProviderCreator: fake.NewBitbucket,
+			vcsType:            vcs.Bitbucket,
+			externalID:         "octocat/Hello-World",
+			repositoryFullPath: "octocat/Hello-World",
+			newWebhookPushEvent: func(added, _ [][]string, beforeSHA, afterSHA string) interface{} {
+				var commits []bitbucket.WebhookCommit
+				for range added {
+					commits = append(commits, bitbucket.WebhookCommit{
+						Hash: afterSHA,
+						Date: time.Now(),
+						Author: bitbucket.Author{
+							Raw: "fake_bitbucket_author <fake_bitbucket_author@localhost>",
+							User: bitbucket.User{
+								Nickname: "fake_bitbucket_author",
+							},
+						},
+						Message: "Fake Bitbucket commit message",
+						Links: bitbucket.Links{
+							HTML: bitbucket.Link{
+								Href: "https://bitbucket.org/octocat/Hello-World/commits/fake_github_commit_id",
+							},
+						},
+						Parents: []bitbucket.Target{
+							{Hash: beforeSHA},
+						},
+					})
+				}
+				return bitbucket.WebhookPushEvent{
+					Push: bitbucket.WebhookPush{
+						Changes: []bitbucket.WebhookPushChange{
+							{
+								Old: bitbucket.Branch{
+									Name: "feature/foo",
+									Target: bitbucket.Target{
+										Hash: beforeSHA,
+									},
+								},
+								New: bitbucket.Branch{
+									Name: "feature/foo",
+									Target: bitbucket.Target{
+										Hash: afterSHA,
+									},
+								},
+								Commits: commits,
+							},
+						},
+					},
+					Repository: bitbucket.Repository{
+						FullName: "octocat/Hello-World",
+						Links: bitbucket.Links{
+							HTML: bitbucket.Link{
+								Href: "https://bitbuket.org/octocat/Hello-World",
+							},
+						},
+					},
+					Actor: bitbucket.User{
+						Nickname: "fake_bitbucket_author",
+					},
 				}
 			},
 		},
@@ -1125,6 +1189,32 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 				// One singleAsterisk cannot match two directories.
 				fmt.Sprintf("%s/%s/foo/bar/%s##ver2##data##insert_data.sql", baseDirectory, "wildcard", dbName),
 				// One singleAsterisk cannot match zero directory.
+				fmt.Sprintf("%s/%s/%s##ver3##migrate##create_table_t3.sql", baseDirectory, "wildcard", dbName),
+			},
+			commitNewFileContents: []string{
+				"CREATE TABLE t1 (id INT);",
+				"INSERT INTO t1 VALUES (1);",
+				"CREATE TABLE t3 (id INT);",
+			},
+			expect: []bool{
+				true,
+				false,
+				false,
+			},
+			newWebhookPushEvent: defaultNewWebhookPushEvent,
+		},
+		{
+			name:               "continuousSingleAsterisk",
+			vcsProviderCreator: fake.NewGitLab,
+			vcsType:            vcs.GitLab,
+			baseDirectory:      "bbtest",
+			envName:            "wildcard",
+			filePathTemplate:   "{{ENV_ID}}/*/*/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
+			commitNewFileNames: []string{
+				// The second single asterisk represents empty folder.
+				fmt.Sprintf("%s/%s/foo/bar/%s##ver1##migrate##create_table_t1.sql", baseDirectory, "wildcard", dbName),
+				// Any singleAsterisk cannot match zero directory.
+				fmt.Sprintf("%s/%s/foo/%s##ver2##data##insert_data.sql", baseDirectory, "wildcard", dbName),
 				fmt.Sprintf("%s/%s/%s##ver3##migrate##create_table_t3.sql", baseDirectory, "wildcard", dbName),
 			},
 			commitNewFileContents: []string{
