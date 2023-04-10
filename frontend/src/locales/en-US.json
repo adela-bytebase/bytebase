@@ -208,6 +208,7 @@
     "sync-now": "Sync Now",
     "show-help": "Show help",
     "success": "Succeed",
+    "failed": "Failed",
     "load-more": "Load more",
     "access-denied": "Access denied",
     "no": "No",
@@ -232,8 +233,9 @@
     "will-lose-unsaved-data": "Will lose any unsaved data.",
     "deleted": "Deleted",
     "will-override-current-data": "Will override current data.",
-    "rollout": "Roll out",
-    "uploading": "Uploading"
+    "rollout": "Rollout",
+    "uploading": "Uploading",
+    "active": "Active"
   },
   "error-page": {
     "go-back-home": "Go back home"
@@ -321,7 +323,8 @@
       "empty-rollback-statement": "The rollback statement is empty",
       "cancel-generating": "Cancel generating the SQL rollback",
       "sql-rollback-tips": "When enabled, Bytebase will keep the rollback logs for the data change\nand allow you to create a new issue to revert this change. {link}"
-    }
+    },
+    "skip-failed-in-current-stage": "Skip failed tasks in current stage"
   },
   "banner": {
     "update-license": "Update license",
@@ -469,7 +472,7 @@
         "branding": "Branding",
         "only-owner-can-edit": "Only workspace owner can update the settings.",
         "logo": "Logo",
-        "logo-aspect": "The suggested logo size should be in 5:2 aspect ratio (e.g 100 x 40).",
+        "logo-aspect": "The suggested logo size should be 5:2 aspect ratio, e.g 100 x 40.",
         "select-logo": "Upload a file",
         "drag-logo": "or drag here",
         "logo-upload-tip": "{extension} up to {size} MiB",
@@ -485,6 +488,11 @@
         "disallow-signup": {
           "enable": "Disable self-service signup",
           "description": "Once disabled, users cannot self-service signup and can only be invited by the workspace owner."
+        },
+        "require-2fa": {
+          "enable": "Require two-factor authentication for all users",
+          "description": "When enabled, users who do not have two-factor authentication enabled for their personal accounts will be forced to configure.",
+          "need-all-user-2fa-enabled": "Requires all users to enable 2FA first"
         },
         "network": "Network",
         "external-url": {
@@ -638,6 +646,7 @@
       "db": "DB",
       "progress": "Progress",
       "updated": "Updated",
+      "approver": "Approver",
       "assignee": "Assignee"
     },
     "stage-select": {
@@ -696,12 +705,12 @@
       "full-schema": "Full schema",
       "left-schema-may-change": "The schema on the left side may change before the issue is applied."
     },
-    "assignee-tooltip": "Allow the assignee to roll out the issue once the approval flow has been passed.",
+    "assignee-tooltip": "Allow the assignee to rollout the issue once the approval flow has been passed.",
     "approval-flow": {
       "self": "Approval flow",
       "tooltip": "The approvers will review and approve the issue in the order specified in the flow. The issue can only be applied after all steps in the flow have been approved. You can configure a custom approval flow for each risk."
     },
-    "waiting-to-roll-out": "Waiting to roll out",
+    "waiting-to-rollout": "Waiting to rollout",
     "waiting-for-review": "Waiting for review",
     "issue-name": "Issue name"
   },
@@ -815,6 +824,7 @@
       "console": {
         "snowflake": "The external console URL managing this instance (e.g. AWS RDS console, your in-house DB instance console)"
       },
+      "outbound-ip-list": "If you make use of inbound firewall rules for your database instance, please include the following IP addresses in its allowlist to allow access by Bytebase Cloud.",
       "create-admin-user": "This is the connection user used by Bytebase to perform DDL and DML (non-SELECT) operations.",
       "create-readonly-user": "This is the connection used by Bytebase to perform read-only operations such as SELECT query.",
       "create-admin-user-non-sql": "This is the connection user used by Bytebase to perform write and admin operations.",
@@ -866,7 +876,8 @@
     "grants": "Grants",
     "find-gcp-project-id-and-instance-id": "To find GCP Project ID and instance ID, see",
     "create-gcp-credentials": "To create Credentials, see",
-    "used-for-testing-connection": "Used for testing connections only"
+    "used-for-testing-connection": "Used for testing connections only",
+    "all": "All instances"
   },
   "environment": {
     "id": "Environment ID",
@@ -937,8 +948,8 @@
     }
   },
   "policy": {
-    "roll-out": {
-      "name": "Roll out policy",
+    "rollout": {
+      "name": "Rollout policy",
       "tip": "The policy is applied to issues retroactively.",
       "info": "For updating schema on the existing database, this setting controls whether the task requires manual approval.",
       "manual": "Require manual rolling out",
@@ -1727,8 +1738,8 @@
         "desc": "Intelligent database management for tenants using identical schemas."
       },
       "bb-feature-approval-policy": {
-        "title": "Roll out policy",
-        "desc": "Roll out policy controls whether the schema change task requires manual rolling out."
+        "title": "Rollout policy",
+        "desc": "Rollout policy controls whether the schema change task requires manual rolling out."
       },
       "bb-feature-backup-policy": {
         "title": "Backup policy",
@@ -1761,6 +1772,10 @@
       "bb-feature-custom-approval": {
         "title": "Custom approval",
         "desc": "Configure security risk level and approval flow for different tasks."
+      },
+      "bb-feature-slow-query": {
+        "title": "Slow query",
+        "desc": "Logging and analyzing slow SQL queries."
       },
       "bb-feature-vcs-schema-write-back": {
         "title": "Schema write-back",
@@ -1836,7 +1851,9 @@
       "confirm-to-sync-sheet": "Confirm to sync sheets?",
       "confirm-to-delete-this-sheet": "Confirm to delete this sheet?",
       "confirm-to-duplicate-sheet": "Confirm to duplicate this sheet?"
-    }
+    },
+    "linked-issue": "Linked issue",
+    "from-sheet-warning": "The sheet comes from issue {issue}. It is read-only and only part of it is displayed."
   },
   "engine": {
     "mysql": "MySQL",
@@ -2116,6 +2133,7 @@
         "self": "Risk",
         "select": "Select risk",
         "risk-level": {
+          "0": "Default",
           "100": "Low",
           "200": "Moderate",
           "300": "High"
@@ -2225,5 +2243,24 @@
       "generating-approval-flow": "Generating approval flow",
       "approved-issue": "approved issue"
     }
+  },
+  "slow-query": {
+    "self": "Slow query",
+    "slow-queries": "Slow queries",
+    "last-query-time": "Last query time",
+    "database-name": "Database name",
+    "sql-statement": "SQL statement",
+    "total-query-count": "Total query count",
+    "query-time-95-percent": "Query time (95%)",
+    "query-time-avg": "Query time avg.",
+    "rows-examined-95-percent": "Rows examined (95%)",
+    "rows-sent-95-percent": "Rows sent (95%)",
+    "rows-examined-avg": "Rows examined avg.",
+    "rows-sent-avg": "Rows sent avg.",
+    "query-start-time": "Query start time",
+    "rows-examined": "Rows examined",
+    "rows-sent": "Rows sent",
+    "lock-time": "Lock time",
+    "query-time": "Query time"
   }
 }

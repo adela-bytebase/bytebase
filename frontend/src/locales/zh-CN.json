@@ -208,6 +208,7 @@
     "sync-now": "现在同步",
     "show-help": "查看帮助",
     "success": "成功",
+    "failed": "失败",
     "load-more": "加载更多",
     "access-denied": "拒绝访问",
     "no": "否",
@@ -231,7 +232,8 @@
     "deleted": "已删除",
     "will-override-current-data": "将会覆盖当前数据。",
     "rollout": "发布",
-    "uploading": "上传中"
+    "uploading": "上传中",
+    "active": "开启"
   },
   "error-page": {
     "go-back-home": "回到主页"
@@ -319,7 +321,8 @@
       "empty-rollback-statement": "回滚语句为空",
       "cancel-generating": "取消生成回滚语句",
       "sql-rollback-tips": "开启时，Bytebase 会保留数据变更的回滚日志，\n可以用于创建一个新的工单来回滚这次变更。{link}"
-    }
+    },
+    "skip-failed-in-current-stage": "跳过当前阶段失败的任务"
   },
   "banner": {
     "update-license": "更新证书",
@@ -484,9 +487,14 @@
           "enable": "禁用自助注册",
           "description": "禁用之后，新用户将无法自助注册，只能通过管理员邀请来创建账户。"
         },
+        "require-2fa": {
+          "enable": "要求所有用户配置双重认证",
+          "description": "启用之后，没有配置双重认证的用户将被强制要求进行配置操作。",
+          "need-all-user-2fa-enabled": "需要所有用户都配置 2FA 后才能开启此项"
+        },
         "network": "网络",
         "external-url": {
-          "self": "外部链接",
+          "self": "External URL",
           "description": "用户或回调能访问到的 Bytebase URL，必须以 http:// 或 https:// 开头。{viewDoc}"
         },
         "config-updated": "配置已更新",
@@ -636,7 +644,8 @@
       "db": "数据库",
       "progress": "进度",
       "updated": "更新于",
-      "assignee": "审核人"
+      "approver": "审批人",
+      "assignee": "发布人"
     },
     "stage-select": {
       "active": "{name}（活动中）"
@@ -699,7 +708,7 @@
       "self": "审批流",
       "tooltip": "审批人需要按审批流指定的顺序审核和审批工单。只有审批流中所有步骤都完成审批后工单才可以执行。您可以为每个风险级别自定义审批流。"
     },
-    "waiting-to-roll-out": "等待发布",
+    "waiting-to-rollout": "等待发布",
     "waiting-for-review": "等待审核",
     "issue-name": "工单名称"
   },
@@ -812,6 +821,7 @@
       "console": {
         "snowflake": "\b管理该@:{'common.instance'}的外部控制台 URL（如 AWS RDS 控制台，您的@:{'common.database'}控制台）"
       },
+      "outbound-ip-list": "如果您的数据库使用了入站 IP 白名单，请将以下 IP 加入白名单以允许 Bytebase Cloud 的连接。",
       "create-admin-user": "这是 Bytebase 用于连接数据库，执行 DDL 和 DML (非 SELECT) 操作的用户。",
       "create-readonly-user": "这是 Bytebase 用于连接数据库，执行诸如 SELECT 的只读操作的用户。",
       "create-admin-user-non-sql": "这是 Bytebase 用于连接数据库，执行写和管理操作的用户。",
@@ -864,7 +874,8 @@
     "authentication-database": "认证数据库",
     "find-gcp-project-id-and-instance-id": "查看 GCP 项目 ID 与实例 ID 的方法见",
     "create-gcp-credentials": "创建凭据的方法见",
-    "used-for-testing-connection": "仅作测试连接用"
+    "used-for-testing-connection": "仅作测试连接用",
+    "all": "所有实例"
   },
   "environment": {
     "id": "环境 ID",
@@ -935,7 +946,7 @@
     }
   },
   "policy": {
-    "roll-out": {
+    "rollout": {
       "name": "发布策略",
       "tip": "新策略对旧工单也生效",
       "info": "要更改数据库 schema，该选项控制了是否需要手动发布。",
@@ -1761,6 +1772,10 @@
         "title": "自定义审批",
         "desc": "为不同的任务配置安全风险等级和自定义审批流。"
       },
+      "bb-feature-slow-query": {
+        "title": "慢查询",
+        "desc": "记录与分析慢速的 SQL 查询。"
+      },
       "bb-feature-vcs-schema-write-back": {
         "title": "Schema 回写",
         "desc": "当一个 Schema 变更完成后，可以将最新的 Schema 快照回写到 VCS。"
@@ -1835,7 +1850,9 @@
       "confirm-to-sync-sheet": "确定要同步工作表?",
       "confirm-to-delete-this-sheet": "确定删除这条工作表?",
       "confirm-to-duplicate-sheet": "确定要复制这条工作表?"
-    }
+    },
+    "linked-issue": "关联工单",
+    "from-sheet-warning": "这个工作表来自工单 {issue}。它是只读的且只显示了部分内容。"
   },
   "engine": {
     "mysql": "MySQL",
@@ -2113,6 +2130,7 @@
         "self": "风险",
         "select": "选择风险",
         "risk-level": {
+          "0": "默认",
           "100": "低",
           "200": "中",
           "300": "高"
@@ -2183,7 +2201,7 @@
         "description": "当一个节点上有多个审批人时，只需要一次审批通过。",
         "approver": "审批人",
         "group": {
-          "WORKSPACE_OWNER": "管理员",
+          "WORKSPACE_OWNER": "工作空间所有者",
           "WORKSPACE_DBA": "DBA",
           "PROJECT_OWNER": "项目所有者",
           "PROJECT_MEMBER": "项目成员"
@@ -2222,5 +2240,24 @@
       "generating-approval-flow": "正在生成审批流",
       "approved-issue": "批准工单"
     }
+  },
+  "slow-query": {
+    "self": "慢查询",
+    "slow-queries": "慢查询",
+    "last-query-time": "最近执行时间",
+    "database-name": "数据库名",
+    "sql-statement": "SQL 语句",
+    "total-query-count": "总执行次数",
+    "query-time-95-percent": "执行时长（95%）",
+    "query-time-avg": "平均执行时长",
+    "rows-examined-95-percent": "扫描行数（95%）",
+    "rows-sent-95-percent": "返回行数（95%）",
+    "rows-examined-avg": "平均扫描行数",
+    "rows-sent-avg": "平均返回行数",
+    "query-start-time": "执行开始时间",
+    "rows-examined": "解析行数",
+    "rows-sent": "返回行数",
+    "lock-time": "持有锁时长",
+    "query-time": "执行时长"
   }
 }

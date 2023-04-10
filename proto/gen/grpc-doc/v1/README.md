@@ -5,6 +5,7 @@
 
 - [v1/actuator_service.proto](#v1_actuator_service-proto)
     - [ActuatorInfo](#bytebase-v1-ActuatorInfo)
+    - [DeleteCacheRequest](#bytebase-v1-DeleteCacheRequest)
     - [GetActuatorInfoRequest](#bytebase-v1-GetActuatorInfoRequest)
   
     - [ActuatorService](#bytebase-v1-ActuatorService)
@@ -82,7 +83,12 @@
     - [ListBackupResponse](#bytebase-v1-ListBackupResponse)
     - [ListDatabasesRequest](#bytebase-v1-ListDatabasesRequest)
     - [ListDatabasesResponse](#bytebase-v1-ListDatabasesResponse)
+    - [ListSlowQueriesRequest](#bytebase-v1-ListSlowQueriesRequest)
+    - [ListSlowQueriesResponse](#bytebase-v1-ListSlowQueriesResponse)
     - [SchemaMetadata](#bytebase-v1-SchemaMetadata)
+    - [SlowQueryDetails](#bytebase-v1-SlowQueryDetails)
+    - [SlowQueryLog](#bytebase-v1-SlowQueryLog)
+    - [SlowQueryStatistics](#bytebase-v1-SlowQueryStatistics)
     - [TableMetadata](#bytebase-v1-TableMetadata)
     - [UpdateBackupSettingRequest](#bytebase-v1-UpdateBackupSettingRequest)
     - [UpdateDatabaseRequest](#bytebase-v1-UpdateDatabaseRequest)
@@ -353,6 +359,17 @@ Actuator concept is similar to the Spring Boot Actuator.
 | need_admin_setup | [bool](#bool) |  | need_admin_setup flag means the Bytebase instance doesn&#39;t have any end users. |
 | disallow_signup | [bool](#bool) |  | disallow_signup is the flag to disable self-service signup. |
 | last_active_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | last_active_time is the service last active time in UTC Time Format, any API calls will refresh this value. |
+| require_2fa | [bool](#bool) |  | require_2fa is the flag to require 2FA for all users. |
+
+
+
+
+
+
+<a name="bytebase-v1-DeleteCacheRequest"></a>
+
+### DeleteCacheRequest
+
 
 
 
@@ -383,6 +400,7 @@ Actuator concept is similar to the Spring Boot Actuator.
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
 | GetActuatorInfo | [GetActuatorInfoRequest](#bytebase-v1-GetActuatorInfoRequest) | [ActuatorInfo](#bytebase-v1-ActuatorInfo) |  |
+| DeleteCache | [DeleteCacheRequest](#bytebase-v1-DeleteCacheRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
 
  
 
@@ -1455,6 +1473,38 @@ When paginating, all other parameters provided to `ListDatabases` must match the
 
 
 
+<a name="bytebase-v1-ListSlowQueriesRequest"></a>
+
+### ListSlowQueriesRequest
+ListSlowQueriesRequest is the request of listing slow query.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | Format: environments/{environment}/instances/{instance}/databases/{database} |
+| filter | [string](#string) |  | The filter of the slow query log. follow the [ebnf](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form) syntax. Support filter by project and start_time in SlowQueryDetails for now. For example: Search the slow query log of the specific project: - the specific project: project = &#34;projects/{project}&#34; Search the slow query log that start_time after 2022-01-01T12:00:00.000Z: - start_time &gt; &#34;2022-01-01T12:00:00.000Z&#34; - Should use [RFC-3339 format](https://www.rfc-editor.org/rfc/rfc3339). - Currently we only support filtering down to date granularity. |
+| order_by | [string](#string) |  | The order by of the slow query log. Support order by count, latest_log_time, average_query_time, nighty_fifth_percentile_query_time, average_rows_sent, nighty_fifth_percentile_rows_sent, average_rows_examined, nighty_fifth_percentile_rows_examined for now. For example: - order by count: order_by = &#34;count&#34; - order by latest_log_time desc: order_by = &#34;latest_log_time desc&#34; Default: order by nighty_fifth_percentile_query_time desc. |
+
+
+
+
+
+
+<a name="bytebase-v1-ListSlowQueriesResponse"></a>
+
+### ListSlowQueriesResponse
+ListSlowQueriesResponse is the response of listing slow query.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| slow_query_logs | [SlowQueryLog](#bytebase-v1-SlowQueryLog) | repeated | The slow query logs. |
+
+
+
+
+
+
 <a name="bytebase-v1-SchemaMetadata"></a>
 
 ### SchemaMetadata
@@ -1467,6 +1517,67 @@ This is the concept of schema in Postgres, but it&#39;s a no-op for MySQL.
 | name | [string](#string) |  | The name is the schema name. It is an empty string for databases without such concept such as MySQL. |
 | tables | [TableMetadata](#bytebase-v1-TableMetadata) | repeated | The tables is the list of tables in a schema. |
 | views | [ViewMetadata](#bytebase-v1-ViewMetadata) | repeated | The views is the list of views in a schema. |
+
+
+
+
+
+
+<a name="bytebase-v1-SlowQueryDetails"></a>
+
+### SlowQueryDetails
+SlowQueryDetails is the details of the slow query log.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| start_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | The start time of the slow query log. |
+| query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The query time of the slow query log. |
+| lock_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The lock time of the slow query log. |
+| rows_sent | [int32](#int32) |  | The rows sent of the slow query log. |
+| rows_examined | [int32](#int32) |  | The rows examined of the slow query log. |
+| sql_text | [string](#string) |  | The sql text of the slow query log. |
+
+
+
+
+
+
+<a name="bytebase-v1-SlowQueryLog"></a>
+
+### SlowQueryLog
+SlowQueryLog is the slow query log.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| resource | [string](#string) |  | The resource of the slow query log. The format is &#34;environments/{environment}/instances/{instance}/databases/{database}&#34;. |
+| project | [string](#string) |  | The project of the slow query log. The format is &#34;projects/{project}&#34;. |
+| statistics | [SlowQueryStatistics](#bytebase-v1-SlowQueryStatistics) |  | The statistics of the slow query log. |
+
+
+
+
+
+
+<a name="bytebase-v1-SlowQueryStatistics"></a>
+
+### SlowQueryStatistics
+SlowQueryStatistics is the statistics of the slow query log.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| sql_fingerprint | [string](#string) |  | The fingerprint of the slow query log. |
+| count | [int32](#int32) |  | The count of the slow query log. |
+| latest_log_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | The latest log time of the slow query log. |
+| average_query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The average query time of the slow query log. |
+| nighty_fifth_percentile_query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The nighty fifth percentile query time of the slow query log. |
+| average_rows_sent | [int32](#int32) |  | The average rows sent of the slow query log. |
+| nighty_fifth_percentile_rows_sent | [int32](#int32) |  | The nighty fifth percentile rows sent of the slow query log. |
+| average_rows_examined | [int32](#int32) |  | The average rows examined of the slow query log. |
+| nighty_fifth_percentile_rows_examined | [int32](#int32) |  | The nighty fifth percentile rows examined of the slow query log. |
+| samples | [SlowQueryDetails](#bytebase-v1-SlowQueryDetails) | repeated | Samples are details of the sample slow query logs with the same fingerprint. |
 
 
 
@@ -1601,6 +1712,7 @@ The type of the backup.
 | UpdateBackupSetting | [UpdateBackupSettingRequest](#bytebase-v1-UpdateBackupSettingRequest) | [BackupSetting](#bytebase-v1-BackupSetting) |  |
 | CreateBackup | [CreateBackupRequest](#bytebase-v1-CreateBackupRequest) | [Backup](#bytebase-v1-Backup) |  |
 | ListBackup | [ListBackupRequest](#bytebase-v1-ListBackupRequest) | [ListBackupResponse](#bytebase-v1-ListBackupResponse) |  |
+| ListSlowQueries | [ListSlowQueriesRequest](#bytebase-v1-ListSlowQueriesRequest) | [ListSlowQueriesResponse](#bytebase-v1-ListSlowQueriesResponse) |  |
 
  
 
