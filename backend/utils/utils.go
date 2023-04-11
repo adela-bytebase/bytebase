@@ -473,8 +473,29 @@ func passCheck(taskCheckRunList []*store.TaskCheckRunMessage, checkType api.Task
 	return true, nil
 }
 
-// ExecuteMigration executes migration.
-func ExecuteMigration(ctx context.Context, store *store.Store, driver db.Driver, m *db.MigrationInfo, statement string, executeBeforeCommitTx func(tx *sql.Tx) error) (migrationHistoryID string, updatedSchema string, resErr error) {
+// ExecuteMigrationDefault executes migration.
+func ExecuteMigrationDefault(ctx context.Context, store *store.Store, driver db.Driver, mi *db.MigrationInfo, statement string, executeBeforeCommitTx func(tx *sql.Tx) error) (migrationHistoryID string, updatedSchema string, resErr error) {
+	execFunc := func() error {
+		if driver.GetType() == db.Oracle && executeBeforeCommitTx != nil {
+			oracleDriver, ok := driver.(*oracle.Driver)
+			if !ok {
+				return errors.New("failed to cast driver to oracle driver")
+			}
+			if _, _, err := oracleDriver.ExecuteMigrationWithBeforeCommitTxFunc(ctx, statement, executeBeforeCommitTx); err != nil {
+				return err
+			}
+		} else {
+			if _, err := driver.Execute(ctx, statement, false /* createDatabase */); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return ExecuteMigrationWithFunc(ctx, store, driver, mi, statement, execFunc)
+}
+
+// ExecuteMigrationWithFunc executes the migration with custom migration function.
+func ExecuteMigrationWithFunc(ctx context.Context, store *store.Store, driver db.Driver, m *db.MigrationInfo, statement string, execFunc func() error) (migrationHistoryID string, updatedSchema string, resErr error) {
 	var prevSchemaBuf bytes.Buffer
 	// Don't record schema if the database hasn't existed yet or is schemaless, e.g. MongoDB.
 	// For baseline migration, we also record the live schema to detect the schema drift.
@@ -507,25 +528,12 @@ func ExecuteMigration(ctx context.Context, store *store.Store, driver db.Driver,
 	// Baseline migration type could has non-empty sql but will not execute.
 	// https://github.com/bytebase/bytebase/issues/394
 	doMigrate := true
-	if statement == "" {
-		doMigrate = false
-	}
-	if m.Type == db.Baseline {
+	if statement == "" || m.Type == db.Baseline {
 		doMigrate = false
 	}
 	if doMigrate {
-		if driver.GetType() == db.Oracle && executeBeforeCommitTx != nil {
-			oracleDriver, ok := driver.(*oracle.Driver)
-			if !ok {
-				return "", "", errors.New("failed to cast driver to oracle driver")
-			}
-			if _, _, err := oracleDriver.ExecuteMigrationWithBeforeCommitTxFunc(ctx, statement, executeBeforeCommitTx); err != nil {
-				return "", "", err
-			}
-		} else {
-			if _, err := driver.Execute(ctx, statement, false /* createDatabase */); err != nil {
-				return "", "", err
-			}
+		if err := execFunc(); err != nil {
+			return "", "", err
 		}
 	}
 
@@ -585,24 +593,12 @@ func BeginMigration(ctx context.Context, store *store.Store, m *db.MigrationInfo
 		}
 	}
 
-	largestSequence, err := store.GetLargestInstanceChangeHistorySequence(ctx, m.InstanceID, m.DatabaseID, false /* baseline */)
-	if err != nil {
-		return "", err
-	}
-
-	// Check if there is any higher version already been applied since the last baseline or branch.
-	if version, err := store.GetLargestInstanceChangeHistoryVersionSinceBaseline(ctx, m.InstanceID, m.DatabaseID); err != nil {
-		return "", err
-	} else if version != nil && len(*version) > 0 && *version >= m.Version {
-		return "", common.Errorf(common.MigrationOutOfOrder, "database %q has already applied version %s which >= %s", m.Database, *version, m.Version)
-	}
-
 	// Phase 2 - Record migration history as PENDING.
 	// MySQL runs DDL in its own transaction, so we can't commit migration history together with DDL in a single transaction.
 	// Thus we sort of doing a 2-phase commit, where we first write a PENDING migration record, and after migration completes, we then
 	// update the record to DONE together with the updated schema.
 	statementRecord, _ := common.TruncateString(statement, common.MaxSheetSize)
-	insertedID, err := store.CreatePendingInstanceChangeHistory(ctx, largestSequence+1, prevSchema, m, storedVersion, statementRecord)
+	insertedID, err := store.CreatePendingInstanceChangeHistory(ctx, prevSchema, m, storedVersion, statementRecord)
 	if err != nil {
 		return "", err
 	}

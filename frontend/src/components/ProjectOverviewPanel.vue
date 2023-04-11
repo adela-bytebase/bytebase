@@ -44,6 +44,22 @@
         {{ $t("common.issue") }}
       </p>
 
+      <WaitingForMyApprovalIssueTable
+        v-if="hasCustomApprovalFeature"
+        :issue-find="{
+          statusList: ['OPEN'],
+          projectId: project.id,
+        }"
+      >
+        <template #table="{ issueList, loading }">
+          <IssueTable
+            :show-placeholder="!loading"
+            :title="$t('issue.waiting-for-my-approval')"
+            :issue-list="issueList"
+          />
+        </template>
+      </WaitingForMyApprovalIssueTable>
+
       <!-- show OPEN issues with pageSize=10 -->
       <div>
         <PagedIssueTable
@@ -111,8 +127,9 @@ import ActivityTable from "../components/ActivityTable.vue";
 import { IssueTable } from "../components/Issue";
 import { Database, Issue, Project, LabelKeyType } from "../types";
 import { findDefaultGroupByLabel } from "../utils";
-import PagedIssueTable from "@/components/Issue/PagedIssueTable.vue";
+import PagedIssueTable from "@/components/Issue/table/PagedIssueTable.vue";
 import PagedActivityTableVue from "./PagedActivityTable.vue";
+import { featureToRef } from "@/store";
 
 // Show at most 5 activity
 const ACTIVITY_LIMIT = 5;
@@ -153,6 +170,7 @@ export default defineComponent({
       xAxisLabel: "bb.environment",
       yAxisLabel: undefined,
     });
+    const hasCustomApprovalFeature = featureToRef("bb.feature.custom-approval");
 
     const isTenantProject = computed((): boolean => {
       return props.project.tenantMode === "TENANT";
@@ -178,6 +196,7 @@ export default defineComponent({
 
     return {
       state,
+      hasCustomApprovalFeature,
       isTenantProject,
       filteredDatabaseList,
       excludedKeyList,
