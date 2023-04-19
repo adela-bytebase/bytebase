@@ -218,6 +218,8 @@ export interface SchemaMetadata {
   tables: TableMetadata[];
   /** The views is the list of views in a schema. */
   views: ViewMetadata[];
+  /** The functions is the list of functions in a schema. */
+  functions: FunctionMetadata[];
 }
 
 /** TableMetadata is the metadata for tables. */
@@ -288,6 +290,14 @@ export interface DependentColumn {
   table: string;
   /** The column is the name of a reference column. */
   column: string;
+}
+
+/** FunctionMetadata is the metadata for functions. */
+export interface FunctionMetadata {
+  /** The name is the name of a view. */
+  name: string;
+  /** The definition is the definition of a view. */
+  definition: string;
 }
 
 /** IndexMetadata is the metadata for indexes. */
@@ -519,12 +529,12 @@ export interface ListSlowQueriesRequest {
   filter: string;
   /**
    * The order by of the slow query log.
-   * Support order by count, latest_log_time, average_query_time, nighty_fifth_percentile_query_time,
-   * average_rows_sent, nighty_fifth_percentile_rows_sent, average_rows_examined, nighty_fifth_percentile_rows_examined for now.
+   * Support order by count, latest_log_time, average_query_time, maximum_query_time,
+   * average_rows_sent, maximum_rows_sent, average_rows_examined, maximum_rows_examined for now.
    * For example:
    *  - order by count: order_by = "count"
    *  - order by latest_log_time desc: order_by = "latest_log_time desc"
-   * Default: order by nighty_fifth_percentile_query_time desc.
+   * Default: order by average_query_time desc.
    */
   orderBy: string;
 }
@@ -561,16 +571,16 @@ export interface SlowQueryStatistics {
   latestLogTime?: Date;
   /** The average query time of the slow query log. */
   averageQueryTime?: Duration;
-  /** The nighty fifth percentile query time of the slow query log. */
-  nightyFifthPercentileQueryTime?: Duration;
+  /** The maximum query time of the slow query log. */
+  maximumQueryTime?: Duration;
   /** The average rows sent of the slow query log. */
   averageRowsSent: number;
-  /** The nighty fifth percentile rows sent of the slow query log. */
-  nightyFifthPercentileRowsSent: number;
+  /** The maximum rows sent of the slow query log. */
+  maximumRowsSent: number;
   /** The average rows examined of the slow query log. */
   averageRowsExamined: number;
-  /** The nighty fifth percentile rows examined of the slow query log. */
-  nightyFifthPercentileRowsExamined: number;
+  /** The maximum rows examined of the slow query log. */
+  maximumRowsExamined: number;
   /** Samples are details of the sample slow query logs with the same fingerprint. */
   samples: SlowQueryDetails[];
 }
@@ -1833,7 +1843,7 @@ export const DatabaseMetadata = {
 };
 
 function createBaseSchemaMetadata(): SchemaMetadata {
-  return { name: "", tables: [], views: [] };
+  return { name: "", tables: [], views: [], functions: [] };
 }
 
 export const SchemaMetadata = {
@@ -1846,6 +1856,9 @@ export const SchemaMetadata = {
     }
     for (const v of message.views) {
       ViewMetadata.encode(v!, writer.uint32(26).fork()).ldelim();
+    }
+    for (const v of message.functions) {
+      FunctionMetadata.encode(v!, writer.uint32(34).fork()).ldelim();
     }
     return writer;
   },
@@ -1878,6 +1891,13 @@ export const SchemaMetadata = {
 
           message.views.push(ViewMetadata.decode(reader, reader.uint32()));
           continue;
+        case 4:
+          if (tag != 34) {
+            break;
+          }
+
+          message.functions.push(FunctionMetadata.decode(reader, reader.uint32()));
+          continue;
       }
       if ((tag & 7) == 4 || tag == 0) {
         break;
@@ -1892,6 +1912,7 @@ export const SchemaMetadata = {
       name: isSet(object.name) ? String(object.name) : "",
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => TableMetadata.fromJSON(e)) : [],
       views: Array.isArray(object?.views) ? object.views.map((e: any) => ViewMetadata.fromJSON(e)) : [],
+      functions: Array.isArray(object?.functions) ? object.functions.map((e: any) => FunctionMetadata.fromJSON(e)) : [],
     };
   },
 
@@ -1908,6 +1929,11 @@ export const SchemaMetadata = {
     } else {
       obj.views = [];
     }
+    if (message.functions) {
+      obj.functions = message.functions.map((e) => e ? FunctionMetadata.toJSON(e) : undefined);
+    } else {
+      obj.functions = [];
+    }
     return obj;
   },
 
@@ -1920,6 +1946,7 @@ export const SchemaMetadata = {
     message.name = object.name ?? "";
     message.tables = object.tables?.map((e) => TableMetadata.fromPartial(e)) || [];
     message.views = object.views?.map((e) => ViewMetadata.fromPartial(e)) || [];
+    message.functions = object.functions?.map((e) => FunctionMetadata.fromPartial(e)) || [];
     return message;
   },
 };
@@ -2493,6 +2520,77 @@ export const DependentColumn = {
     message.schema = object.schema ?? "";
     message.table = object.table ?? "";
     message.column = object.column ?? "";
+    return message;
+  },
+};
+
+function createBaseFunctionMetadata(): FunctionMetadata {
+  return { name: "", definition: "" };
+}
+
+export const FunctionMetadata = {
+  encode(message: FunctionMetadata, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.definition !== "") {
+      writer.uint32(18).string(message.definition);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): FunctionMetadata {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFunctionMetadata();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag != 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 2:
+          if (tag != 18) {
+            break;
+          }
+
+          message.definition = reader.string();
+          continue;
+      }
+      if ((tag & 7) == 4 || tag == 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FunctionMetadata {
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      definition: isSet(object.definition) ? String(object.definition) : "",
+    };
+  },
+
+  toJSON(message: FunctionMetadata): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    message.definition !== undefined && (obj.definition = message.definition);
+    return obj;
+  },
+
+  create(base?: DeepPartial<FunctionMetadata>): FunctionMetadata {
+    return FunctionMetadata.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<FunctionMetadata>): FunctionMetadata {
+    const message = createBaseFunctionMetadata();
+    message.name = object.name ?? "";
+    message.definition = object.definition ?? "";
     return message;
   },
 };
@@ -3425,11 +3523,11 @@ function createBaseSlowQueryStatistics(): SlowQueryStatistics {
     count: 0,
     latestLogTime: undefined,
     averageQueryTime: undefined,
-    nightyFifthPercentileQueryTime: undefined,
+    maximumQueryTime: undefined,
     averageRowsSent: 0,
-    nightyFifthPercentileRowsSent: 0,
+    maximumRowsSent: 0,
     averageRowsExamined: 0,
-    nightyFifthPercentileRowsExamined: 0,
+    maximumRowsExamined: 0,
     samples: [],
   };
 }
@@ -3440,7 +3538,7 @@ export const SlowQueryStatistics = {
       writer.uint32(10).string(message.sqlFingerprint);
     }
     if (message.count !== 0) {
-      writer.uint32(16).int32(message.count);
+      writer.uint32(16).int64(message.count);
     }
     if (message.latestLogTime !== undefined) {
       Timestamp.encode(toTimestamp(message.latestLogTime), writer.uint32(26).fork()).ldelim();
@@ -3448,20 +3546,20 @@ export const SlowQueryStatistics = {
     if (message.averageQueryTime !== undefined) {
       Duration.encode(message.averageQueryTime, writer.uint32(34).fork()).ldelim();
     }
-    if (message.nightyFifthPercentileQueryTime !== undefined) {
-      Duration.encode(message.nightyFifthPercentileQueryTime, writer.uint32(42).fork()).ldelim();
+    if (message.maximumQueryTime !== undefined) {
+      Duration.encode(message.maximumQueryTime, writer.uint32(42).fork()).ldelim();
     }
     if (message.averageRowsSent !== 0) {
-      writer.uint32(48).int32(message.averageRowsSent);
+      writer.uint32(48).int64(message.averageRowsSent);
     }
-    if (message.nightyFifthPercentileRowsSent !== 0) {
-      writer.uint32(56).int32(message.nightyFifthPercentileRowsSent);
+    if (message.maximumRowsSent !== 0) {
+      writer.uint32(56).int64(message.maximumRowsSent);
     }
     if (message.averageRowsExamined !== 0) {
-      writer.uint32(64).int32(message.averageRowsExamined);
+      writer.uint32(64).int64(message.averageRowsExamined);
     }
-    if (message.nightyFifthPercentileRowsExamined !== 0) {
-      writer.uint32(72).int32(message.nightyFifthPercentileRowsExamined);
+    if (message.maximumRowsExamined !== 0) {
+      writer.uint32(72).int64(message.maximumRowsExamined);
     }
     for (const v of message.samples) {
       SlowQueryDetails.encode(v!, writer.uint32(82).fork()).ldelim();
@@ -3488,7 +3586,7 @@ export const SlowQueryStatistics = {
             break;
           }
 
-          message.count = reader.int32();
+          message.count = longToNumber(reader.int64() as Long);
           continue;
         case 3:
           if (tag != 26) {
@@ -3509,35 +3607,35 @@ export const SlowQueryStatistics = {
             break;
           }
 
-          message.nightyFifthPercentileQueryTime = Duration.decode(reader, reader.uint32());
+          message.maximumQueryTime = Duration.decode(reader, reader.uint32());
           continue;
         case 6:
           if (tag != 48) {
             break;
           }
 
-          message.averageRowsSent = reader.int32();
+          message.averageRowsSent = longToNumber(reader.int64() as Long);
           continue;
         case 7:
           if (tag != 56) {
             break;
           }
 
-          message.nightyFifthPercentileRowsSent = reader.int32();
+          message.maximumRowsSent = longToNumber(reader.int64() as Long);
           continue;
         case 8:
           if (tag != 64) {
             break;
           }
 
-          message.averageRowsExamined = reader.int32();
+          message.averageRowsExamined = longToNumber(reader.int64() as Long);
           continue;
         case 9:
           if (tag != 72) {
             break;
           }
 
-          message.nightyFifthPercentileRowsExamined = reader.int32();
+          message.maximumRowsExamined = longToNumber(reader.int64() as Long);
           continue;
         case 10:
           if (tag != 82) {
@@ -3561,17 +3659,11 @@ export const SlowQueryStatistics = {
       count: isSet(object.count) ? Number(object.count) : 0,
       latestLogTime: isSet(object.latestLogTime) ? fromJsonTimestamp(object.latestLogTime) : undefined,
       averageQueryTime: isSet(object.averageQueryTime) ? Duration.fromJSON(object.averageQueryTime) : undefined,
-      nightyFifthPercentileQueryTime: isSet(object.nightyFifthPercentileQueryTime)
-        ? Duration.fromJSON(object.nightyFifthPercentileQueryTime)
-        : undefined,
+      maximumQueryTime: isSet(object.maximumQueryTime) ? Duration.fromJSON(object.maximumQueryTime) : undefined,
       averageRowsSent: isSet(object.averageRowsSent) ? Number(object.averageRowsSent) : 0,
-      nightyFifthPercentileRowsSent: isSet(object.nightyFifthPercentileRowsSent)
-        ? Number(object.nightyFifthPercentileRowsSent)
-        : 0,
+      maximumRowsSent: isSet(object.maximumRowsSent) ? Number(object.maximumRowsSent) : 0,
       averageRowsExamined: isSet(object.averageRowsExamined) ? Number(object.averageRowsExamined) : 0,
-      nightyFifthPercentileRowsExamined: isSet(object.nightyFifthPercentileRowsExamined)
-        ? Number(object.nightyFifthPercentileRowsExamined)
-        : 0,
+      maximumRowsExamined: isSet(object.maximumRowsExamined) ? Number(object.maximumRowsExamined) : 0,
       samples: Array.isArray(object?.samples) ? object.samples.map((e: any) => SlowQueryDetails.fromJSON(e)) : [],
     };
   },
@@ -3583,16 +3675,12 @@ export const SlowQueryStatistics = {
     message.latestLogTime !== undefined && (obj.latestLogTime = message.latestLogTime.toISOString());
     message.averageQueryTime !== undefined &&
       (obj.averageQueryTime = message.averageQueryTime ? Duration.toJSON(message.averageQueryTime) : undefined);
-    message.nightyFifthPercentileQueryTime !== undefined &&
-      (obj.nightyFifthPercentileQueryTime = message.nightyFifthPercentileQueryTime
-        ? Duration.toJSON(message.nightyFifthPercentileQueryTime)
-        : undefined);
+    message.maximumQueryTime !== undefined &&
+      (obj.maximumQueryTime = message.maximumQueryTime ? Duration.toJSON(message.maximumQueryTime) : undefined);
     message.averageRowsSent !== undefined && (obj.averageRowsSent = Math.round(message.averageRowsSent));
-    message.nightyFifthPercentileRowsSent !== undefined &&
-      (obj.nightyFifthPercentileRowsSent = Math.round(message.nightyFifthPercentileRowsSent));
+    message.maximumRowsSent !== undefined && (obj.maximumRowsSent = Math.round(message.maximumRowsSent));
     message.averageRowsExamined !== undefined && (obj.averageRowsExamined = Math.round(message.averageRowsExamined));
-    message.nightyFifthPercentileRowsExamined !== undefined &&
-      (obj.nightyFifthPercentileRowsExamined = Math.round(message.nightyFifthPercentileRowsExamined));
+    message.maximumRowsExamined !== undefined && (obj.maximumRowsExamined = Math.round(message.maximumRowsExamined));
     if (message.samples) {
       obj.samples = message.samples.map((e) => e ? SlowQueryDetails.toJSON(e) : undefined);
     } else {
@@ -3613,14 +3701,13 @@ export const SlowQueryStatistics = {
     message.averageQueryTime = (object.averageQueryTime !== undefined && object.averageQueryTime !== null)
       ? Duration.fromPartial(object.averageQueryTime)
       : undefined;
-    message.nightyFifthPercentileQueryTime =
-      (object.nightyFifthPercentileQueryTime !== undefined && object.nightyFifthPercentileQueryTime !== null)
-        ? Duration.fromPartial(object.nightyFifthPercentileQueryTime)
-        : undefined;
+    message.maximumQueryTime = (object.maximumQueryTime !== undefined && object.maximumQueryTime !== null)
+      ? Duration.fromPartial(object.maximumQueryTime)
+      : undefined;
     message.averageRowsSent = object.averageRowsSent ?? 0;
-    message.nightyFifthPercentileRowsSent = object.nightyFifthPercentileRowsSent ?? 0;
+    message.maximumRowsSent = object.maximumRowsSent ?? 0;
     message.averageRowsExamined = object.averageRowsExamined ?? 0;
-    message.nightyFifthPercentileRowsExamined = object.nightyFifthPercentileRowsExamined ?? 0;
+    message.maximumRowsExamined = object.maximumRowsExamined ?? 0;
     message.samples = object.samples?.map((e) => SlowQueryDetails.fromPartial(e)) || [];
     return message;
   },
@@ -3642,10 +3729,10 @@ export const SlowQueryDetails = {
       Duration.encode(message.lockTime, writer.uint32(26).fork()).ldelim();
     }
     if (message.rowsSent !== 0) {
-      writer.uint32(32).int32(message.rowsSent);
+      writer.uint32(32).int64(message.rowsSent);
     }
     if (message.rowsExamined !== 0) {
-      writer.uint32(40).int32(message.rowsExamined);
+      writer.uint32(40).int64(message.rowsExamined);
     }
     if (message.sqlText !== "") {
       writer.uint32(50).string(message.sqlText);
@@ -3686,14 +3773,14 @@ export const SlowQueryDetails = {
             break;
           }
 
-          message.rowsSent = reader.int32();
+          message.rowsSent = longToNumber(reader.int64() as Long);
           continue;
         case 5:
           if (tag != 40) {
             break;
           }
 
-          message.rowsExamined = reader.int32();
+          message.rowsExamined = longToNumber(reader.int64() as Long);
           continue;
         case 6:
           if (tag != 50) {

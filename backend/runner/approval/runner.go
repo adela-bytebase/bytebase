@@ -23,6 +23,7 @@ import (
 	"github.com/bytebase/bytebase/backend/component/state"
 	enterpriseAPI "github.com/bytebase/bytebase/backend/enterprise/api"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
+	"github.com/bytebase/bytebase/backend/utils"
 
 	"github.com/bytebase/bytebase/backend/store"
 
@@ -161,9 +162,8 @@ func (r *Runner) findApprovalTemplateForIssue(ctx context.Context, issue *store.
 	// no need to find if
 	// - feature is not enabled
 	// - risk source is RiskSourceUnknown
-	// - risks are empty
 	// - approval setting rules are empty
-	if !r.licenseService.IsFeatureEnabled(api.FeatureCustomApproval) || issueTypeToRiskSource[issue.Type] == store.RiskSourceUnknown || len(risks) == 0 || len(approvalSetting.Rules) == 0 {
+	if !r.licenseService.IsFeatureEnabled(api.FeatureCustomApproval) || issueTypeToRiskSource[issue.Type] == store.RiskSourceUnknown || len(approvalSetting.Rules) == 0 {
 		if err := updateIssuePayload(ctx, r.store, issue.UID, &storepb.IssuePayload{
 			Approval: &storepb.IssuePayloadApproval{
 				ApprovalFindingDone: true,
@@ -216,6 +216,10 @@ func (r *Runner) findApprovalTemplateForIssue(ctx context.Context, issue *store.
 	}
 	if approvalTemplate != nil {
 		payload.Approval.ApprovalTemplates = append(payload.Approval.ApprovalTemplates, approvalTemplate)
+	}
+
+	if err := utils.SkipApprovalStepIfNeeded(ctx, r.store, issue.Project.UID, payload.Approval); err != nil {
+		return false, errors.Wrap(err, "failed to skip approval step if needed")
 	}
 
 	if err := updateIssuePayload(ctx, r.store, issue.UID, payload); err != nil {
@@ -313,6 +317,11 @@ func getReportResult(ctx context.Context, s *store.Store, task *store.TaskMessag
 }
 
 func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMessage, task *store.TaskMessage, risks []*store.RiskMessage) (int64, bool, error) {
+	// Fall through to "DEFAULT" risk level if risks are empty.
+	if len(risks) == 0 {
+		return 0, true, nil
+	}
+
 	instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{
 		UID: &task.InstanceID,
 	})

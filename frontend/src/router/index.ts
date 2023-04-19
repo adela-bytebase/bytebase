@@ -23,9 +23,10 @@ import {
   UNKNOWN_ID,
 } from "../types";
 import {
-  hasProjectPermission,
+  hasPermissionInProject,
   hasWorkspacePermission,
   idFromSlug,
+  memberListInProject,
   migrationHistoryIdFromSlug,
 } from "../utils";
 import Signin from "../views/auth/Signin.vue";
@@ -253,6 +254,20 @@ const routes: Array<RouteRecordRaw> = [
             },
           },
           {
+            path: "slow-query",
+            name: "workspace.slow-query",
+            meta: { title: () => startCase(t("slow-query.slow-queries")) },
+            components: {
+              content: () =>
+                import("../views/SlowQuery/SlowQueryDashboard.vue"),
+              leftSidebar: DashboardSidebar,
+            },
+            props: {
+              content: true,
+              leftSidebar: true,
+            },
+          },
+          {
             path: "anomaly-center",
             name: "workspace.anomaly-center",
             meta: { title: () => t("anomaly-center") },
@@ -370,6 +385,13 @@ const routes: Array<RouteRecordRaw> = [
                 props: true,
               },
               {
+                path: "role",
+                name: "setting.workspace.role",
+                meta: { title: () => t("settings.sidebar.roles") },
+                component: () => import("../views/SettingWorkspaceRole.vue"),
+                props: true,
+              },
+              {
                 path: "im-integration",
                 name: "setting.workspace.im-integration",
                 meta: { title: () => t("settings.sidebar.im-integration") },
@@ -473,6 +495,13 @@ const routes: Array<RouteRecordRaw> = [
                 component: () =>
                   import("../views/SettingWorkspaceVCSDetail.vue"),
                 props: true,
+              },
+              {
+                path: "mail-delivery",
+                name: "setting.workspace.mail-delivery",
+                meta: { title: () => t("settings.sidebar.mail-delivery") },
+                component: () =>
+                  import("../views/SettingWorkspaceMailDelivery.vue"),
               },
               {
                 path: "subscription",
@@ -658,17 +687,20 @@ const routes: Array<RouteRecordRaw> = [
                     allowCreateDB = true;
                     allowTransferDB = true;
                   } else {
-                    const memberOfProject = project.memberList.find(
-                      (m) => m.principal.id === currentUser.value.id
+                    const memberList = memberListInProject(
+                      project,
+                      currentUser.value
                     );
-                    if (memberOfProject) {
-                      allowAlterSchemaOrChangeData = hasProjectPermission(
-                        "bb.permission.project.change-database",
-                        memberOfProject.role
+                    if (memberList.length > 0) {
+                      allowAlterSchemaOrChangeData = hasPermissionInProject(
+                        project,
+                        currentUser.value,
+                        "bb.permission.project.change-database"
                       );
-                      allowTransferDB = hasProjectPermission(
-                        "bb.permission.project.transfer-database",
-                        memberOfProject.role
+                      allowTransferDB = hasPermissionInProject(
+                        project,
+                        currentUser.value,
+                        "bb.permission.project.transfer-database"
                       );
 
                       if (
@@ -682,9 +714,10 @@ const routes: Array<RouteRecordRaw> = [
                       } else {
                         // See RBAC otherwise.
                         // AKA yes if project owner.
-                        allowCreateDB = hasProjectPermission(
-                          "bb.permission.project.create-database",
-                          memberOfProject.role
+                        allowCreateDB = hasPermissionInProject(
+                          project,
+                          currentUser.value,
+                          "bb.permission.project.create-database"
                         );
                       }
                     }
@@ -1137,7 +1170,11 @@ router.beforeEach((to, from, next) => {
   const serverInfo = useActuatorStore().serverInfo;
 
   // If 2FA is required, redirect to MFA setup page if the user has not enabled 2FA.
-  if (serverInfo?.require2fa && currentUser.value) {
+  if (
+    hasFeature("bb.feature.2fa") &&
+    serverInfo?.require2fa &&
+    currentUser.value
+  ) {
     const user = userStore.getUserById(currentUser.value.id as number);
     if (user && !user.mfaEnabled) {
       next({
@@ -1288,6 +1325,7 @@ router.beforeEach((to, from, next) => {
     to.name === "error.500" ||
     to.name === "workspace.home" ||
     to.name === "workspace.inbox" ||
+    to.name === "workspace.slow-query" ||
     to.name === "workspace.anomaly-center" ||
     to.name === "workspace.project" ||
     to.name === "workspace.instance" ||

@@ -29,7 +29,6 @@ type LicenseService struct {
 // Claims creates a struct that will be encoded to a JWT.
 // We add jwt.RegisteredClaims as an embedded type, to provide fields such as name.
 type Claims struct {
-	Seat          int    `json:"seat"`
 	InstanceCount int    `json:"instanceCount"`
 	Trialing      bool   `json:"trialing"`
 	Plan          string `json:"plan"`
@@ -72,6 +71,10 @@ func (s *LicenseService) StoreLicense(ctx context.Context, patch *enterpriseAPI.
 
 // LoadSubscription will load subscription.
 func (s *LicenseService) LoadSubscription(ctx context.Context) enterpriseAPI.Subscription {
+	if s.cachedSubscription != nil && s.cachedSubscription.IsExpired() {
+		// refresh expired subscription
+		s.cachedSubscription = nil
+	}
 	if s.cachedSubscription != nil {
 		return *s.cachedSubscription
 	}
@@ -83,13 +86,7 @@ func (s *LicenseService) LoadSubscription(ctx context.Context) enterpriseAPI.Sub
 			// -1 means not expire, just for free plan
 			ExpiresTs:     -1,
 			InstanceCount: config.MaximumInstanceForFreePlan,
-			Seat:          config.MaximumSeatForFreePlan,
 		}
-	}
-
-	seat := license.Seat
-	if seat == 0 {
-		seat = -1
 	}
 
 	// Cache the subscription.
@@ -101,7 +98,6 @@ func (s *LicenseService) LoadSubscription(ctx context.Context) enterpriseAPI.Sub
 		Trialing:      license.Trialing,
 		OrgID:         license.OrgID(),
 		OrgName:       license.OrgName,
-		Seat:          seat,
 	}
 	return *s.cachedSubscription
 }
@@ -181,6 +177,13 @@ func (s *LicenseService) loadLicense(ctx context.Context) *enterpriseAPI.License
 			log.Debug("failed to fetch license", zap.Error(err))
 		}
 	}
+	if license == nil {
+		return nil
+	}
+	if err := license.Valid(); err != nil {
+		log.Debug("license is invalid", zap.Error(err))
+		return nil
+	}
 
 	return license
 }
@@ -214,7 +217,6 @@ func (s *LicenseService) findEnterpriseLicense(ctx context.Context) (*enterprise
 				zap.String("plan", license.Plan.String()),
 				zap.Time("expiresAt", time.Unix(license.ExpiresTs, 0)),
 				zap.Int("instanceCount", license.InstanceCount),
-				zap.Int("seat", license.Seat),
 			)
 			return license, nil
 		}
@@ -261,17 +263,12 @@ func (s *LicenseService) parseClaims(claims *Claims) (*enterpriseAPI.License, er
 
 	license := &enterpriseAPI.License{
 		InstanceCount: claims.InstanceCount,
-		Seat:          claims.Seat,
 		ExpiresTs:     claims.ExpiresAt.Unix(),
 		IssuedTs:      claims.IssuedAt.Unix(),
 		Plan:          planType,
 		Subject:       claims.Subject,
 		Trialing:      claims.Trialing,
 		OrgName:       claims.OrgName,
-	}
-
-	if err := license.Valid(); err != nil {
-		return nil, common.Wrap(err, common.Invalid)
 	}
 
 	return license, nil

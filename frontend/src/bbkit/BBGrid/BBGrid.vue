@@ -24,27 +24,63 @@
       </div>
     </div>
 
-    <div
-      v-for="(item, row) in dataSource"
-      :key="rowKey ? item[rowKey] : row"
-      row="table-row"
-      class="bb-grid-row group"
-      :class="{
-        clickable: rowClickable,
-      }"
-      @click="handleClick(item, 0, row, $event)"
-    >
-      <slot name="item" :item="item" :row="row" />
-    </div>
+    <template v-if="ready">
+      <template
+        v-for="(item, row) in dataSource"
+        :key="rowKey ? item[rowKey] : row"
+      >
+        <div
+          row="table-row"
+          class="bb-grid-row group"
+          :class="{
+            clickable: rowClickable,
+          }"
+          @click="handleClick(item, 0, row, $event)"
+        >
+          <slot name="item" :item="item" :row="row" />
+        </div>
+        <div
+          v-if="isRowExpanded(item, row)"
+          row="table-row"
+          class="bb-grid-row"
+        >
+          <div
+            class="bb-grid-cell"
+            :style="{
+              gridColumnStart: 1,
+              gridColumnEnd: columnList.length + 1,
+            }"
+          >
+            <slot name="expanded-item" :item="item" :row="row" />
+          </div>
+        </div>
+      </template>
+    </template>
+
     <slot name="placeholder">
       <div
-        v-if="dataSource.length === 0 && showPlaceholder"
-        class="flex flex-col items-center justify-center py-8 text-control-placeholder border-t"
+        v-if="ready && dataSource.length === 0 && showPlaceholder"
+        class="flex flex-col items-center justify-center text-control-placeholder border-t"
         :style="{
           'grid-column': `auto / span ${columnList.length}`,
         }"
       >
-        <p>{{ $t("common.no-data") }}</p>
+        <slot name="placeholder-content">
+          <p class="py-8">{{ $t("common.no-data") }}</p>
+        </slot>
+      </div>
+    </slot>
+    <slot name="loading">
+      <div
+        v-if="!ready"
+        class="flex flex-col items-center justify-center text-control-placeholder border-t"
+        :style="{
+          'grid-column': `auto / span ${columnList.length}`,
+        }"
+      >
+        <p class="py-8">
+          <BBSpin />
+        </p>
       </div>
     </slot>
   </div>
@@ -54,6 +90,7 @@
 
 <script lang="ts" setup>
 import { computed } from "vue";
+
 import { VueClass } from "@/utils";
 import { BBGridColumn } from "../types";
 import { useResponsiveGridColumns } from "./useResponsiveGridColumns";
@@ -80,6 +117,8 @@ const props = withDefaults(
     headerClass?: VueClass;
     rowClickable?: boolean;
     showPlaceholder?: boolean;
+    ready?: boolean;
+    isRowExpanded?: (item: DataType, row: number) => boolean;
   }>(),
   {
     columnList: () => [],
@@ -90,6 +129,8 @@ const props = withDefaults(
     headerClass: undefined,
     rowClickable: true,
     showPlaceholder: false,
+    ready: true,
+    isRowExpanded: () => false,
   }
 );
 

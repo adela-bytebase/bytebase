@@ -11,8 +11,14 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/bytebase/bytebase/backend/common"
+	"github.com/bytebase/bytebase/backend/component/dbfactory"
+	"github.com/bytebase/bytebase/backend/component/state"
 	enterpriseAPI "github.com/bytebase/bytebase/backend/enterprise/api"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
+	metricAPI "github.com/bytebase/bytebase/backend/metric"
+	"github.com/bytebase/bytebase/backend/plugin/db"
+	"github.com/bytebase/bytebase/backend/plugin/metric"
+	"github.com/bytebase/bytebase/backend/runner/metricreport"
 	"github.com/bytebase/bytebase/backend/store"
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
@@ -22,15 +28,21 @@ type InstanceService struct {
 	v1pb.UnimplementedInstanceServiceServer
 	store          *store.Store
 	licenseService enterpriseAPI.LicenseService
+	metricReporter *metricreport.Reporter
 	secret         string
+	stateCfg       *state.State
+	dbFactory      *dbfactory.DBFactory
 }
 
 // NewInstanceService creates a new InstanceService.
-func NewInstanceService(store *store.Store, licenseService enterpriseAPI.LicenseService, secret string) *InstanceService {
+func NewInstanceService(store *store.Store, licenseService enterpriseAPI.LicenseService, metricReporter *metricreport.Reporter, secret string, stateCfg *state.State, dbFactory *dbfactory.DBFactory) *InstanceService {
 	return &InstanceService{
 		store:          store,
 		licenseService: licenseService,
+		metricReporter: metricReporter,
 		secret:         secret,
+		stateCfg:       stateCfg,
+		dbFactory:      dbFactory,
 	}
 }
 
@@ -100,6 +112,14 @@ func (s *InstanceService) CreateInstance(ctx context.Context, request *v1pb.Crea
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
+	s.metricReporter.Report(ctx, &metric.Metric{
+		Name:  metricAPI.InstanceCreateMetricName,
+		Value: 1,
+		Labels: map[string]any{
+			"engine": instance.Engine,
+		},
+	})
+
 	// TODO(d): sync instance databases.
 	return convertToInstance(instance), nil
 }
@@ -149,6 +169,95 @@ func (s *InstanceService) UpdateInstance(ctx context.Context, request *v1pb.Upda
 	// TODO(d): sync instance databases.
 
 	return convertToInstance(ins), nil
+}
+
+// SyncSlowQueries syncs slow queries for an instance.
+func (s *InstanceService) SyncSlowQueries(ctx context.Context, request *v1pb.SyncSlowQueriesRequest) (*emptypb.Empty, error) {
+	instance, err := s.getInstanceMessage(ctx, request.Instance)
+	if err != nil {
+		return nil, err
+	}
+	if instance.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "instance %q has been deleted", request.Instance)
+	}
+
+	composedInstance, err := s.store.GetInstanceByID(ctx, instance.UID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if composedInstance == nil {
+		return nil, status.Errorf(codes.NotFound, "instance %q not found", request.Instance)
+	}
+
+	slowQueryPolicy, err := s.store.GetSlowQueryPolicy(ctx, api.PolicyResourceTypeInstance, instance.UID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if slowQueryPolicy == nil || !slowQueryPolicy.Active {
+		return nil, status.Errorf(codes.FailedPrecondition, "slow query policy is not active for instance %q", request.Instance)
+	}
+
+	switch instance.Engine {
+	case db.MySQL:
+		driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, "" /* database name */)
+		if err != nil {
+			return nil, err
+		}
+		defer driver.Close(ctx)
+		if err := driver.CheckSlowQueryLogEnabled(ctx); err != nil {
+			return nil, status.Errorf(codes.FailedPrecondition, "slow query log is not enabled: %s", err.Error())
+		}
+
+		// Sync slow queries for instance.
+		s.stateCfg.InstanceSlowQuerySyncChan <- composedInstance
+	case db.Postgres:
+		databases, err := s.store.ListDatabases(ctx, &store.FindDatabaseMessage{
+			InstanceID: &instance.ResourceID,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to list databases: %s", err.Error())
+		}
+
+		databaseMap := make(map[string]bool)
+		for _, database := range slowQueryPolicy.DatabaseList {
+			databaseMap[database] = true
+		}
+
+		var firstDatabase string
+		for _, database := range databases {
+			if database.SyncState != api.OK {
+				continue
+			}
+			if _, exists := databaseMap[database.DatabaseName]; !exists {
+				continue
+			}
+			if err := func() error {
+				driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, database.DatabaseName)
+				if err != nil {
+					return err
+				}
+				defer driver.Close(ctx)
+				return driver.CheckSlowQueryLogEnabled(ctx)
+			}(); err != nil {
+				return nil, status.Errorf(codes.FailedPrecondition, "slow query log for database %q is not enabled: %s", database.DatabaseName, err.Error())
+			}
+
+			if firstDatabase == "" {
+				firstDatabase = database.DatabaseName
+			}
+		}
+
+		if firstDatabase == "" {
+			return nil, status.Errorf(codes.FailedPrecondition, "no database enabled pg_stat_statements")
+		}
+
+		// Sync slow queries for instance.
+		s.stateCfg.InstanceSlowQuerySyncChan <- composedInstance
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported engine %q", instance.Engine)
+	}
+
+	return &emptypb.Empty{}, nil
 }
 
 // DeleteInstance deletes an instance.

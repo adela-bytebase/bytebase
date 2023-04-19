@@ -162,21 +162,24 @@
       "
     />
     <div class="py-6 px-6">
-      <template v-if="state.selectedIndex == OVERVIEW_TAB">
+      <template v-if="selectedTabItem?.hash === 'overview'">
         <DatabaseOverviewPanel :database="database" />
       </template>
-      <template v-if="state.selectedIndex == MIGRATION_HISTORY_TAB">
+      <template v-if="selectedTabItem?.hash === 'change-history'">
         <DatabaseMigrationHistoryPanel
           :database="database"
           :allow-edit="allowEdit"
         />
       </template>
-      <template v-if="state.selectedIndex == BACKUP_TAB">
+      <template v-if="selectedTabItem?.hash === 'backup-and-restore'">
         <DatabaseBackupPanel
           :database="database"
           :allow-admin="allowAdmin"
           :allow-edit="allowEdit"
         />
+      </template>
+      <template v-if="selectedTabItem?.hash === 'slow-query'">
+        <DatabaseSlowQueryPanel :database="database" />
       </template>
     </div>
 
@@ -195,7 +198,7 @@
             name="project"
             :allowed-role-list="['OWNER']"
             :include-default-project="allowTransferToDefaultProject"
-            :selected-id="state.editingProjectId"
+            :selected-id="state.editingProjectId as number"
             @select-project-id="
               (projectId) => {
                 state.editingProjectId = projectId;
@@ -298,16 +301,20 @@
 <script lang="ts" setup>
 import { computed, onMounted, reactive, watch, ref } from "vue";
 import { useRouter } from "vue-router";
+import dayjs from "dayjs";
+import { useI18n } from "vue-i18n";
+import { startCase } from "lodash-es";
+
 import ProjectSelect from "@/components/ProjectSelect.vue";
 import DatabaseBackupPanel from "@/components/DatabaseBackupPanel.vue";
 import DatabaseMigrationHistoryPanel from "@/components/DatabaseMigrationHistoryPanel.vue";
 import DatabaseOverviewPanel from "@/components/DatabaseOverviewPanel.vue";
+import DatabaseSlowQueryPanel from "@/components/DatabaseSlowQueryPanel.vue";
 import InstanceEngineIcon from "@/components/InstanceEngineIcon.vue";
 import { DatabaseLabelProps } from "@/components/DatabaseLabels";
 import { SelectDatabaseLabel } from "@/components/TransferDatabaseForm";
 import {
   idFromSlug,
-  hasProjectPermission,
   hasWorkspacePermission,
   hidePrefix,
   allowGhostMigration,
@@ -317,6 +324,8 @@ import {
   isArchivedDatabase,
   instanceHasBackupRestore,
   instanceHasAlterSchema,
+  instanceSupportSlowQuery,
+  hasPermissionInProject,
 } from "@/utils";
 import {
   ProjectId,
@@ -327,7 +336,6 @@ import {
   SQLResultSet,
 } from "@/types";
 import { BBTabFilterItem } from "@/bbkit/types";
-import { useI18n } from "vue-i18n";
 import { GhostDialog } from "@/components/AlterSchemaPrepForm";
 import { SchemaDiagram, SchemaDiagramIcon } from "@/components/SchemaDiagram";
 import { SQLEditorButton } from "@/components/DatabaseDetail";
@@ -339,11 +347,6 @@ import {
   usePolicyByDatabaseAndType,
   useSQLStore,
 } from "@/store";
-import dayjs from "dayjs";
-
-const OVERVIEW_TAB = 0;
-const MIGRATION_HISTORY_TAB = 1;
-const BACKUP_TAB = 2;
 
 type DatabaseTabItem = {
   name: string;
@@ -374,18 +377,21 @@ const dbSchemaStore = useDBSchemaStore();
 const sqlStore = useSQLStore();
 const ghostDialog = ref<InstanceType<typeof GhostDialog>>();
 
-const databaseTabItemList: DatabaseTabItem[] = [
-  { name: t("common.overview"), hash: "overview" },
-  { name: t("change-history.self"), hash: "change-history" },
-  { name: t("common.backup-and-restore"), hash: "backup-and-restore" },
-];
+const databaseTabItemList = computed((): DatabaseTabItem[] => {
+  return [
+    { name: t("common.overview"), hash: "overview" },
+    { name: t("change-history.self"), hash: "change-history" },
+    { name: t("common.backup-and-restore"), hash: "backup-and-restore" },
+    { name: startCase(t("slow-query.slow-queries")), hash: "slow-query" },
+  ];
+});
 
 const state = reactive<LocalState>({
   showTransferDatabaseModal: false,
   showIncorrectProjectModal: false,
   showSchemaEditorModal: false,
   editingProjectId: UNKNOWN_ID,
-  selectedIndex: OVERVIEW_TAB,
+  selectedIndex: 0,
   syncingSchema: false,
   showSchemaDiagram: false,
 });
@@ -434,16 +440,14 @@ const allowTransferProject = computed(() => {
     return true;
   }
 
-  for (const member of database.value.project.memberList) {
-    if (
-      member.principal.id == currentUser.value.id &&
-      hasProjectPermission(
-        "bb.permission.project.transfer-database",
-        member.role
-      )
-    ) {
-      return true;
-    }
+  if (
+    hasPermissionInProject(
+      database.value.project,
+      currentUser.value,
+      "bb.permission.project.transfer-database"
+    )
+  ) {
+    return true;
   }
 
   return false;
@@ -484,13 +488,14 @@ const allowAdmin = computed(() => {
     return true;
   }
 
-  for (const member of database.value.project.memberList) {
-    if (
-      member.principal.id == currentUser.value.id &&
-      hasProjectPermission("bb.permission.project.admin-database", member.role)
-    ) {
-      return true;
-    }
+  if (
+    hasPermissionInProject(
+      database.value.project,
+      currentUser.value,
+      "bb.permission.project.admin-database"
+    )
+  ) {
+    return true;
   }
   return false;
 });
@@ -515,13 +520,14 @@ const allowEdit = computed(() => {
     return true;
   }
 
-  for (const member of database.value.project.memberList) {
-    if (
-      member.principal.id == currentUser.value.id &&
-      hasProjectPermission("bb.permission.project.change-database", member.role)
-    ) {
-      return true;
-    }
+  if (
+    hasPermissionInProject(
+      database.value.project,
+      currentUser.value,
+      "bb.permission.project.change-database"
+    )
+  ) {
+    return true;
   }
   return false;
 });
@@ -545,15 +551,21 @@ const allowEditDatabaseLabels = computed((): boolean => {
   return allowAdmin.value;
 });
 
+const availableDatabaseTabItemList = computed(() => {
+  const db = database.value;
+  return databaseTabItemList.value.filter((item) => {
+    if (item.hash === "backup-and-restore") {
+      return instanceHasBackupRestore(db.instance);
+    }
+    if (item.hash === "slow-query") {
+      return instanceSupportSlowQuery(db.instance);
+    }
+    return true;
+  });
+});
+
 const tabItemList = computed((): BBTabFilterItem[] => {
-  if (!instanceHasBackupRestore(database.value.instance)) {
-    return databaseTabItemList
-      .filter((item) => item.hash !== "backup-and-restore")
-      .map((item) => {
-        return { title: item.name, alert: false };
-      });
-  }
-  return databaseTabItemList.map((item) => {
+  return availableDatabaseTabItemList.value.map((item) => {
     return { title: item.name, alert: false };
   });
 });
@@ -666,26 +678,32 @@ const updateLabels = (labels: DatabaseLabel[]) => {
   });
 };
 
+const selectedTabItem = computed(() => {
+  return availableDatabaseTabItemList.value[state.selectedIndex];
+});
+
 const selectTab = (index: number) => {
+  const item = availableDatabaseTabItemList.value[index];
   state.selectedIndex = index;
   router.replace({
     name: "workspace.database.detail",
-    hash: "#" + databaseTabItemList[index].hash,
+    hash: "#" + item.hash,
   });
 };
 
 const selectDatabaseTabOnHash = () => {
   if (router.currentRoute.value.hash) {
-    for (let i = 0; i < databaseTabItemList.length; i++) {
+    for (let i = 0; i < availableDatabaseTabItemList.value.length; i++) {
       if (
-        databaseTabItemList[i].hash == router.currentRoute.value.hash.slice(1)
+        availableDatabaseTabItemList.value[i].hash ==
+        router.currentRoute.value.hash.slice(1)
       ) {
         selectTab(i);
         break;
       }
     }
   } else {
-    selectTab(OVERVIEW_TAB);
+    selectTab(0);
   }
 };
 

@@ -235,7 +235,10 @@
     "will-override-current-data": "Will override current data.",
     "rollout": "Rollout",
     "uploading": "Uploading",
-    "active": "Active"
+    "active": "Active",
+    "added": "Added",
+    "revoke": "Revoke",
+    "cannot-undo-this-action": "You cannot undo this action"
   },
   "error-page": {
     "go-back-home": "Go back home"
@@ -374,7 +377,9 @@
       "debug-log": "Debug Log",
       "sensitive-data": "Data Anonymization",
       "access-control": "Data Access Control",
-      "audit-log": "Audit Log"
+      "audit-log": "Audit Log",
+      "roles": "Roles",
+      "mail-delivery": "Mail Delivery"
     },
     "profile": {
       "email": "Email",
@@ -401,7 +406,8 @@
         "account": "Account",
         "role": "Role",
         "update-time": "Updated Time",
-        "granted-time": "Granted Time"
+        "granted-time": "Granted Time",
+        "roles": "Roles"
       },
       "action": {
         "deactivate": "Deactivate",
@@ -423,7 +429,8 @@
       "reset-service-key": "Reset Service Key",
       "reset-service-key-alert": "This action cannot be undone. The old key will stop working immediately. Are you sure you want to reset this service key?",
       "service-key-copied": "Service Key copied to clipboard, please keep it in secret.",
-      "create-as-service-account": "Create as service account"
+      "create-as-service-account": "Create as service account",
+      "show-inactive": "Show inactive members"
     },
     "im-integration": {
       "enable": "Enable",
@@ -532,6 +539,22 @@
       "new-version-available": "New version is available",
       "new-version-content": "The new version {tag} is available now! Please check our docs for installation.",
       "not-show-till-next-release": "Don't show this till next version"
+    },
+    "mail-delivery": {
+      "description": "Enable mail delivery to receive email notification by configuring SMTP server information.",
+      "field": {
+        "smtp-server-host": "SMTP Server Host",
+        "smtp-server-port": "SMTP Server Port",
+        "from": "From",
+        "smtp-username": "SMTP Username",
+        "smtp-password": "SMTP Password",
+        "send-test-email-to": "Send Test Email To",
+        "send": "Send",
+        "authentication-method": "Authentication Method",
+        "encryption": "Encryption"
+      },
+      "updated-tip": "Successfully updated the mail delivery setting",
+      "tested-tip": "Send successfully, please check the inbox of {address}."
     }
   },
   "activity": {
@@ -903,6 +926,7 @@
     "visit-environment": "@:common.visit @:common.environments",
     "add-a-member": "Add a member",
     "use-kbar": "Use kbar ({shortcut})",
+    "query-data": "Query data",
     "notice": {
       "title": "Quickstart guide dismissed",
       "desc": "You can still bring it back later from the top right menu"
@@ -1142,7 +1166,8 @@
     "n-selected-m-in-total": "({selected} selected, {total} in total)",
     "doesnt-match-database-name-template": "Doesn't match tenant database name template",
     "doesnt-match-tenant-value": "Doesn't match label value",
-    "should-follow-database-name-template": "Should follow tenant database name template"
+    "should-follow-database-name-template": "Should follow tenant database name template",
+    "all": "All databases"
   },
   "repository": {
     "branch-observe-file-change": "The branch where Bytebase observes the file change.",
@@ -1335,7 +1360,14 @@
       "schema-change-type": "Schema change type",
       "select-schema-change-type-ddl": "Imperative - Migration-based migration. E.g., ALTER TABLE",
       "select-schema-change-type-sdl": "Declarative - State-based migration. E.g., CREATE TABLE",
-      "schema-path-template-sdl-description": "The schema file describes the database's full schema."
+      "schema-path-template-sdl-description": "The schema file describes the database's full schema.",
+      "members": {
+        "view-by-principals": "View by principals",
+        "view-by-roles": "View by roles",
+        "cannot-remove-last-owner": "Cannot remove the last owner of a project",
+        "revoke-role-from-user": "Revoke '{role}' from '{user}'",
+        "remove-user": "Remove '{user}'"
+      }
     },
     "mode": {
       "standard": "Standard",
@@ -1349,7 +1381,8 @@
       "project-member": "Require LGTM from project members",
       "project-owner": "Require LGTM from project owner"
     },
-    "successfully-updated-db-name-template": "Successfully updated database name template."
+    "successfully-updated-db-name-template": "Successfully updated database name template.",
+    "all": "All projects"
   },
   "inbox": {
     "mark-all-as-read": "Mark all as read",
@@ -1506,7 +1539,8 @@
   },
   "setting": {
     "project": {
-      "description": "This is the Admin project panel listing all projects in Bytebase."
+      "description": "This is the Admin project panel listing all projects in Bytebase.",
+      "show-archived": "Show archived projects"
     },
     "label": {
       "key": "Key",
@@ -1727,13 +1761,6 @@
         "runoutof": "Your have run out of your {total} instance quota.",
         "upgrade": "@:{'subscription.upgrade'} to get more instance quota."
       },
-      "bb-feature-seat-count": {
-        "title": "Seat count limit",
-        "desc": "You have reached the maximum seat count limit. Please upgrade to get more seat quota.",
-        "remaining": "Your total seat quota is {total}, only have {count} seat remained.",
-        "runoutof": "Your have run out of your {total} seat quota.",
-        "upgrade": "@:{'subscription.upgrade'} to get more seat quota."
-      },
       "bb-feature-multi-tenancy": {
         "title": "Multi-tenancy",
         "desc": "Intelligent database management for tenants using identical schemas."
@@ -1773,10 +1800,6 @@
       "bb-feature-custom-approval": {
         "title": "Custom approval",
         "desc": "Configure security risk level and approval flow for different tasks."
-      },
-      "bb-feature-slow-query": {
-        "title": "Slow query",
-        "desc": "Logging and analyzing slow SQL queries."
       },
       "bb-feature-vcs-schema-write-back": {
         "title": "Schema write-back",
@@ -1837,6 +1860,10 @@
       "bb-feature-plugin-openai": {
         "title": "AI Augmentation",
         "desc": "AI augmented SQL Editor features powered by OpenAI."
+      },
+      "bb-feature-shared-sql-script": {
+        "title": "Shared SQL script",
+        "desc": "Share your SQL scripts with project teammates or make them public to all."
       }
     }
   },
@@ -1948,7 +1975,7 @@
       "created-ts": "Time",
       "created-time": "Created Time",
       "updated-time": "Updated Time",
-      "creator": "Creator",
+      "actor": "Actor",
       "type": "Audit Type",
       "level": "Audit Level",
       "comment": "Comment",
@@ -2223,7 +2250,12 @@
           "PROJECT_MEMBER": "Project Member"
         },
         "add": "Add node",
-        "delete": "Delete approval node"
+        "delete": "Delete approval node",
+        "select-approver": "Select approver",
+        "roles": {
+          "system": "System roles",
+          "custom": "Custom roles"
+        }
       },
       "presets": {
         "owner-dba": "The system defines the approval process, first the project Owner approves, then the DBA approves.",
@@ -2239,7 +2271,8 @@
     },
     "risk": {
       "self": "Risk",
-      "risk-center": "Risk Center"
+      "risk-center": "Risk Center",
+      "description": "Risk Center defines the risk levels for different database operations under different conditions. And risk levels determine the corresponding custom approval flows."
     },
     "workflow-center": {
       "workflow": "Workflow"
@@ -2275,6 +2308,30 @@
     "rows-examined": "Rows examined",
     "rows-sent": "Rows sent",
     "lock-time": "Lock time",
-    "query-time": "Query time"
+    "query-time": "Query time",
+    "attention-description": "Logging and analyzing slow queries for {versions}.\nBytebase will periodically sync slow query logs from instances.",
+    "sync-job-started": "Sync jobs started. Please wait for the jobs to complete.",
+    "detail": "Slow Query Detail"
+  },
+  "principal": {
+    "select": "Select user"
+  },
+  "role": {
+    "setting": {
+      "description": "Defining custom roles, and you may apply them to project members.",
+      "add": "Add role",
+      "edit": "Edit role",
+      "name-placeholder": "Input role name",
+      "description-placeholder": "Input role description",
+      "validation": {
+        "duplicated": "Duplicated {resource}",
+        "required": "{resource} is required",
+        "pattern": "{resource} can only contain lowercase letters, numbers, and hyphens. It must start with a lowercase letter.",
+        "max-length": "{resource} can contain up to {length} characters"
+      },
+      "delete": "Delete role"
+    },
+    "select": "Select role",
+    "select-roles": "Select roles"
   }
 }

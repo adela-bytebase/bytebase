@@ -9,7 +9,6 @@
     - [ActivityIssueCommentCreatePayload.ExternalApprovalEvent](#bytebase-store-ActivityIssueCommentCreatePayload-ExternalApprovalEvent)
     - [ActivityIssueCommentCreatePayload.TaskRollbackBy](#bytebase-store-ActivityIssueCommentCreatePayload-TaskRollbackBy)
     - [ActivityIssueCreatePayload](#bytebase-store-ActivityIssueCreatePayload)
-    - [ActivityPayload](#bytebase-store-ActivityPayload)
   
     - [ActivityIssueCommentCreatePayload.ApprovalEvent.Status](#bytebase-store-ActivityIssueCommentCreatePayload-ApprovalEvent-Status)
     - [ActivityIssueCommentCreatePayload.ExternalApprovalEvent.Action](#bytebase-store-ActivityIssueCommentCreatePayload-ExternalApprovalEvent-Action)
@@ -37,6 +36,7 @@
     - [DependentColumn](#bytebase-store-DependentColumn)
     - [ExtensionMetadata](#bytebase-store-ExtensionMetadata)
     - [ForeignKeyMetadata](#bytebase-store-ForeignKeyMetadata)
+    - [FunctionMetadata](#bytebase-store-FunctionMetadata)
     - [IndexMetadata](#bytebase-store-IndexMetadata)
     - [InstanceRoleMetadata](#bytebase-store-InstanceRoleMetadata)
     - [SchemaMetadata](#bytebase-store-SchemaMetadata)
@@ -57,9 +57,13 @@
   
 - [store/setting.proto](#store_setting-proto)
     - [AgentPluginSetting](#bytebase-store-AgentPluginSetting)
+    - [SMTPMailDeliverySetting](#bytebase-store-SMTPMailDeliverySetting)
     - [WorkspaceApprovalSetting](#bytebase-store-WorkspaceApprovalSetting)
     - [WorkspaceApprovalSetting.Rule](#bytebase-store-WorkspaceApprovalSetting-Rule)
     - [WorkspaceProfileSetting](#bytebase-store-WorkspaceProfileSetting)
+  
+    - [SMTPMailDeliverySetting.Authentication](#bytebase-store-SMTPMailDeliverySetting-Authentication)
+    - [SMTPMailDeliverySetting.Encryption](#bytebase-store-SMTPMailDeliverySetting-Encryption)
   
 - [store/slow_query.proto](#store_slow_query-proto)
     - [SlowQueryDetails](#bytebase-store-SlowQueryDetails)
@@ -167,22 +171,6 @@ convert to the expected struct there.
 
 
 
-
-<a name="bytebase-store-ActivityPayload"></a>
-
-### ActivityPayload
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| issue_create_payload | [ActivityIssueCreatePayload](#bytebase-store-ActivityIssueCreatePayload) |  |  |
-| issue_comment_create_payload | [ActivityIssueCommentCreatePayload](#bytebase-store-ActivityIssueCommentCreatePayload) |  |  |
-
-
-
-
-
  
 
 
@@ -263,6 +251,7 @@ convert to the expected struct there.
 | ----- | ---- | ----- | ----------- |
 | type | [ApprovalNode.Type](#bytebase-store-ApprovalNode-Type) |  |  |
 | group_value | [ApprovalNode.GroupValue](#bytebase-store-ApprovalNode-GroupValue) |  |  |
+| role | [string](#string) |  | Format: roles/{role} |
 
 
 
@@ -343,7 +332,6 @@ IssuePayloadApproval records the approval template used and the approval history
 <a name="bytebase-store-ApprovalNode-GroupValue"></a>
 
 ### ApprovalNode.GroupValue
-GroupValue is used if ApprovalNode Type is ANY_IN_GROUP
 The predefined user groups are:
 - WORKSPACE_OWNER
 - WORKSPACE_DBA
@@ -549,6 +537,22 @@ ForeignKeyMetadata is the metadata for foreign keys.
 
 
 
+<a name="bytebase-store-FunctionMetadata"></a>
+
+### FunctionMetadata
+FunctionMetadata is the metadata for functions.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name is the name of a view. |
+| definition | [string](#string) |  | The definition is the definition of a view. |
+
+
+
+
+
+
 <a name="bytebase-store-IndexMetadata"></a>
 
 ### IndexMetadata
@@ -598,6 +602,7 @@ This is the concept of schema in Postgres, but it&#39;s a no-op for MySQL.
 | name | [string](#string) |  | The name is the schema name. It is an empty string for databases without such concept such as MySQL. |
 | tables | [TableMetadata](#bytebase-store-TableMetadata) | repeated | The tables is the list of tables in a schema. |
 | views | [ViewMetadata](#bytebase-store-ViewMetadata) | repeated | The views is the list of views in a schema. |
+| functions | [FunctionMetadata](#bytebase-store-FunctionMetadata) | repeated | The functions is the list of functions in a schema. |
 
 
 
@@ -836,6 +841,30 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 
 
 
+<a name="bytebase-store-SMTPMailDeliverySetting"></a>
+
+### SMTPMailDeliverySetting
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| server | [string](#string) |  | The SMTP server address. |
+| port | [int32](#int32) |  | The SMTP server port. |
+| encryption | [SMTPMailDeliverySetting.Encryption](#bytebase-store-SMTPMailDeliverySetting-Encryption) |  | The SMTP server encryption. |
+| ca | [string](#string) |  | The CA, KEY, and CERT for the SMTP server. |
+| key | [string](#string) |  |  |
+| cert | [string](#string) |  |  |
+| authentication | [SMTPMailDeliverySetting.Authentication](#bytebase-store-SMTPMailDeliverySetting-Authentication) |  |  |
+| username | [string](#string) |  |  |
+| password | [string](#string) |  |  |
+| from | [string](#string) |  | The sender email address. |
+
+
+
+
+
+
 <a name="bytebase-store-WorkspaceApprovalSetting"></a>
 
 ### WorkspaceApprovalSetting
@@ -888,6 +917,35 @@ The external URL is used for: 1. Constructing the correct callback URL when conf
 
  
 
+
+<a name="bytebase-store-SMTPMailDeliverySetting-Authentication"></a>
+
+### SMTPMailDeliverySetting.Authentication
+We support four types of SMTP authentication: NONE, PLAIN, LOGIN, and CRAM-MD5.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| AUTHENTICATION_UNSPECIFIED | 0 |  |
+| AUTHENTICATION_NONE | 1 |  |
+| AUTHENTICATION_PLAIN | 2 |  |
+| AUTHENTICATION_LOGIN | 3 |  |
+| AUTHENTICATION_CRAM_MD5 | 4 |  |
+
+
+
+<a name="bytebase-store-SMTPMailDeliverySetting-Encryption"></a>
+
+### SMTPMailDeliverySetting.Encryption
+We support three types of SMTP encryption: NONE, STARTTLS, and SSL/TLS.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ENCRYPTION_UNSPECIFIED | 0 |  |
+| ENCRYPTION_NONE | 1 |  |
+| ENCRYPTION_STARTTLS | 2 |  |
+| ENCRYPTION_SSL_TLS | 3 |  |
+
+
  
 
  
@@ -914,8 +972,8 @@ SlowQueryDetails is the details of a slow query.
 | start_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | start_time is the start time of the slow query. |
 | query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | query_time is the query time of the slow query. |
 | lock_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | lock_time is the lock time of the slow query. |
-| rows_sent | [int32](#int32) |  | rows_sent is the number of rows sent by the slow query. |
-| rows_examined | [int32](#int32) |  | rows_examined is the number of rows examined by the slow query. |
+| rows_sent | [int64](#int64) |  | rows_sent is the number of rows sent by the slow query. |
+| rows_examined | [int64](#int64) |  | rows_examined is the number of rows examined by the slow query. |
 | sql_text | [string](#string) |  | sql_text is the SQL text of the slow query. |
 
 
@@ -947,8 +1005,14 @@ SlowQueryStatisticsItem is the item of slow query statistics.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | sql_fingerprint | [string](#string) |  | sql_fingerprint is the fingerprint of the slow query. |
-| count | [int32](#int32) |  | count is the number of slow queries with the same fingerprint. |
+| count | [int64](#int64) |  | count is the number of slow queries with the same fingerprint. |
 | latest_log_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | latest_log_time is the time of the latest slow query with the same fingerprint. |
+| total_query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The total query time of the slow query log. |
+| maximum_query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The maximum query time of the slow query log. |
+| total_rows_sent | [int64](#int64) |  | The total rows sent of the slow query log. |
+| maximum_rows_sent | [int64](#int64) |  | The maximum rows sent of the slow query log. |
+| total_rows_examined | [int64](#int64) |  | The total rows examined of the slow query log. |
+| maximum_rows_examined | [int64](#int64) |  | The maximum rows examined of the slow query log. |
 | samples | [SlowQueryDetails](#bytebase-store-SlowQueryDetails) | repeated | samples are the details of the sample slow queries with the same fingerprint. |
 
 

@@ -393,10 +393,13 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 
 			sensitiveSchemaInfo, err = s.getSensitiveSchemaInfo(ctx, instance, databaseList, exec.DatabaseName)
 			if err != nil {
-				return err
+				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to get sensitive schema info: %s", exec.Statement)).SetInternal(err)
 			}
 		case db.Postgres:
 			sensitiveSchemaInfo, err = s.getSensitiveSchemaInfo(ctx, instance, []string{exec.DatabaseName}, exec.DatabaseName)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to get sensitive schema info: %s", exec.Statement)).SetInternal(err)
+			}
 		}
 
 		start := time.Now().UnixNano()
@@ -672,7 +675,7 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 				}
 			} else {
 				if err := util.ApplyMultiStatements(strings.NewReader(exec.Statement), func(statement string) error {
-					rowSet, err := driver.QueryConn(ctx, conn, exec.Statement, &db.QueryContext{
+					rowSet, err := driver.QueryConn(ctx, conn, statement, &db.QueryContext{
 						Limit:               exec.Limit,
 						ReadOnly:            false,
 						CurrentDatabase:     exec.DatabaseName,
@@ -931,6 +934,11 @@ func (s *Server) getSensitiveSchemaInfo(ctx context.Context, instance *store.Ins
 		if err != nil {
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to find sensitive data policy for database %q in instance %q", databaseName, instance.Title))
 		}
+		if len(policy.SensitiveDataList) == 0 {
+			// If there is no sensitive data policy, return nil to skip mask sensitive data.
+			return nil, nil
+		}
+
 		for _, data := range policy.SensitiveDataList {
 			columnMap[api.SensitiveData{
 				Schema: data.Schema,

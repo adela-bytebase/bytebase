@@ -6,7 +6,7 @@
       :database-list="databaseList"
     />
   </template>
-  <template v-else-if="hash === 'databases'">
+  <template v-if="hash === 'databases'">
     <ProjectDeploymentConfigPanel
       v-if="isTenantProject"
       id="deployment-config"
@@ -27,24 +27,27 @@
       :database-list="databaseList"
     />
   </template>
+  <template v-if="hash === 'slow-query'">
+    <ProjectSlowQueryPanel :project="project" />
+  </template>
   <template v-if="hash === 'activity'">
     <ProjectActivityPanel id="activity" :project="project" />
   </template>
-  <template v-else-if="hash === 'gitops'">
+  <template v-if="hash === 'gitops'">
     <ProjectVersionControlPanel
       id="gitops"
       :project="project"
       :allow-edit="allowEdit"
     />
   </template>
-  <template v-else-if="hash === 'webhook'">
+  <template v-if="hash === 'webhook'">
     <ProjectWebhookPanel
       id="webhook"
       :project="project"
       :allow-edit="allowEdit"
     />
   </template>
-  <template v-else-if="hash === 'setting'">
+  <template v-if="project.id !== DEFAULT_PROJECT_ID && hash === 'setting'">
     <ProjectSettingPanel
       id="setting"
       :project="project"
@@ -55,17 +58,20 @@
 
 <script lang="ts">
 import { computed, defineComponent, watchEffect } from "vue";
+import { cloneDeep } from "lodash-es";
+import { useRoute } from "vue-router";
+
+import { DEFAULT_PROJECT_ID } from "@/types";
 import { idFromSlug, sortDatabaseList } from "../utils";
 import ProjectActivityPanel from "../components/ProjectActivityPanel.vue";
 import ProjectMigrationHistoryPanel from "../components/ProjectMigrationHistoryPanel.vue";
+import ProjectSlowQueryPanel from "../components/ProjectSlowQueryPanel.vue";
 import ProjectOverviewPanel from "../components/ProjectOverviewPanel.vue";
 import ProjectDatabasesPanel from "../components/ProjectDatabasesPanel.vue";
 import ProjectVersionControlPanel from "../components/ProjectVersionControlPanel.vue";
 import ProjectWebhookPanel from "../components/ProjectWebhookPanel.vue";
 import ProjectSettingPanel from "../components/ProjectSettingPanel.vue";
 import ProjectDeploymentConfigPanel from "../components/ProjectDeploymentConfigPanel.vue";
-import { cloneDeep } from "lodash-es";
-import { useRoute } from "vue-router";
 import { useDatabaseStore, useEnvironmentList, useProjectStore } from "@/store";
 
 export default defineComponent({
@@ -73,6 +79,7 @@ export default defineComponent({
   components: {
     ProjectActivityPanel,
     ProjectMigrationHistoryPanel,
+    ProjectSlowQueryPanel,
     ProjectOverviewPanel,
     ProjectVersionControlPanel,
     ProjectWebhookPanel,
@@ -127,6 +134,7 @@ export default defineComponent({
     });
 
     return {
+      DEFAULT_PROJECT_ID,
       hash,
       project,
       databaseList,

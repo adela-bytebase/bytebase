@@ -1,5 +1,7 @@
-import { ProjectRoleType, RoleType } from "../types";
-import { hasFeature } from "@/store";
+import { computed, unref } from "vue";
+import { MaybeRef, ProjectRoleType, RoleType } from "../types";
+import { hasFeature, useCurrentUser } from "@/store";
+import { t, te } from "@/plugins/i18n";
 
 export type WorkspacePermissionType =
   | "bb.permission.workspace.debug"
@@ -27,7 +29,8 @@ export type WorkspacePermissionType =
   | "bb.permission.workspace.admin-sql-editor"
   // Can view sensitive information such as audit logs and debug logs
   | "bb.permission.workspace.audit-log"
-  | "bb.permission.workspace.debug-log";
+  | "bb.permission.workspace.debug-log"
+  | "bb.permission.workspace.manage-mail-delivery";
 
 // A map from a particular workspace permission to the respective enablement of a particular workspace role.
 // The key is the workspace permission type and the value is the workspace [DEVELOPER, DBA, OWNER] triplet.
@@ -56,6 +59,7 @@ export const WORKSPACE_PERMISSION_MATRIX: Map<
   ["bb.permission.workspace.admin-sql-editor", [false, true, true]],
   ["bb.permission.workspace.audit-log", [false, true, true]],
   ["bb.permission.workspace.debug-log", [false, true, true]],
+  ["bb.permission.workspace.manage-mail-delivery", [false, false, true]],
 ]);
 
 // Returns true if RBAC is not enabled or the particular role has the particular permission.
@@ -75,6 +79,15 @@ export function hasWorkspacePermission(
       return WORKSPACE_PERMISSION_MATRIX.get(permission)![2];
   }
 }
+
+export const useWorkspacePermission = (
+  permission: MaybeRef<WorkspacePermissionType>
+) => {
+  const user = useCurrentUser();
+  return computed(() => {
+    return hasWorkspacePermission(unref(permission), user.value.role);
+  });
+};
 
 export type ProjectPermissionType =
   | "bb.permission.project.manage-general"
@@ -121,21 +134,22 @@ export function hasProjectPermission(
     case "OWNER":
       return PROJECT_PERMISSION_MATRIX.get(permission)![1];
   }
+  return false;
 }
 
 // Returns true if admin feature is NOT supported or the principal is OWNER
 export function isOwner(role: RoleType): boolean {
-  return !hasFeature("bb.feature.rbac") || role == "OWNER";
+  return !hasFeature("bb.feature.rbac") || role === "OWNER";
 }
 
 // Returns true if admin feature is NOT supported or the principal is DBA
 export function isDBA(role: RoleType): boolean {
-  return !hasFeature("bb.feature.rbac") || role == "DBA";
+  return !hasFeature("bb.feature.rbac") || role === "DBA";
 }
 
 // Returns true if admin feature is NOT supported or the principal is DEVELOPER
 export function isDeveloper(role: RoleType): boolean {
-  return !hasFeature("bb.feature.rbac") || role == "DEVELOPER";
+  return !hasFeature("bb.feature.rbac") || role === "DEVELOPER";
 }
 
 export function roleName(role: RoleType): string {
@@ -157,4 +171,20 @@ export function projectRoleName(role: ProjectRoleType): string {
     case "DEVELOPER":
       return "Developer";
   }
+  return role;
 }
+
+export const extractRoleResourceName = (resourceId: string): string => {
+  const pattern = /(?:^|\/)roles\/([^/]+)(?:$|\/)/;
+  const matches = resourceId.match(pattern);
+  return matches?.[1] ?? "";
+};
+
+export const roleNameText = (name: string): string => {
+  const keypath = `common.role.${name.toLowerCase()}`;
+
+  if (te(keypath)) {
+    return t(keypath);
+  }
+  return name;
+};

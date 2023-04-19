@@ -27,11 +27,7 @@
     :responsive="false"
     :tab-item-list="tabItemList"
     :selected-index="state.selectedIndex"
-    @select-index="
-      (index: number) => {
-        selectTab(index);
-      }
-    "
+    @select-index="selectTab"
   />
 
   <div class="py-6 px-6">
@@ -46,10 +42,12 @@
 <script lang="ts">
 import { computed, defineComponent, reactive, watch } from "vue";
 import { useRouter } from "vue-router";
+import { startCase } from "lodash-es";
+
 import {
   idFromSlug,
-  hasProjectPermission,
   hasWorkspacePermission,
+  hasPermissionInProject,
 } from "../utils";
 import ArchiveBanner from "../components/ArchiveBanner.vue";
 import { BBTabFilterItem } from "../bbkit/types";
@@ -92,6 +90,10 @@ export default defineComponent({
       return projectStore.getProjectById(idFromSlug(props.projectSlug));
     });
 
+    const isDefaultProject = computed((): boolean => {
+      return project.value.id === DEFAULT_PROJECT_ID;
+    });
+
     const isTenantProject = computed((): boolean => {
       return project.value.tenantMode === "TENANT";
     });
@@ -105,10 +107,14 @@ export default defineComponent({
           ? null // Hide "Change History" tab for tenant projects
           : { name: t("common.change-history"), hash: "change-history" },
 
+        { name: startCase(t("slow-query.slow-queries")), hash: "slow-query" },
+
         { name: t("common.activities"), hash: "activity" },
         { name: t("common.gitops"), hash: "gitops" },
         { name: t("common.webhooks"), hash: "webhook" },
-        { name: t("common.settings"), hash: "setting" },
+        isDefaultProject.value
+          ? null
+          : { name: t("common.settings"), hash: "setting" },
       ];
       const filteredList = list.filter(
         (item) => item !== null
@@ -147,17 +153,14 @@ export default defineComponent({
         return true;
       }
 
-      for (const member of project.value.memberList) {
-        if (member.principal.id == currentUser.value.id) {
-          if (
-            hasProjectPermission(
-              "bb.permission.project.manage-general",
-              member.role
-            )
-          ) {
-            return true;
-          }
-        }
+      if (
+        hasPermissionInProject(
+          project.value,
+          currentUser.value,
+          "bb.permission.project.manage-general"
+        )
+      ) {
+        return true;
       }
       return false;
     });

@@ -17,13 +17,6 @@ export const useSubscriptionStore = defineStore("subscription", {
     trialingDays: 14,
   }),
   getters: {
-    seatCount(state): number {
-      const count = state.subscription?.seat ?? 0;
-      if (count <= 0) {
-        return Number.MAX_VALUE;
-      }
-      return count;
-    },
     instanceCount(state): number {
       const count = state.subscription?.instanceCount ?? 0;
       if (count <= 0) {
@@ -124,7 +117,7 @@ export const useSubscriptionStore = defineStore("subscription", {
 
       for (let i = 0; i < matrix.length; i++) {
         if (matrix[i]) {
-          return i as PlanType;
+          return (i + 1) as PlanType;
         }
       }
       return PlanType.FREE;
@@ -180,7 +173,6 @@ export const useSubscriptionStore = defineStore("subscription", {
         {
           plan: planType,
           days: this.trialingDays,
-          seat: 10,
           instanceCount: -1,
         }
       );

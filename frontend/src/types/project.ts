@@ -1,11 +1,13 @@
 import { RowStatus } from "./common";
-import { MemberId, PrincipalId, ProjectId, ResourceId } from "./id";
+import { MemberId, ProjectId, ResourceId } from "./id";
 import { OAuthToken } from "./oauth";
 import { Principal } from "./principal";
 import { ExternalRepositoryInfo, RepositoryConfig } from "./repository";
 import { VCS } from "./vcs";
 
-export type ProjectRoleType = "OWNER" | "DEVELOPER";
+export type ProjectRoleType = "OWNER" | "DEVELOPER" | string;
+export const ProjectRoleTypeOwner: ProjectRoleType = "OWNER";
+export const ProjectRoleTypeDeveloper: ProjectRoleType = "DEVELOPER";
 
 export type ProjectWorkflowType = "UI" | "VCS";
 
@@ -68,17 +70,6 @@ export type ProjectMember = {
   // Domain specific fields
   role: ProjectRoleType;
   principal: Principal;
-};
-
-export type ProjectMemberCreate = {
-  // Domain specific fields
-  principalId: PrincipalId;
-  role: ProjectRoleType;
-};
-
-export type ProjectMemberPatch = {
-  // Domain specific fields
-  role: ProjectRoleType;
 };
 
 export type ProjectRepositoryConfig = {

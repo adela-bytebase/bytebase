@@ -53,7 +53,7 @@
 
               <div
                 :class="[
-                  'text-gray-600 h-12',
+                  'mt-2 text-gray-600 h-12',
                   plan.type == PlanType.TEAM ? 'font-bold' : '',
                 ]"
               >
@@ -321,8 +321,8 @@ const plans = computed((): LocalPlan[] => {
     pricing:
       plan.type === PlanType.ENTERPRISE
         ? t("subscription.contact-us")
-        : `$${plan.unitPrice}`,
-    pricePrefix: plan.type === PlanType.TEAM ? t("subscription.start-at") : "",
+        : `$${plan.pricePerInstancePerMonth}`,
+    pricePrefix: "",
     priceSuffix:
       plan.type === PlanType.TEAM
         ? t("subscription.price-unit-for-team")
@@ -356,7 +356,7 @@ const onButtonClick = (plan: Plan) => {
     );
   } else if (plan.type === PlanType.ENTERPRISE) {
     window.open(
-      "mailto:support@bytebase.com?subject=Request for enterprise plan&body=Hi Bytebase team,%0D%0A%0D%0AI would like to request for an enterprise plan. Please contact me at [your email].%0D%0A%0D%0AThanks"
+      "https://docs.google.com/forms/d/e/1FAIpQLSfe1JvroV4ckBMJo8hDXBYGeuzN0Sn1Ylg1lIUamN2jqu9Fcw/viewform"
     );
   } else {
     window.open("https://bytebase.com/docs?source=console", "_self");

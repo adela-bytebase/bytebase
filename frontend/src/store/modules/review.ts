@@ -1,18 +1,19 @@
 import { defineStore } from "pinia";
+import { ref } from "vue";
+import { uniq, uniqBy } from "lodash-es";
 
-import { Issue } from "@/types";
+import { Issue, ProjectRoleTypeDeveloper, ProjectRoleTypeOwner } from "@/types";
 import {
   Review,
   ApprovalStep,
   ApprovalNode_Type,
   ApprovalNode_GroupValue,
 } from "@/types/proto/v1/review_service";
-import { ref } from "vue";
 import { extractUserEmail, useUserStore } from "./user";
 import { useMemberStore } from "./member";
-import { uniq, uniqBy } from "lodash-es";
 import { reviewServiceClient } from "@/grpcweb";
 import { User } from "@/types/proto/v1/auth_service";
+import { extractRoleResourceName } from "@/utils";
 
 const reviewName = (issue: Issue) => {
   return `projects/${issue.project.id}/reviews/${issue.id}`;
@@ -99,29 +100,56 @@ const fetchReviewApproversAndCandidates = async (
 
 export const candidatesOfApprovalStep = (issue: Issue, step: ApprovalStep) => {
   const memberStore = useMemberStore();
+  const workspaceMemberList = memberStore.memberList.filter(
+    (member) => member.principal.type === "END_USER"
+  );
+  const projectMemberList = issue.project.memberList.filter(
+    (member) => member.principal.type === "END_USER"
+  );
 
   const candidates = step.nodes.flatMap((node) => {
-    const { type, groupValue } = node;
+    const {
+      type,
+      groupValue = ApprovalNode_GroupValue.UNRECOGNIZED,
+      role,
+    } = node;
     if (type !== ApprovalNode_Type.ANY_IN_GROUP) return [];
-    if (groupValue === ApprovalNode_GroupValue.PROJECT_MEMBER) {
+
+    const candidatesForSystemRoles = (groupValue: ApprovalNode_GroupValue) => {
+      if (groupValue === ApprovalNode_GroupValue.PROJECT_MEMBER) {
+        return projectMemberList
+          .filter((member) => member.role === ProjectRoleTypeDeveloper)
+          .map((member) => member.principal);
+      }
+      if (groupValue === ApprovalNode_GroupValue.PROJECT_OWNER) {
+        return projectMemberList
+          .filter((member) => member.role === ProjectRoleTypeOwner)
+          .map((member) => member.principal);
+      }
+      if (groupValue === ApprovalNode_GroupValue.WORKSPACE_DBA) {
+        return workspaceMemberList
+          .filter((member) => member.role === "DBA")
+          .map((member) => member.principal);
+      }
+      if (groupValue === ApprovalNode_GroupValue.WORKSPACE_OWNER) {
+        return workspaceMemberList
+          .filter((member) => member.role === "OWNER")
+          .map((member) => member.principal);
+      }
+      return [];
+    };
+    const candidatesForCustomRoles = (role: string) => {
+      const roleName = extractRoleResourceName(role);
       return issue.project.memberList
-        .filter((member) => member.role === "DEVELOPER")
+        .filter((member) => member.role === roleName)
         .map((member) => member.principal);
+    };
+
+    if (groupValue !== ApprovalNode_GroupValue.UNRECOGNIZED) {
+      return candidatesForSystemRoles(groupValue);
     }
-    if (groupValue === ApprovalNode_GroupValue.PROJECT_OWNER) {
-      return issue.project.memberList
-        .filter((member) => member.role === "OWNER")
-        .map((member) => member.principal);
-    }
-    if (groupValue === ApprovalNode_GroupValue.WORKSPACE_DBA) {
-      return memberStore.memberList
-        .filter((member) => member.role === "DBA")
-        .map((member) => member.principal);
-    }
-    if (groupValue === ApprovalNode_GroupValue.WORKSPACE_OWNER) {
-      return memberStore.memberList
-        .filter((member) => member.role === "OWNER")
-        .map((member) => member.principal);
+    if (role) {
+      return candidatesForCustomRoles(role);
     }
     return [];
   });

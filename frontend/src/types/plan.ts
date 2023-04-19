@@ -1,6 +1,9 @@
 import { useI18n } from "vue-i18n";
 import planData from "./plan.yaml";
-import { PlanType } from "@/types/proto/v1/subscription_service";
+import {
+  PlanType,
+  planTypeFromJSON,
+} from "@/types/proto/v1/subscription_service";
 
 // Check api/plan.go to understand what each feature means.
 export type FeatureType =
@@ -37,7 +40,8 @@ export type FeatureType =
   | "bb.feature.sensitive-data"
   | "bb.feature.access-control"
   | "bb.feature.custom-approval"
-  | "bb.feature.slow-query"
+  // Collaboration
+  | "bb.feature.shared-sql-script"
   // Plugins
   | "bb.feature.plugin.openai";
 
@@ -68,10 +72,10 @@ export interface Plan {
   // Plan meta data
   type: PlanType;
   trialDays: number;
-  unitPrice: number;
   trialPrice: number;
-  freeInstanceCount: number;
+  unitPrice: number;
   pricePerSeatPerMonth: number;
+  pricePerInstancePerMonth: number;
   // Plan desc and feature
   title: string;
   featureList: PlanFeature[];
@@ -80,7 +84,10 @@ export interface Plan {
 export const FEATURE_SECTIONS: { type: string; featureList: string[] }[] =
   planData.categoryList;
 
-export const PLANS: Plan[] = planData.planList;
+export const PLANS: Plan[] = planData.planList.map((raw: Plan) => ({
+  ...raw,
+  type: planTypeFromJSON(raw.type + 1),
+}));
 
 export const getFeatureLocalization = (feature: PlanFeature): PlanFeature => {
   const { t } = useI18n();

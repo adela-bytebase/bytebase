@@ -13,10 +13,11 @@
 </template>
 
 <script lang="ts" setup>
+import { computed } from "vue";
+
 import type { Environment } from "@/types";
 import { environmentName, environmentSlug } from "@/utils";
 import ProductionEnvironmentIcon from "@/components/Environment/ProductionEnvironmentIcon.vue";
-import { computed } from "vue";
 
 const props = withDefaults(
   defineProps<{
@@ -34,6 +35,8 @@ const bindings = computed(() => {
   if (props.link) {
     return {
       to: `/environment/${environmentSlug(props.environment)}`,
+      activeClass: "",
+      exactActiveClass: "",
       onClick: (e: MouseEvent) => {
         e.stopPropagation();
       },

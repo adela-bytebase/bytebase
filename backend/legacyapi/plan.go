@@ -156,8 +156,13 @@ const (
 	// FeatureCustomApproval enables custom risk level definition and custom
 	// approval chain definition.
 	FeatureCustomApproval FeatureType = "bb.feature.custom-approval"
-	// FeatureSlowQuery enables slow query logging and analyzing.
-	FeatureSlowQuery FeatureType = "bb.feature.slow-query"
+
+	// Collaboration.
+
+	// FeatureSharedSQLScript enables sharing sql script.
+	FeatureSharedSQLScript FeatureType = "bb.feature.shared-sql-script"
+
+	// Plugins.
 
 	// FeaturePluginOpenAI enables AI features powered by OpenAI.
 	FeaturePluginOpenAI FeatureType = "bb.feature.plugin.openai"
@@ -224,8 +229,9 @@ func (e FeatureType) Name() string {
 		return "Access Control"
 	case FeatureCustomApproval:
 		return "Custom Approval"
-	case FeatureSlowQuery:
-		return "Slow Query"
+	// Collaboration
+	case FeatureSharedSQLScript:
+		return "Shared SQL script"
 	// Plugins
 	case FeaturePluginOpenAI:
 		return "OpenAI"
@@ -256,7 +262,7 @@ var FeatureMatrix = map[FeatureType][3]bool{
 	// Admin & Security
 	FeatureSSO:       {false, false, true},
 	Feature2FA:       {false, false, true},
-	FeatureRBAC:      {false, true, true},
+	FeatureRBAC:      {true, true, true},
 	FeatureWatermark: {false, false, true},
 	FeatureAuditLog:  {false, false, true},
 	// Branding
@@ -268,16 +274,16 @@ var FeatureMatrix = map[FeatureType][3]bool{
 	FeatureMultiTenancy:     {false, false, true},
 	FeatureOnlineMigration:  {false, true, true},
 	FeatureSchemaDrift:      {false, false, true},
-	FeatureSQLReview:        {false, true, true},
+	FeatureSQLReview:        {true, true, true},
 	FeatureTaskScheduleTime: {false, true, true},
 	// VCS Integration
-	FeatureVCSSchemaWriteBack:   {false, false, true},
-	FeatureVCSSheetSync:         {false, false, true},
-	FeatureVCSSQLReviewWorkflow: {false, false, true},
+	FeatureVCSSchemaWriteBack:   {false, true, true},
+	FeatureVCSSheetSync:         {false, true, true},
+	FeatureVCSSQLReviewWorkflow: {true, true, true},
 	// Database management
 	FeaturePITR:                  {false, true, true},
 	FeatureReadReplicaConnection: {false, false, true},
-	FeatureSyncSchemaAllVersions: {false, false, true},
+	FeatureSyncSchemaAllVersions: {false, true, true},
 	// Policy Control
 	FeatureApprovalPolicy:        {false, true, true},
 	FeatureBackupPolicy:          {false, true, true},
@@ -285,7 +291,8 @@ var FeatureMatrix = map[FeatureType][3]bool{
 	FeatureSensitiveData:         {false, false, true},
 	FeatureAccessControl:         {false, false, true},
 	FeatureCustomApproval:        {false, false, true},
-	FeatureSlowQuery:             {false, false, true},
+	// Collaboration
+	FeatureSharedSQLScript: {false, true, true},
 	// Plugins
 	FeaturePluginOpenAI: {false, false, true},
 }

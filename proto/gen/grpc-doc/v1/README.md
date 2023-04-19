@@ -74,6 +74,7 @@
     - [DependentColumn](#bytebase-v1-DependentColumn)
     - [ExtensionMetadata](#bytebase-v1-ExtensionMetadata)
     - [ForeignKeyMetadata](#bytebase-v1-ForeignKeyMetadata)
+    - [FunctionMetadata](#bytebase-v1-FunctionMetadata)
     - [GetBackupSettingRequest](#bytebase-v1-GetBackupSettingRequest)
     - [GetDatabaseMetadataRequest](#bytebase-v1-GetDatabaseMetadataRequest)
     - [GetDatabaseRequest](#bytebase-v1-GetDatabaseRequest)
@@ -157,14 +158,14 @@
     - [IdentityProviderService](#bytebase-v1-IdentityProviderService)
   
 - [v1/instance_role_service.proto](#v1_instance_role_service-proto)
-    - [CreateRoleRequest](#bytebase-v1-CreateRoleRequest)
-    - [DeleteRoleRequest](#bytebase-v1-DeleteRoleRequest)
-    - [GetRoleRequest](#bytebase-v1-GetRoleRequest)
+    - [CreateInstanceRoleRequest](#bytebase-v1-CreateInstanceRoleRequest)
+    - [DeleteInstanceRoleRequest](#bytebase-v1-DeleteInstanceRoleRequest)
+    - [GetInstanceRoleRequest](#bytebase-v1-GetInstanceRoleRequest)
     - [InstanceRole](#bytebase-v1-InstanceRole)
-    - [ListRolesRequest](#bytebase-v1-ListRolesRequest)
-    - [ListRolesResponse](#bytebase-v1-ListRolesResponse)
-    - [UndeleteRoleRequest](#bytebase-v1-UndeleteRoleRequest)
-    - [UpdateRoleRequest](#bytebase-v1-UpdateRoleRequest)
+    - [ListInstanceRolesRequest](#bytebase-v1-ListInstanceRolesRequest)
+    - [ListInstanceRolesResponse](#bytebase-v1-ListInstanceRolesResponse)
+    - [UndeleteInstanceRoleRequest](#bytebase-v1-UndeleteInstanceRoleRequest)
+    - [UpdateInstanceRoleRequest](#bytebase-v1-UpdateInstanceRoleRequest)
   
     - [InstanceRoleService](#bytebase-v1-InstanceRoleService)
   
@@ -178,6 +179,7 @@
     - [ListInstancesRequest](#bytebase-v1-ListInstancesRequest)
     - [ListInstancesResponse](#bytebase-v1-ListInstancesResponse)
     - [RemoveDataSourceRequest](#bytebase-v1-RemoveDataSourceRequest)
+    - [SyncSlowQueriesRequest](#bytebase-v1-SyncSlowQueriesRequest)
     - [UndeleteInstanceRequest](#bytebase-v1-UndeleteInstanceRequest)
     - [UpdateDataSourceRequest](#bytebase-v1-UpdateDataSourceRequest)
     - [UpdateInstanceRequest](#bytebase-v1-UpdateInstanceRequest)
@@ -256,7 +258,6 @@
   
     - [Activity.Type](#bytebase-v1-Activity-Type)
     - [OperatorType](#bytebase-v1-OperatorType)
-    - [ProjectRole](#bytebase-v1-ProjectRole)
     - [SchemaChange](#bytebase-v1-SchemaChange)
     - [SchemaVersion](#bytebase-v1-SchemaVersion)
     - [TenantMode](#bytebase-v1-TenantMode)
@@ -301,12 +302,26 @@
   
     - [RiskService](#bytebase-v1-RiskService)
   
+- [v1/role_service.proto](#v1_role_service-proto)
+    - [CreateRoleRequest](#bytebase-v1-CreateRoleRequest)
+    - [DeleteRoleRequest](#bytebase-v1-DeleteRoleRequest)
+    - [ListRolesRequest](#bytebase-v1-ListRolesRequest)
+    - [ListRolesResponse](#bytebase-v1-ListRolesResponse)
+    - [Role](#bytebase-v1-Role)
+    - [UpdateRoleRequest](#bytebase-v1-UpdateRoleRequest)
+  
+    - [RoleService](#bytebase-v1-RoleService)
+  
 - [v1/setting_service.proto](#v1_setting_service-proto)
     - [GetSettingRequest](#bytebase-v1-GetSettingRequest)
     - [GetSettingResponse](#bytebase-v1-GetSettingResponse)
+    - [SMTPMailDeliverySettingValue](#bytebase-v1-SMTPMailDeliverySettingValue)
     - [SetSettingRequest](#bytebase-v1-SetSettingRequest)
     - [Setting](#bytebase-v1-Setting)
     - [Value](#bytebase-v1-Value)
+  
+    - [SMTPMailDeliverySettingValue.Authentication](#bytebase-v1-SMTPMailDeliverySettingValue-Authentication)
+    - [SMTPMailDeliverySettingValue.Encryption](#bytebase-v1-SMTPMailDeliverySettingValue-Encryption)
   
     - [SettingService](#bytebase-v1-SettingService)
   
@@ -360,6 +375,7 @@ Actuator concept is similar to the Spring Boot Actuator.
 | disallow_signup | [bool](#bool) |  | disallow_signup is the flag to disable self-service signup. |
 | last_active_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | last_active_time is the service last active time in UTC Time Format, any API calls will refresh this value. |
 | require_2fa | [bool](#bool) |  | require_2fa is the flag to require 2FA for all users. |
+| workspace_id | [string](#string) |  | workspace_id is the identifier for the workspace. |
 
 
 
@@ -1321,6 +1337,22 @@ ForeignKeyMetadata is the metadata for foreign keys.
 
 
 
+<a name="bytebase-v1-FunctionMetadata"></a>
+
+### FunctionMetadata
+FunctionMetadata is the metadata for functions.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name is the name of a view. |
+| definition | [string](#string) |  | The definition is the definition of a view. |
+
+
+
+
+
+
 <a name="bytebase-v1-GetBackupSettingRequest"></a>
 
 ### GetBackupSettingRequest
@@ -1483,7 +1515,7 @@ ListSlowQueriesRequest is the request of listing slow query.
 | ----- | ---- | ----- | ----------- |
 | parent | [string](#string) |  | Format: environments/{environment}/instances/{instance}/databases/{database} |
 | filter | [string](#string) |  | The filter of the slow query log. follow the [ebnf](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form) syntax. Support filter by project and start_time in SlowQueryDetails for now. For example: Search the slow query log of the specific project: - the specific project: project = &#34;projects/{project}&#34; Search the slow query log that start_time after 2022-01-01T12:00:00.000Z: - start_time &gt; &#34;2022-01-01T12:00:00.000Z&#34; - Should use [RFC-3339 format](https://www.rfc-editor.org/rfc/rfc3339). - Currently we only support filtering down to date granularity. |
-| order_by | [string](#string) |  | The order by of the slow query log. Support order by count, latest_log_time, average_query_time, nighty_fifth_percentile_query_time, average_rows_sent, nighty_fifth_percentile_rows_sent, average_rows_examined, nighty_fifth_percentile_rows_examined for now. For example: - order by count: order_by = &#34;count&#34; - order by latest_log_time desc: order_by = &#34;latest_log_time desc&#34; Default: order by nighty_fifth_percentile_query_time desc. |
+| order_by | [string](#string) |  | The order by of the slow query log. Support order by count, latest_log_time, average_query_time, maximum_query_time, average_rows_sent, maximum_rows_sent, average_rows_examined, maximum_rows_examined for now. For example: - order by count: order_by = &#34;count&#34; - order by latest_log_time desc: order_by = &#34;latest_log_time desc&#34; Default: order by average_query_time desc. |
 
 
 
@@ -1517,6 +1549,7 @@ This is the concept of schema in Postgres, but it&#39;s a no-op for MySQL.
 | name | [string](#string) |  | The name is the schema name. It is an empty string for databases without such concept such as MySQL. |
 | tables | [TableMetadata](#bytebase-v1-TableMetadata) | repeated | The tables is the list of tables in a schema. |
 | views | [ViewMetadata](#bytebase-v1-ViewMetadata) | repeated | The views is the list of views in a schema. |
+| functions | [FunctionMetadata](#bytebase-v1-FunctionMetadata) | repeated | The functions is the list of functions in a schema. |
 
 
 
@@ -1534,8 +1567,8 @@ SlowQueryDetails is the details of the slow query log.
 | start_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | The start time of the slow query log. |
 | query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The query time of the slow query log. |
 | lock_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The lock time of the slow query log. |
-| rows_sent | [int32](#int32) |  | The rows sent of the slow query log. |
-| rows_examined | [int32](#int32) |  | The rows examined of the slow query log. |
+| rows_sent | [int64](#int64) |  | The rows sent of the slow query log. |
+| rows_examined | [int64](#int64) |  | The rows examined of the slow query log. |
 | sql_text | [string](#string) |  | The sql text of the slow query log. |
 
 
@@ -1569,14 +1602,14 @@ SlowQueryStatistics is the statistics of the slow query log.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | sql_fingerprint | [string](#string) |  | The fingerprint of the slow query log. |
-| count | [int32](#int32) |  | The count of the slow query log. |
+| count | [int64](#int64) |  | The count of the slow query log. |
 | latest_log_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | The latest log time of the slow query log. |
 | average_query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The average query time of the slow query log. |
-| nighty_fifth_percentile_query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The nighty fifth percentile query time of the slow query log. |
-| average_rows_sent | [int32](#int32) |  | The average rows sent of the slow query log. |
-| nighty_fifth_percentile_rows_sent | [int32](#int32) |  | The nighty fifth percentile rows sent of the slow query log. |
-| average_rows_examined | [int32](#int32) |  | The average rows examined of the slow query log. |
-| nighty_fifth_percentile_rows_examined | [int32](#int32) |  | The nighty fifth percentile rows examined of the slow query log. |
+| maximum_query_time | [google.protobuf.Duration](#google-protobuf-Duration) |  | The maximum query time of the slow query log. |
+| average_rows_sent | [int64](#int64) |  | The average rows sent of the slow query log. |
+| maximum_rows_sent | [int64](#int64) |  | The maximum rows sent of the slow query log. |
+| average_rows_examined | [int64](#int64) |  | The average rows examined of the slow query log. |
+| maximum_rows_examined | [int64](#int64) |  | The maximum rows examined of the slow query log. |
 | samples | [SlowQueryDetails](#bytebase-v1-SlowQueryDetails) | repeated | Samples are details of the sample slow query logs with the same fingerprint. |
 
 
@@ -2505,9 +2538,9 @@ The identity provider&#39;s `name` field is used to identify the identity provid
 
 
 
-<a name="bytebase-v1-CreateRoleRequest"></a>
+<a name="bytebase-v1-CreateInstanceRoleRequest"></a>
 
-### CreateRoleRequest
+### CreateInstanceRoleRequest
 
 
 
@@ -2521,9 +2554,9 @@ The identity provider&#39;s `name` field is used to identify the identity provid
 
 
 
-<a name="bytebase-v1-DeleteRoleRequest"></a>
+<a name="bytebase-v1-DeleteInstanceRoleRequest"></a>
 
-### DeleteRoleRequest
+### DeleteInstanceRoleRequest
 
 
 
@@ -2536,9 +2569,9 @@ The identity provider&#39;s `name` field is used to identify the identity provid
 
 
 
-<a name="bytebase-v1-GetRoleRequest"></a>
+<a name="bytebase-v1-GetInstanceRoleRequest"></a>
 
-### GetRoleRequest
+### GetInstanceRoleRequest
 
 
 
@@ -2571,9 +2604,9 @@ InstanceRole is the API message for instance role.
 
 
 
-<a name="bytebase-v1-ListRolesRequest"></a>
+<a name="bytebase-v1-ListInstanceRolesRequest"></a>
 
-### ListRolesRequest
+### ListInstanceRolesRequest
 
 
 
@@ -2590,9 +2623,9 @@ When paginating, all other parameters provided to `ListRoles` must match the cal
 
 
 
-<a name="bytebase-v1-ListRolesResponse"></a>
+<a name="bytebase-v1-ListInstanceRolesResponse"></a>
 
-### ListRolesResponse
+### ListInstanceRolesResponse
 
 
 
@@ -2606,9 +2639,9 @@ When paginating, all other parameters provided to `ListRoles` must match the cal
 
 
 
-<a name="bytebase-v1-UndeleteRoleRequest"></a>
+<a name="bytebase-v1-UndeleteInstanceRoleRequest"></a>
 
-### UndeleteRoleRequest
+### UndeleteInstanceRoleRequest
 
 
 
@@ -2621,9 +2654,9 @@ When paginating, all other parameters provided to `ListRoles` must match the cal
 
 
 
-<a name="bytebase-v1-UpdateRoleRequest"></a>
+<a name="bytebase-v1-UpdateInstanceRoleRequest"></a>
 
-### UpdateRoleRequest
+### UpdateInstanceRoleRequest
 
 
 
@@ -2652,12 +2685,12 @@ The role&#39;s `name`, `environment` and `instance` field is used to identify th
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| GetRole | [GetRoleRequest](#bytebase-v1-GetRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
-| ListRoles | [ListRolesRequest](#bytebase-v1-ListRolesRequest) | [ListRolesResponse](#bytebase-v1-ListRolesResponse) |  |
-| CreateRole | [CreateRoleRequest](#bytebase-v1-CreateRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
-| UpdateRole | [UpdateRoleRequest](#bytebase-v1-UpdateRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
-| DeleteRole | [DeleteRoleRequest](#bytebase-v1-DeleteRoleRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
-| UndeleteRole | [UndeleteRoleRequest](#bytebase-v1-UndeleteRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
+| GetInstanceRole | [GetInstanceRoleRequest](#bytebase-v1-GetInstanceRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
+| ListInstanceRoles | [ListInstanceRolesRequest](#bytebase-v1-ListInstanceRolesRequest) | [ListInstanceRolesResponse](#bytebase-v1-ListInstanceRolesResponse) |  |
+| CreateInstanceRole | [CreateInstanceRoleRequest](#bytebase-v1-CreateInstanceRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
+| UpdateInstanceRole | [UpdateInstanceRoleRequest](#bytebase-v1-UpdateInstanceRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
+| DeleteInstanceRole | [DeleteInstanceRoleRequest](#bytebase-v1-DeleteInstanceRoleRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
+| UndeleteInstanceRole | [UndeleteInstanceRoleRequest](#bytebase-v1-UndeleteInstanceRoleRequest) | [InstanceRole](#bytebase-v1-InstanceRole) |  |
 
  
 
@@ -2836,6 +2869,21 @@ When paginating, all other parameters provided to `ListInstances` must match the
 
 
 
+<a name="bytebase-v1-SyncSlowQueriesRequest"></a>
+
+### SyncSlowQueriesRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| instance | [string](#string) |  | The name of the instance to sync slow queries. Format: environments/{environment}/instances/{instance} |
+
+
+
+
+
+
 <a name="bytebase-v1-UndeleteInstanceRequest"></a>
 
 ### UndeleteInstanceRequest
@@ -2921,6 +2969,7 @@ The instance&#39;s `name` field is used to identify the instance to update. Form
 | AddDataSource | [AddDataSourceRequest](#bytebase-v1-AddDataSourceRequest) | [Instance](#bytebase-v1-Instance) |  |
 | RemoveDataSource | [RemoveDataSourceRequest](#bytebase-v1-RemoveDataSourceRequest) | [Instance](#bytebase-v1-Instance) |  |
 | UpdateDataSource | [UpdateDataSourceRequest](#bytebase-v1-UpdateDataSourceRequest) | [Instance](#bytebase-v1-Instance) |  |
+| SyncSlowQueries | [SyncSlowQueriesRequest](#bytebase-v1-SyncSlowQueriesRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
 
  
 
@@ -3483,7 +3532,7 @@ TODO(zp): move to activity later.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| role | [ProjectRole](#bytebase-v1-ProjectRole) |  | The project role that is assigned to the members. |
+| role | [string](#string) |  | The project role that is assigned to the members. Format: roles/{role} |
 | members | [string](#string) | repeated | Specifies the principals requesting access for a Bytebase resource. `members` can have the following values:
 
 * `user:{emailid}`: An email address that represents a specific Bytebase account. For example, `alice@example.com` . |
@@ -3971,19 +4020,6 @@ TYPE_PROJECT_REPOSITORY_PUSH represents Bytebase receiving a push event from the
 
 
 
-<a name="bytebase-v1-ProjectRole"></a>
-
-### ProjectRole
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| PROJECT_ROLE_UNSPECIFIED | 0 |  |
-| PROJECT_ROLE_OWNER | 1 |  |
-| PROJECT_ROLE_DEVELOPER | 2 |  |
-
-
-
 <a name="bytebase-v1-SchemaChange"></a>
 
 ### SchemaChange
@@ -4131,6 +4167,7 @@ TYPE_PROJECT_REPOSITORY_PUSH represents Bytebase receiving a push event from the
 | ----- | ---- | ----- | ----------- |
 | type | [ApprovalNode.Type](#bytebase-v1-ApprovalNode-Type) |  |  |
 | group_value | [ApprovalNode.GroupValue](#bytebase-v1-ApprovalNode-GroupValue) |  |  |
+| role | [string](#string) |  | Format: roles/{role} |
 
 
 
@@ -4334,7 +4371,6 @@ The review&#39;s `name` field is used to identify the review to update. Format: 
 <a name="bytebase-v1-ApprovalNode-GroupValue"></a>
 
 ### ApprovalNode.GroupValue
-GroupValue is used if ApprovalNode Type is ANY_IN_GROUP
 The predefined user groups are:
 - WORKSPACE_OWNER
 - WORKSPACE_DBA
@@ -4575,6 +4611,134 @@ The risk&#39;s `name` field is used to identify the risk to update. Format: risk
 
 
 
+<a name="v1_role_service-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## v1/role_service.proto
+
+
+
+<a name="bytebase-v1-CreateRoleRequest"></a>
+
+### CreateRoleRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| role | [Role](#bytebase-v1-Role) |  |  |
+| role_id | [string](#string) |  | The ID to use for the role, which will become the final component of the role&#39;s resource name.
+
+This value should be 4-63 characters, and valid characters are /[a-z][A-Z][0-9]/. |
+
+
+
+
+
+
+<a name="bytebase-v1-DeleteRoleRequest"></a>
+
+### DeleteRoleRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | Format: roles/{role} |
+
+
+
+
+
+
+<a name="bytebase-v1-ListRolesRequest"></a>
+
+### ListRolesRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| page_size | [int32](#int32) |  | The maximum number of roles to return. The service may return fewer than this value. If unspecified, at most 50 reviews will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
+| page_token | [string](#string) |  | A page token, received from a previous `ListRoles` call. Provide this to retrieve the subsequent page.
+
+When paginating, all other parameters provided to `ListRoles` must match the call that provided the page token. |
+
+
+
+
+
+
+<a name="bytebase-v1-ListRolesResponse"></a>
+
+### ListRolesResponse
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| roles | [Role](#bytebase-v1-Role) | repeated |  |
+| next_page_token | [string](#string) |  | A token, which can be sent as `page_token` to retrieve the next page. If this field is omitted, there are no subsequent pages. |
+
+
+
+
+
+
+<a name="bytebase-v1-Role"></a>
+
+### Role
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | Format: roles/{role} |
+| description | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-UpdateRoleRequest"></a>
+
+### UpdateRoleRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| role | [Role](#bytebase-v1-Role) |  |  |
+| update_mask | [google.protobuf.FieldMask](#google-protobuf-FieldMask) |  |  |
+
+
+
+
+
+ 
+
+ 
+
+ 
+
+
+<a name="bytebase-v1-RoleService"></a>
+
+### RoleService
+
+
+| Method Name | Request Type | Response Type | Description |
+| ----------- | ------------ | ------------- | ------------|
+| ListRoles | [ListRolesRequest](#bytebase-v1-ListRolesRequest) | [ListRolesResponse](#bytebase-v1-ListRolesResponse) |  |
+| CreateRole | [CreateRoleRequest](#bytebase-v1-CreateRoleRequest) | [Role](#bytebase-v1-Role) |  |
+| UpdateRole | [UpdateRoleRequest](#bytebase-v1-UpdateRoleRequest) | [Role](#bytebase-v1-Role) |  |
+| DeleteRole | [DeleteRoleRequest](#bytebase-v1-DeleteRoleRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
+
+ 
+
+
+
 <a name="v1_setting_service-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
@@ -4612,6 +4776,31 @@ The response message for getting a setting.
 
 
 
+<a name="bytebase-v1-SMTPMailDeliverySettingValue"></a>
+
+### SMTPMailDeliverySettingValue
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| server | [string](#string) |  | The SMTP server address. |
+| port | [int32](#int32) |  | The SMTP server port. |
+| encryption | [SMTPMailDeliverySettingValue.Encryption](#bytebase-v1-SMTPMailDeliverySettingValue-Encryption) |  | The SMTP server encryption. |
+| ca | [string](#string) | optional | The CA, KEY, and CERT for the SMTP server. Not used. |
+| key | [string](#string) | optional |  |
+| cert | [string](#string) | optional |  |
+| authentication | [SMTPMailDeliverySettingValue.Authentication](#bytebase-v1-SMTPMailDeliverySettingValue-Authentication) |  |  |
+| username | [string](#string) |  |  |
+| password | [string](#string) | optional | If not specified, server will use the existed password. |
+| from | [string](#string) |  | The sender email address. |
+| to | [string](#string) |  | The recipient email address, used with validate_only to send test email. |
+
+
+
+
+
+
 <a name="bytebase-v1-SetSettingRequest"></a>
 
 ### SetSettingRequest
@@ -4621,6 +4810,7 @@ The request message for updating a setting.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | setting | [Setting](#bytebase-v1-Setting) |  | The setting to update. |
+| validate_only | [bool](#bool) |  | validate_only is a flag to indicate whether to validate the setting value, server would not persist the setting value if it is true. |
 
 
 
@@ -4654,12 +4844,42 @@ The data in setting value.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | string_value | [string](#string) |  | Defines this value as being a string value. |
+| smtp_mail_delivery_setting_value | [SMTPMailDeliverySettingValue](#bytebase-v1-SMTPMailDeliverySettingValue) |  |  |
 
 
 
 
 
  
+
+
+<a name="bytebase-v1-SMTPMailDeliverySettingValue-Authentication"></a>
+
+### SMTPMailDeliverySettingValue.Authentication
+We support four types of SMTP authentication: NONE, PLAIN, LOGIN, and CRAM-MD5.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| AUTHENTICATION_UNSPECIFIED | 0 |  |
+| AUTHENTICATION_NONE | 1 |  |
+| AUTHENTICATION_PLAIN | 2 |  |
+| AUTHENTICATION_LOGIN | 3 |  |
+| AUTHENTICATION_CRAM_MD5 | 4 |  |
+
+
+
+<a name="bytebase-v1-SMTPMailDeliverySettingValue-Encryption"></a>
+
+### SMTPMailDeliverySettingValue.Encryption
+We support three types of SMTP encryption: NONE, STARTTLS, and SSL/TLS.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ENCRYPTION_UNSPECIFIED | 0 |  |
+| ENCRYPTION_NONE | 1 |  |
+| ENCRYPTION_STARTTLS | 2 |  |
+| ENCRYPTION_SSL_TLS | 3 |  |
+
 
  
 
@@ -4779,7 +4999,6 @@ The data in setting value.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| seat | [int32](#int32) |  |  |
 | instance_count | [int32](#int32) |  |  |
 | expires_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
 | started_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
@@ -4803,7 +5022,6 @@ The data in setting value.
 | ----- | ---- | ----- | ----------- |
 | plan | [PlanType](#bytebase-v1-PlanType) |  |  |
 | days | [int32](#int32) |  |  |
-| seat | [int32](#int32) |  |  |
 | instance_count | [int32](#int32) |  |  |
 
 

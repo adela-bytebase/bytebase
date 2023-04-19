@@ -163,7 +163,6 @@ type Server struct {
 	dbFactory       *dbfactory.DBFactory
 	startedTs       int64
 	secret          string
-	workspaceID     string
 	errorRecordRing api.ErrorRecordRing
 
 	// MySQL utility binaries
@@ -327,7 +326,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		return nil, errors.Wrap(err, "failed to init config")
 	}
 	s.secret = config.secret
-	s.workspaceID = config.workspaceID
 
 	s.ActivityManager = activity.NewManager(storeInstance)
 	s.dbFactory = dbfactory.New(s.mysqlBinDir, s.mongoBinDir, s.pgBinDir, profile.DataDir, s.secret)
@@ -405,7 +403,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.s3Client = s3Client
 	}
 
-	s.MetricReporter = metricreport.NewReporter(s.store, s.licenseService, s.profile, false)
+	s.MetricReporter = metricreport.NewReporter(s.store, s.licenseService, &s.profile, false)
 	if !profile.Readonly {
 		s.SchemaSyncer = schemasync.NewSyncer(storeInstance, s.dbFactory, s.stateCfg, profile)
 		s.SlowQuerySyncer = slowquerysync.NewSyncer(storeInstance, s.dbFactory, s.stateCfg, profile)
@@ -506,7 +504,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	s.registerPolicyRoutes(apiGroup)
 	s.registerProjectRoutes(apiGroup)
 	s.registerProjectWebhookRoutes(apiGroup)
-	s.registerProjectMemberRoutes(apiGroup)
 	s.registerEnvironmentRoutes(apiGroup)
 	s.registerInstanceRoutes(apiGroup)
 	s.registerDatabaseRoutes(apiGroup)
@@ -550,13 +547,18 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		}))
 	v1pb.RegisterActuatorServiceServer(s.grpcServer, v1.NewActuatorService(s.store, &s.profile))
 	v1pb.RegisterSubscriptionServiceServer(s.grpcServer, v1.NewSubscriptionService(
-		s.workspaceID,
 		s.store,
 		&s.profile,
 		s.MetricReporter,
 		s.licenseService))
 	v1pb.RegisterEnvironmentServiceServer(s.grpcServer, v1.NewEnvironmentService(s.store, s.licenseService))
-	v1pb.RegisterInstanceServiceServer(s.grpcServer, v1.NewInstanceService(s.store, s.licenseService, s.secret))
+	v1pb.RegisterInstanceServiceServer(s.grpcServer, v1.NewInstanceService(
+		s.store,
+		s.licenseService,
+		s.MetricReporter,
+		s.secret,
+		s.stateCfg,
+		s.dbFactory))
 	v1pb.RegisterProjectServiceServer(s.grpcServer, v1.NewProjectService(s.store))
 	v1pb.RegisterDatabaseServiceServer(s.grpcServer, v1.NewDatabaseService(s.store, s.BackupRunner))
 	v1pb.RegisterInstanceRoleServiceServer(s.grpcServer, v1.NewInstanceRoleService(s.store, s.dbFactory))
@@ -568,6 +570,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	v1pb.RegisterExternalVersionControlServiceServer(s.grpcServer, v1.NewExternalVersionControlService(s.store))
 	v1pb.RegisterRiskServiceServer(s.grpcServer, v1.NewRiskService(s.store, s.licenseService))
 	v1pb.RegisterReviewServiceServer(s.grpcServer, v1.NewReviewService(s.store, s.ActivityManager, s.stateCfg))
+	v1pb.RegisterRoleServiceServer(s.grpcServer, v1.NewRoleService(s.store))
 	reflection.Register(s.grpcServer)
 
 	// REST gateway proxy.
@@ -619,6 +622,9 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	if err := v1pb.RegisterExternalVersionControlServiceHandler(ctx, mux, grpcConn); err != nil {
 		return nil, err
 	}
+	if err := v1pb.RegisterRoleServiceHandler(ctx, mux, grpcConn); err != nil {
+		return nil, err
+	}
 	e.Any("/v1/*", echo.WrapHandler(mux))
 	// GRPC web proxy.
 	options := []grpcweb.Option{
@@ -664,8 +670,7 @@ func (s *Server) registerOpenAPIRoutes(e *echo.Echo, ce *casbin.Enforcer, prof c
 
 // initMetricReporter will initial the metric scheduler.
 func (s *Server) initMetricReporter() {
-	enabled := s.profile.Mode == common.ReleaseModeProd && s.profile.DemoName != "" && !s.profile.DisableMetric
-	metricReporter := metricreport.NewReporter(s.store, s.licenseService, s.profile, enabled)
+	metricReporter := metricreport.NewReporter(s.store, s.licenseService, &s.profile, s.profile.EnableMetric)
 	metricReporter.Register(metric.InstanceCountMetricName, metricCollector.NewInstanceCountCollector(s.store))
 	metricReporter.Register(metric.IssueCountMetricName, metricCollector.NewIssueCountCollector(s.store))
 	metricReporter.Register(metric.ProjectCountMetricName, metricCollector.NewProjectCountCollector(s.store))
@@ -922,11 +927,6 @@ func (s *Server) GetEcho() *echo.Echo {
 	return s.e
 }
 
-// GetWorkspaceID returns the workspace id.
-func (s *Server) GetWorkspaceID() string {
-	return s.workspaceID
-}
-
 // getSampleSQLReviewPolicy returns a sample SQL review policy for preparing onboardign data.
 func getSampleSQLReviewPolicy() *advisor.SQLReviewPolicy {
 	policy := &advisor.SQLReviewPolicy{
@@ -984,7 +984,7 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 	}
 
 	instance, err := s.store.CreateInstanceV2(ctx, api.DefaultProdEnvironmentID, &store.InstanceMessage{
-		ResourceID:   "postgres-sample",
+		ResourceID:   postgres.SampleInstanceResourceID,
 		Title:        "Postgres Sample Instance",
 		Engine:       db.Postgres,
 		ExternalLink: "",
@@ -1312,6 +1312,10 @@ func (s *Server) backfillInstanceChangeHistory(ctx context.Context) {
 				return nil
 			}(instance)
 			if err != nil {
+				// New instances may not have the "bytebase" database.
+				if strings.Contains(err.Error(), "database \"bytebase\" does not exist") {
+					return nil
+				}
 				errList = multierr.Append(errList, err)
 			}
 		}

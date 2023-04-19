@@ -7,7 +7,7 @@ import {
   languageOfEngine,
   MaybeRef,
 } from "../types";
-import { isDev, semverCompare } from "./util";
+import { semverCompare } from "./util";
 
 export const supportedEngineList = () => {
   const engines: EngineType[] = [
@@ -22,10 +22,8 @@ export const supportedEngineList = () => {
     "ORACLE",
     "MSSQL",
     "MARIADB",
+    "REDSHIFT",
   ];
-  if (isDev()) {
-    engines.push("REDSHIFT");
-  }
   return engines;
 };
 
@@ -76,15 +74,19 @@ export const isValidSpannerHost = (host: string) => {
   return RE.test(host);
 };
 
-export const instanceHasAlterSchema = (instance: Instance): boolean => {
-  const { engine } = instance;
+export const instanceHasAlterSchema = (
+  instanceOrEngine: Instance | EngineType
+): boolean => {
+  const engine = engineOfInstance(instanceOrEngine);
   if (engine === "MONGODB") return false;
   if (engine === "REDIS") return false;
   return true;
 };
 
-export const instanceHasBackupRestore = (instance: Instance): boolean => {
-  const { engine } = instance;
+export const instanceHasBackupRestore = (
+  instanceOrEngine: Instance | EngineType
+): boolean => {
+  const engine = engineOfInstance(instanceOrEngine);
   if (engine === "MONGODB") return false;
   if (engine === "REDIS") return false;
   if (engine === "SPANNER") return false;
@@ -92,24 +94,28 @@ export const instanceHasBackupRestore = (instance: Instance): boolean => {
   return true;
 };
 
-export const instanceHasReadonlyMode = (instance: Instance): boolean => {
-  const { engine } = instance;
+export const instanceHasReadonlyMode = (
+  instanceOrEngine: Instance | EngineType
+): boolean => {
+  const engine = engineOfInstance(instanceOrEngine);
   if (engine === "MONGODB") return false;
   if (engine === "REDIS") return false;
   return true;
 };
 
-export const instanceHasCreateDatabase = (instance: Instance): boolean => {
-  const { engine } = instance;
+export const instanceHasCreateDatabase = (
+  instanceOrEngine: Instance | EngineType
+): boolean => {
+  const engine = engineOfInstance(instanceOrEngine);
   if (engine === "REDIS") return false;
   if (engine === "ORACLE") return false;
   return true;
 };
 
 export const instanceHasStructuredQueryResult = (
-  instance: Instance
+  instanceOrEngine: Instance | EngineType
 ): boolean => {
-  const { engine } = instance;
+  const engine = engineOfInstance(instanceOrEngine);
   if (engine === "MONGODB") return false;
   if (engine === "REDIS") return false;
   return true;
@@ -118,10 +124,7 @@ export const instanceHasStructuredQueryResult = (
 export const instanceHasSSL = (
   instanceOrEngine: Instance | EngineType
 ): boolean => {
-  const engine =
-    typeof instanceOrEngine === "string"
-      ? instanceOrEngine
-      : instanceOrEngine.engine;
+  const engine = engineOfInstance(instanceOrEngine);
   return [
     "CLICKHOUSE",
     "MYSQL",
@@ -133,10 +136,34 @@ export const instanceHasSSL = (
   ].includes(engine);
 };
 
+export const instanceHasCollationAndCharacterSet = (
+  instanceOrEngine: Instance | EngineType
+) => {
+  const engine = engineOfInstance(instanceOrEngine);
+
+  const excludedList: EngineType[] = [
+    "MONGODB",
+    "CLICKHOUSE",
+    "SNOWFLAKE",
+    "REDSHIFT",
+  ];
+  return !excludedList.includes(engine);
+};
+
 export const instanceSupportSlowQuery = (instance: Instance) => {
   const { engine } = instance;
   if (engine === "MYSQL") {
     return semverCompare(instance.engineVersion, "5.7", "gte");
   }
+  if (engine === "POSTGRES") {
+    return true;
+  }
   return false;
+};
+
+export const engineOfInstance = (instanceOrEngine: Instance | EngineType) => {
+  if (typeof instanceOrEngine === "string") {
+    return instanceOrEngine;
+  }
+  return instanceOrEngine.engine;
 };

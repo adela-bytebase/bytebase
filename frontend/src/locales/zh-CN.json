@@ -233,7 +233,10 @@
     "will-override-current-data": "将会覆盖当前数据。",
     "rollout": "发布",
     "uploading": "上传中",
-    "active": "开启"
+    "active": "开启",
+    "added": "已创建",
+    "revoke": "撤销",
+    "cannot-undo-this-action": "这个操作无法撤销"
   },
   "error-page": {
     "go-back-home": "回到主页"
@@ -372,7 +375,9 @@
       "debug-log": "Debug 日志",
       "sensitive-data": "数据脱敏",
       "access-control": "数据访问控制",
-      "audit-log": "审计日志"
+      "audit-log": "审计日志",
+      "roles": "角色",
+      "mail-delivery": "邮件传输"
     },
     "profile": {
       "email": "邮箱",
@@ -399,7 +404,8 @@
         "account": "账户",
         "role": "角色",
         "update-time": "更新时间",
-        "granted-time": "批准时间"
+        "granted-time": "批准时间",
+        "roles": "角色"
       },
       "action": {
         "deactivate": "禁用",
@@ -421,7 +427,8 @@
       "reset-service-key": "重置 Service Key",
       "reset-service-key-alert": "旧 Service Key 将立即被重置，该操作不可逆。确定要重置 Service Key 吗？",
       "service-key-copied": "Service Key 已复制，请勿泄漏",
-      "create-as-service-account": "创建为服务账号"
+      "create-as-service-account": "创建为服务账号",
+      "show-inactive": "查看未激活的成员"
     },
     "im-integration": {
       "enable": "启用",
@@ -530,6 +537,22 @@
       "new-version-available": "有新版本可更新",
       "new-version-content": "新版本 {tag} 正式发布！请根据我们的文档来获取新版本。",
       "not-show-till-next-release": "在下次更新前不要提醒我"
+    },
+    "mail-delivery": {
+      "description": "通过配置 SMTP 服务器信息以接收相关问题的电子邮件通知。",
+      "field": {
+        "smtp-server-host": "SMTP 服务器主机",
+        "from": "发送自",
+        "smtp-username": "SMTP 用户名",
+        "smtp-password": "SMTP 密码",
+        "send-test-email-to": "发送测试邮件给",
+        "authentication-method": "验证方式",
+        "encryption": "加密方式",
+        "smtp-server-port": "SMTP 服务器端口",
+        "send": "发送"
+      },
+      "updated-tip": "邮件传输配置更新成功",
+      "tested-tip": "发送成功，请检查 {address} 的收件箱。"
     }
   },
   "activity": {
@@ -901,6 +924,7 @@
     "visit-environment": "@:common.visit@:common.environments",
     "add-a-member": "添加成员",
     "use-kbar": "使用 kbar ({shortcut})",
+    "query-data": "查询数据",
     "notice": {
       "title": "快速入门导览已关闭",
       "desc": "您稍后仍可以从右上角的菜单中再次打开快速入门导览"
@@ -1140,7 +1164,8 @@
     "n-selected-m-in-total": "（已选择 {selected}，共计 {total}）",
     "doesnt-match-database-name-template": "不符合租户数据库名称模板",
     "doesnt-match-tenant-value": "与租户标签值不匹配",
-    "should-follow-database-name-template": "需要遵循租户数据库名称模板"
+    "should-follow-database-name-template": "需要遵循租户数据库名称模板",
+    "all": "所有数据库"
   },
   "repository": {
     "branch-observe-file-change": "Bytebase 跟踪文件变更的分支。",
@@ -1333,7 +1358,14 @@
       "schema-change-type": "Schema 变更类型",
       "select-schema-change-type-ddl": "命令式 - 面向过程的 DDL 命令，如 ALTER TABLE",
       "select-schema-change-type-sdl": "声明式 - 面向终态的 Schema 描述，如 CREATE TABLE",
-      "schema-path-template-sdl-description": "Schema 文件描述了完整的数据库结构。"
+      "schema-path-template-sdl-description": "Schema 文件描述了完整的数据库结构。",
+      "members": {
+        "view-by-principals": "按用户查看",
+        "view-by-roles": "按角色查看",
+        "cannot-remove-last-owner": "不能移除项目的最后一个所有者",
+        "revoke-role-from-user": "撤销 '{user}' 的 '{role}' 角色",
+        "remove-user": "移除 '{user}'"
+      }
     },
     "mode": {
       "standard": "标准",
@@ -1347,7 +1379,8 @@
       "project-member": "需要来自项目成员的 LGTM",
       "project-owner": "需要来自项目所有者的 LGTM"
     },
-    "successfully-updated-db-name-template": "成功更新数据库名称模板。"
+    "successfully-updated-db-name-template": "成功更新数据库名称模板。",
+    "all": "所有项目"
   },
   "inbox": {
     "mark-all-as-read": "全部标记为已读",
@@ -1504,7 +1537,8 @@
   },
   "setting": {
     "project": {
-      "description": "这里是项目管理员界面，列出了 Bytebase 上的所有项目。"
+      "description": "这里是项目管理员界面，列出了 Bytebase 上的所有项目。",
+      "show-archived": "显示已归档的项目"
     },
     "label": {
       "key": "Key",
@@ -1726,13 +1760,6 @@
         "runoutof": "已用尽全部 {total} 个实例额度。",
         "upgrade": "@:{'subscription.upgrade'}来获取更多实例额度。"
       },
-      "bb-feature-seat-count": {
-        "title": "席位数量限制",
-        "desc": "您已达最大席位数量限制，请付费升级来获取更多席位额度。",
-        "remaining": "当前总席位额度为 {total}，目前仅剩 {count} 个份额可用。",
-        "runoutof": "已用尽全部 {total} 个席位额度。",
-        "upgrade": "@:{'subscription.upgrade'}来获取更多席位额度。"
-      },
       "bb-feature-multi-tenancy": {
         "title": "多租户",
         "desc": "「多租户功能」可以同时管理多个属于不同租户的同构数据库，帮您更统一和方便地对多个数据库进行管理和表结构变更。"
@@ -1772,10 +1799,6 @@
       "bb-feature-custom-approval": {
         "title": "自定义审批",
         "desc": "为不同的任务配置安全风险等级和自定义审批流。"
-      },
-      "bb-feature-slow-query": {
-        "title": "慢查询",
-        "desc": "记录与分析慢速的 SQL 查询。"
       },
       "bb-feature-vcs-schema-write-back": {
         "title": "Schema 回写",
@@ -1836,6 +1859,10 @@
       "bb-feature-plugin-openai": {
         "title": "AI 增强",
         "desc": "AI 增强的 SQL 编辑器功能，基于 OpenAI 技术驱动。"
+      },
+      "bb-feature-shared-sql-script": {
+        "title": "共享 SQL 脚本",
+        "desc": "将 SQL 脚本分享给项目成员，或者公开给所有人。"
       }
     }
   },
@@ -1947,7 +1974,7 @@
       "created-ts": "时间",
       "created-time": "创建时间",
       "updated-time": "更新时间",
-      "creator": "操作者",
+      "actor": "操作者",
       "type": "事件类型",
       "level": "事件等级",
       "comment": "评论",
@@ -2220,7 +2247,12 @@
         },
         "add": "增加节点",
         "delete": "删除审批节点",
-        "order": "顺序"
+        "order": "顺序",
+        "select-approver": "选择审批人",
+        "roles": {
+          "system": "系统角色",
+          "custom": "自定义角色"
+        }
       },
       "presets": {
         "owner-dba": "系统定义的流程。先由项目所有者审批，再由 DBA 审批。",
@@ -2236,7 +2268,8 @@
     },
     "risk": {
       "self": "风险",
-      "risk-center": "风险中心"
+      "risk-center": "风险中心",
+      "description": "风险中心定义了不同数据库操作在不同条件下的风险等级。而风险等级则会决定工单的自定义审批流程。"
     },
     "workflow-center": {
       "workflow": "工作流"
@@ -2272,6 +2305,30 @@
     "rows-examined": "解析行数",
     "rows-sent": "返回行数",
     "lock-time": "持有锁时长",
-    "query-time": "执行时长"
+    "query-time": "执行时长",
+    "attention-description": "为 {versions} 记录和分析慢查询。\nBytebase 会定期从实例上同步慢查询日志。",
+    "sync-job-started": "同步作业已启动。请等待同步完成。",
+    "detail": "慢查询详情"
+  },
+  "principal": {
+    "select": "选择用户"
+  },
+  "role": {
+    "setting": {
+      "description": "定义自定义角色，你可以将它们应用到项目成员上。",
+      "add": "添加角色",
+      "edit": "编辑角色",
+      "name-placeholder": "输入角色名称",
+      "description-placeholder": "输入角色描述",
+      "validation": {
+        "duplicated": "{resource}已存在",
+        "required": "{resource}是必填的",
+        "pattern": "{resource}只能包含小写字母、数字和连字符，并以小写字母开头。",
+        "max-length": "{resource}至多包含 {length} 个字符"
+      },
+      "delete": "删除角色"
+    },
+    "select": "选择角色",
+    "select-roles": "选择角色"
   }
 }

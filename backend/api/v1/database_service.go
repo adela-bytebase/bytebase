@@ -31,16 +31,16 @@ const (
 	filterKeyProject   = "project"
 	filterKeyStartTime = "start_time"
 
-	// Support order by count, latest_log_time, average_query_time, nighty_fifth_percentile_query_time,
-	// average_rows_sent, nighty_fifth_percentile_rows_sent, average_rows_examined, nighty_fifth_percentile_rows_examined for now.
-	orderByKeyCount                             = "count"
-	orderByKeyLatestLogTime                     = "latest_log_time"
-	orderByKeyAverageQueryTime                  = "average_query_time"
-	orderByKeyNightyFifthPercentileQueryTime    = "nighty_fifth_percentile_query_time"
-	orderByKeyAverageRowsSent                   = "average_rows_sent"
-	orderByKeyNightyFifthPercentileRowsSent     = "nighty_fifth_percentile_rows_sent"
-	orderByKeyAverageRowsExamined               = "average_rows_examined"
-	orderByKeyNightyFifthPercentileRowsExamined = "nighty_fifth_percentile_rows_examined"
+	// Support order by count, latest_log_time, average_query_time, maximum_query_time,
+	// average_rows_sent, maximum_rows_sent, average_rows_examined, maximum_rows_examined for now.
+	orderByKeyCount               = "count"
+	orderByKeyLatestLogTime       = "latest_log_time"
+	orderByKeyAverageQueryTime    = "average_query_time"
+	orderByKeyMaximumQueryTime    = "maximum_query_time"
+	orderByKeyAverageRowsSent     = "average_rows_sent"
+	orderByKeyMaximumRowsSent     = "maximum_rows_sent"
+	orderByKeyAverageRowsExamined = "average_rows_examined"
+	orderByKeyMaximumRowsExamined = "maximum_rows_examined"
 )
 
 // DatabaseService implements the database service.
@@ -530,7 +530,7 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 	for _, expr := range filters {
 		switch expr.key {
 		case filterKeyProject:
-			reg := regexp.MustCompile(`^projects/(\w+)`)
+			reg := regexp.MustCompile(`^projects/(.+)`)
 			match := reg.FindStringSubmatch(expr.value)
 			if len(match) != 2 {
 				return nil, status.Errorf(codes.InvalidArgument, "invalid project filter %q", expr.value)
@@ -637,7 +637,7 @@ func sortSlowQueryLogResponse(response *v1pb.ListSlowQueriesResponse, orderByKey
 	if len(orderByKeys) == 0 {
 		orderByKeys = []orderByKey{
 			{
-				key:      orderByKeyNightyFifthPercentileQueryTime,
+				key:      orderByKeyAverageQueryTime,
 				isAscend: false,
 			},
 		}
@@ -651,60 +651,76 @@ func sortSlowQueryLogResponse(response *v1pb.ListSlowQueriesResponse, orderByKey
 		for _, key := range orderByKeys {
 			switch key.key {
 			case orderByKeyCount:
-				if response.SlowQueryLogs[i].Statistics.Count != response.SlowQueryLogs[j].Statistics.Count {
+				lCount := response.SlowQueryLogs[i].Statistics.Count
+				rCount := response.SlowQueryLogs[j].Statistics.Count
+				if lCount != rCount {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.Count < response.SlowQueryLogs[j].Statistics.Count
+						return lCount < rCount
 					}
-					return response.SlowQueryLogs[i].Statistics.Count > response.SlowQueryLogs[j].Statistics.Count
+					return lCount > rCount
 				}
 			case orderByKeyLatestLogTime:
-				if response.SlowQueryLogs[i].Statistics.LatestLogTime != response.SlowQueryLogs[j].Statistics.LatestLogTime {
+				lTime := response.SlowQueryLogs[i].Statistics.LatestLogTime.AsTime()
+				rTime := response.SlowQueryLogs[j].Statistics.LatestLogTime.AsTime()
+				if !lTime.Equal(rTime) {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.LatestLogTime.AsTime().Before(response.SlowQueryLogs[j].Statistics.LatestLogTime.AsTime())
+						return lTime.Before(rTime)
 					}
-					return response.SlowQueryLogs[i].Statistics.LatestLogTime.AsTime().After(response.SlowQueryLogs[j].Statistics.LatestLogTime.AsTime())
+					return lTime.After(rTime)
 				}
 			case orderByKeyAverageQueryTime:
-				if response.SlowQueryLogs[i].Statistics.AverageQueryTime != response.SlowQueryLogs[j].Statistics.AverageQueryTime {
+				lTime := response.SlowQueryLogs[i].Statistics.AverageQueryTime.AsDuration()
+				rTime := response.SlowQueryLogs[j].Statistics.AverageQueryTime.AsDuration()
+				if lTime != rTime {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.AverageQueryTime.AsDuration() < response.SlowQueryLogs[j].Statistics.AverageQueryTime.AsDuration()
+						return lTime < rTime
 					}
-					return response.SlowQueryLogs[i].Statistics.AverageQueryTime.AsDuration() > response.SlowQueryLogs[j].Statistics.AverageQueryTime.AsDuration()
+					return lTime > rTime
 				}
-			case orderByKeyNightyFifthPercentileQueryTime:
-				if response.SlowQueryLogs[i].Statistics.NightyFifthPercentileQueryTime != response.SlowQueryLogs[j].Statistics.NightyFifthPercentileQueryTime {
+			case orderByKeyMaximumQueryTime:
+				lDuration := response.SlowQueryLogs[i].Statistics.MaximumQueryTime.AsDuration()
+				rDuration := response.SlowQueryLogs[j].Statistics.MaximumQueryTime.AsDuration()
+				if lDuration != rDuration {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.NightyFifthPercentileQueryTime.AsDuration() < response.SlowQueryLogs[j].Statistics.NightyFifthPercentileQueryTime.AsDuration()
+						return lDuration < rDuration
 					}
-					return response.SlowQueryLogs[i].Statistics.NightyFifthPercentileQueryTime.AsDuration() > response.SlowQueryLogs[j].Statistics.NightyFifthPercentileQueryTime.AsDuration()
+					return lDuration > rDuration
 				}
 			case orderByKeyAverageRowsSent:
-				if response.SlowQueryLogs[i].Statistics.AverageRowsSent != response.SlowQueryLogs[j].Statistics.AverageRowsSent {
+				lSent := response.SlowQueryLogs[i].Statistics.AverageRowsSent
+				rSent := response.SlowQueryLogs[j].Statistics.AverageRowsSent
+				if lSent != rSent {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.AverageRowsSent < response.SlowQueryLogs[j].Statistics.AverageRowsSent
+						return lSent < rSent
 					}
-					return response.SlowQueryLogs[i].Statistics.AverageRowsSent > response.SlowQueryLogs[j].Statistics.AverageRowsSent
+					return lSent > rSent
 				}
-			case orderByKeyNightyFifthPercentileRowsSent:
-				if response.SlowQueryLogs[i].Statistics.NightyFifthPercentileRowsSent != response.SlowQueryLogs[j].Statistics.NightyFifthPercentileRowsSent {
+			case orderByKeyMaximumRowsSent:
+				lSent := response.SlowQueryLogs[i].Statistics.MaximumRowsSent
+				rSent := response.SlowQueryLogs[j].Statistics.MaximumRowsSent
+				if lSent != rSent {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.NightyFifthPercentileRowsSent < response.SlowQueryLogs[j].Statistics.NightyFifthPercentileRowsSent
+						return lSent < rSent
 					}
-					return response.SlowQueryLogs[i].Statistics.NightyFifthPercentileRowsSent > response.SlowQueryLogs[j].Statistics.NightyFifthPercentileRowsSent
+					return lSent > rSent
 				}
 			case orderByKeyAverageRowsExamined:
-				if response.SlowQueryLogs[i].Statistics.AverageRowsExamined != response.SlowQueryLogs[j].Statistics.AverageRowsExamined {
+				lExamined := response.SlowQueryLogs[i].Statistics.AverageRowsExamined
+				rExamined := response.SlowQueryLogs[j].Statistics.AverageRowsExamined
+				if lExamined != rExamined {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.AverageRowsExamined < response.SlowQueryLogs[j].Statistics.AverageRowsExamined
+						return lExamined < rExamined
 					}
-					return response.SlowQueryLogs[i].Statistics.AverageRowsExamined > response.SlowQueryLogs[j].Statistics.AverageRowsExamined
+					return lExamined > rExamined
 				}
-			case orderByKeyNightyFifthPercentileRowsExamined:
-				if response.SlowQueryLogs[i].Statistics.NightyFifthPercentileRowsExamined != response.SlowQueryLogs[j].Statistics.NightyFifthPercentileRowsExamined {
+			case orderByKeyMaximumRowsExamined:
+				lExamined := response.SlowQueryLogs[i].Statistics.MaximumRowsExamined
+				rExamined := response.SlowQueryLogs[j].Statistics.MaximumRowsExamined
+				if lExamined != rExamined {
 					if key.isAscend {
-						return response.SlowQueryLogs[i].Statistics.NightyFifthPercentileRowsExamined < response.SlowQueryLogs[j].Statistics.NightyFifthPercentileRowsExamined
+						return lExamined < rExamined
 					}
-					return response.SlowQueryLogs[i].Statistics.NightyFifthPercentileRowsExamined > response.SlowQueryLogs[j].Statistics.NightyFifthPercentileRowsExamined
+					return lExamined > rExamined
 				}
 			}
 		}
@@ -717,10 +733,10 @@ func sortSlowQueryLogResponse(response *v1pb.ListSlowQueriesResponse, orderByKey
 func validSlowQueryOrderByKey(keys []orderByKey) error {
 	for _, key := range keys {
 		switch key.key {
-		// Support order by count, latest_log_time, average_query_time, nighty_fifth_percentile_query_time,
-		// average_rows_sent, nighty_fifth_percentile_rows_sent, average_rows_examined, nighty_fifth_percentile_rows_examined for now.
-		case orderByKeyCount, orderByKeyLatestLogTime, orderByKeyAverageQueryTime, orderByKeyNightyFifthPercentileQueryTime,
-			orderByKeyAverageRowsSent, orderByKeyNightyFifthPercentileRowsSent, orderByKeyAverageRowsExamined, orderByKeyNightyFifthPercentileRowsExamined:
+		// Support order by count, latest_log_time, average_query_time, maximum_query_time,
+		// average_rows_sent, maximum_rows_sent, average_rows_examined, maximum_rows_examined for now.
+		case orderByKeyCount, orderByKeyLatestLogTime, orderByKeyAverageQueryTime, orderByKeyMaximumQueryTime,
+			orderByKeyAverageRowsSent, orderByKeyMaximumRowsSent, orderByKeyAverageRowsExamined, orderByKeyMaximumRowsExamined:
 		default:
 			return errors.Errorf("invalid order_by key %q", key.key)
 		}
@@ -860,6 +876,12 @@ func convertDatabaseMetadata(metadata *storepb.DatabaseMetadata) *v1pb.DatabaseM
 				Definition:       view.Definition,
 				Comment:          view.Comment,
 				DependentColumns: dependentColumnList,
+			})
+		}
+		for _, function := range schema.Functions {
+			s.Functions = append(s.Functions, &v1pb.FunctionMetadata{
+				Name:       function.Name,
+				Definition: function.Definition,
 			})
 		}
 		m.Schemas = append(m.Schemas, s)
