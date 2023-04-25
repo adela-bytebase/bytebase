@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pkg/errors"
 
@@ -16,10 +17,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/bytebase/bytebase/backend/common"
 	"github.com/bytebase/bytebase/backend/common/log"
+	enterpriseAPI "github.com/bytebase/bytebase/backend/enterprise/api"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/runner/backuprun"
 	"github.com/bytebase/bytebase/backend/store"
@@ -46,15 +49,17 @@ const (
 // DatabaseService implements the database service.
 type DatabaseService struct {
 	v1pb.UnimplementedDatabaseServiceServer
-	store        *store.Store
-	BackupRunner *backuprun.Runner
+	store          *store.Store
+	BackupRunner   *backuprun.Runner
+	licenseService enterpriseAPI.LicenseService
 }
 
 // NewDatabaseService creates a new DatabaseService.
-func NewDatabaseService(store *store.Store, br *backuprun.Runner) *DatabaseService {
+func NewDatabaseService(store *store.Store, br *backuprun.Runner, licenseService enterpriseAPI.LicenseService) *DatabaseService {
 	return &DatabaseService{
-		store:        store,
-		BackupRunner: br,
+		store:          store,
+		BackupRunner:   br,
+		licenseService: licenseService,
 	}
 }
 
@@ -504,6 +509,238 @@ func (s *DatabaseService) CreateBackup(ctx context.Context, request *v1pb.Create
 	return convertToBackup(backup, environmentID, instanceID, databaseName), nil
 }
 
+// ListSecrets lists the secrets of a database.
+func (s *DatabaseService) ListSecrets(ctx context.Context, request *v1pb.ListSecretsRequest) (*v1pb.ListSecretsResponse, error) {
+	environmentID, instanceID, databaseName, err := getEnvironmentInstanceDatabaseID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	environment, err := s.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{
+		ResourceID: &environmentID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if environment == nil {
+		return nil, status.Errorf(codes.NotFound, "environment %q not found", environmentID)
+	}
+	instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{
+		EnvironmentID: &environmentID,
+		ResourceID:    &instanceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if instance == nil {
+		return nil, status.Errorf(codes.NotFound, "instance %q not found", instanceID)
+	}
+	database, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
+		EnvironmentID: &environmentID,
+		InstanceID:    &instanceID,
+		DatabaseName:  &databaseName,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if database == nil {
+		return nil, status.Errorf(codes.NotFound, "database %q not found", databaseName)
+	}
+	return &v1pb.ListSecretsResponse{
+		Secrets: stripeAndConvertToServiceSecrets(database.Secrets, database.EnvironmentID, database.InstanceID, database.DatabaseName),
+	}, nil
+}
+
+// UpdateSecret updates a secret of a database.
+func (s *DatabaseService) UpdateSecret(ctx context.Context, request *v1pb.UpdateSecretRequest) (*v1pb.Secret, error) {
+	if !s.licenseService.IsFeatureEnabled(api.FeatureEncryptedSecrets) {
+		return nil, status.Errorf(codes.PermissionDenied, api.FeatureEncryptedSecrets.AccessErrorMessage())
+	}
+
+	if request.Secret == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "secret is required")
+	}
+
+	environmentID, instanceID, databaseName, updateSecretName, err := getEnvironmentInstanceDatabaseIDSecretName(request.Secret.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	environment, err := s.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{
+		ResourceID: &environmentID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if environment == nil {
+		return nil, status.Errorf(codes.NotFound, "environment %q not found", environmentID)
+	}
+	instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{
+		EnvironmentID: &environmentID,
+		ResourceID:    &instanceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if instance == nil {
+		return nil, status.Errorf(codes.NotFound, "instance %q not found", instanceID)
+	}
+	database, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
+		EnvironmentID: &environmentID,
+		InstanceID:    &instanceID,
+		DatabaseName:  &databaseName,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if database == nil {
+		return nil, status.Errorf(codes.NotFound, "database %q not found", databaseName)
+	}
+
+	// We retrieve the secret from the database, convert secrets to map, upsert the new secret and store it back.
+	// But if two processes are doing this at the same time, the second one will override the first one.
+	// It is not a big deal for now because it's not a common case and users can find that secret he set is not existed or not correct.
+	secretsMap := make(map[string]*storepb.SecretItem)
+	if database.Secrets != nil {
+		for _, secret := range database.Secrets.Items {
+			secretsMap[secret.Name] = secret
+		}
+	}
+
+	var newSecret storepb.SecretItem
+	if _, ok := secretsMap[updateSecretName]; !ok {
+		// If the secret is not existed and allow_missing is false, we will not create it.
+		if !request.AllowMissing {
+			return nil, status.Errorf(codes.NotFound, "secret %q not found", updateSecretName)
+		}
+		newSecret.Name = updateSecretName
+		newSecret.Value = request.Secret.Value
+		newSecret.Description = request.Secret.Description
+	} else {
+		oldSecret := secretsMap[updateSecretName]
+		newSecret.Name = oldSecret.Name
+		newSecret.Value = oldSecret.Value
+		newSecret.Description = oldSecret.Description
+		for _, path := range request.UpdateMask.Paths {
+			switch path {
+			case "value":
+				newSecret.Value = request.Secret.Value
+			case "name":
+				// We don't allow users to update the name of a secret.
+				return nil, status.Errorf(codes.InvalidArgument, "name of a secret is not allowed to be updated")
+			case "description":
+				newSecret.Description = request.Secret.Description
+			}
+		}
+	}
+	if err := isSecretValid(&newSecret); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	secretsMap[updateSecretName] = &newSecret
+	// Flatten the map to a slice.
+	var secretItems []*storepb.SecretItem
+	for _, secret := range secretsMap {
+		secretItems = append(secretItems, secret)
+	}
+	var updateDatabaseMessage store.UpdateDatabaseMessage
+	updateDatabaseMessage.Secrets = &storepb.Secrets{
+		Items: secretItems,
+	}
+	updateDatabaseMessage.EnvironmentID = database.EnvironmentID
+	updateDatabaseMessage.InstanceID = database.InstanceID
+	updateDatabaseMessage.DatabaseName = database.DatabaseName
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	updatedDatabase, err := s.store.UpdateDatabase(ctx, &updateDatabaseMessage, principalID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+
+	// Get the secret from the updated database.
+	for _, secret := range updatedDatabase.Secrets.Items {
+		if secret.Name == updateSecretName {
+			return stripeAndConvertToServiceSecret(secret, updatedDatabase.EnvironmentID, updatedDatabase.InstanceID, updatedDatabase.DatabaseName), nil
+		}
+	}
+	return &v1pb.Secret{}, nil
+}
+
+// DeleteSecret deletes a secret of a database.
+func (s *DatabaseService) DeleteSecret(ctx context.Context, request *v1pb.DeleteSecretRequest) (*emptypb.Empty, error) {
+	if !s.licenseService.IsFeatureEnabled(api.FeatureEncryptedSecrets) {
+		return nil, status.Errorf(codes.PermissionDenied, api.FeatureEncryptedSecrets.AccessErrorMessage())
+	}
+
+	environmentID, instanceID, databaseName, secretName, err := getEnvironmentInstanceDatabaseIDSecretName(request.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	environment, err := s.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{
+		ResourceID: &environmentID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if environment == nil {
+		return nil, status.Errorf(codes.NotFound, "environment %q not found", environmentID)
+	}
+	instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{
+		EnvironmentID: &environmentID,
+		ResourceID:    &instanceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if instance == nil {
+		return nil, status.Errorf(codes.NotFound, "instance %q not found", instanceID)
+	}
+	database, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
+		EnvironmentID: &environmentID,
+		InstanceID:    &instanceID,
+		DatabaseName:  &databaseName,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if database == nil {
+		return nil, status.Errorf(codes.NotFound, "database %q not found", databaseName)
+	}
+
+	// We retrieve the secret from the database, convert secrets to map, upsert the new secret and store it back.
+	// But if two processes are doing this at the same time, the second one will override the first one.
+	// It is not a big deal for now because it's not a common case and users can find that secret he set is not existed or not correct.
+	secretsMap := make(map[string]*storepb.SecretItem)
+	if database.Secrets != nil {
+		for _, secret := range database.Secrets.Items {
+			secretsMap[secret.Name] = secret
+		}
+	}
+	delete(secretsMap, secretName)
+
+	// Flatten the map to a slice.
+	var secretItems []*storepb.SecretItem
+	for _, secret := range secretsMap {
+		secretItems = append(secretItems, secret)
+	}
+	var updateDatabaseMessage store.UpdateDatabaseMessage
+	updateDatabaseMessage.Secrets = &storepb.Secrets{
+		Items: secretItems,
+	}
+	updateDatabaseMessage.EnvironmentID = database.EnvironmentID
+	updateDatabaseMessage.InstanceID = database.InstanceID
+	updateDatabaseMessage.DatabaseName = database.DatabaseName
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	if _, err := s.store.UpdateDatabase(ctx, &updateDatabaseMessage, principalID); err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+type totalValue struct {
+	totalQueryTime time.Duration
+	totalCount     int64
+}
+
 // ListSlowQueries lists the slow queries.
 func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.ListSlowQueriesRequest) (*v1pb.ListSlowQueriesResponse, error) {
 	findDatabase := &store.FindDatabaseMessage{}
@@ -546,7 +783,7 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 				if err != nil {
 					return nil, status.Errorf(codes.InvalidArgument, "invalid start_time filter %q", expr.value)
 				}
-				t = t.AddDate(0, 0, 1)
+				t = t.AddDate(0, 0, 1).UTC()
 				startLogDate = &t
 			case comparatorTypeGreaterEqual:
 				if startLogDate != nil {
@@ -556,6 +793,7 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 				if err != nil {
 					return nil, status.Errorf(codes.InvalidArgument, "invalid start_time filter %q", expr.value)
 				}
+				t = t.UTC()
 				startLogDate = &t
 			case comparatorTypeLess:
 				if endLogDate != nil {
@@ -565,6 +803,7 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 				if err != nil {
 					return nil, status.Errorf(codes.InvalidArgument, "invalid start_time filter %q", expr.value)
 				}
+				t = t.UTC()
 				endLogDate = &t
 			case comparatorTypeLessEqual:
 				if endLogDate != nil {
@@ -574,7 +813,7 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 				if err != nil {
 					return nil, status.Errorf(codes.InvalidArgument, "invalid start_time filter %q", expr.value)
 				}
-				t = t.AddDate(0, 0, 1)
+				t = t.AddDate(0, 0, 1).UTC()
 				endLogDate = &t
 			default:
 				return nil, status.Errorf(codes.InvalidArgument, "invalid start_time filter %q %q %q", expr.key, expr.comparator, expr.value)
@@ -597,9 +836,34 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 		return nil, status.Errorf(codes.Internal, "failed to find database list %q", err.Error())
 	}
 
-	result := &v1pb.ListSlowQueriesResponse{}
+	var canAccessDBs []*store.DatabaseMessage
 
-	for _, database := range databases {
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	user, err := s.store.GetUserByID(ctx, principalID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to find user %q", err.Error())
+	}
+	switch user.Role {
+	case api.Owner, api.DBA:
+		canAccessDBs = databases
+	case api.Developer:
+		for _, database := range databases {
+			policy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{ProjectID: &database.ProjectID})
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to find project policy %q", err.Error())
+			}
+			if isProjectOwnerOrDeveloper(principalID, policy) {
+				canAccessDBs = append(canAccessDBs, database)
+			}
+		}
+	default:
+		return nil, status.Errorf(codes.PermissionDenied, "unknown role %q", user.Role)
+	}
+
+	result := &v1pb.ListSlowQueriesResponse{}
+	instanceMap := make(map[string]*totalValue)
+
+	for _, database := range canAccessDBs {
 		instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{
 			ResourceID: &database.InstanceID,
 		})
@@ -622,7 +886,26 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 
 		for _, log := range logs {
 			result.SlowQueryLogs = append(result.SlowQueryLogs, convertToSlowQueryLog(database.EnvironmentID, database.InstanceID, database.DatabaseName, database.ProjectID, log))
+			if value, exists := instanceMap[database.InstanceID]; exists {
+				value.totalQueryTime += log.Statistics.AverageQueryTime.AsDuration() * time.Duration(log.Statistics.Count)
+				value.totalCount += log.Statistics.Count
+			} else {
+				instanceMap[database.InstanceID] = &totalValue{
+					totalQueryTime: log.Statistics.AverageQueryTime.AsDuration() * time.Duration(log.Statistics.Count),
+					totalCount:     log.Statistics.Count,
+				}
+			}
 		}
+	}
+
+	for _, log := range result.SlowQueryLogs {
+		_, instanceID, _, err := getEnvironmentInstanceDatabaseID(log.Resource)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to get instance id %q", err.Error())
+		}
+		totalQueryTime := log.Statistics.AverageQueryTime.AsDuration() * time.Duration(log.Statistics.Count)
+		log.Statistics.QueryTimePercent = float64(totalQueryTime) / float64(instanceMap[instanceID].totalQueryTime)
+		log.Statistics.CountPercent = float64(log.Statistics.Count) / float64(instanceMap[instanceID].totalCount)
 	}
 
 	result, err = sortSlowQueryLogResponse(result, orderByKeys)
@@ -1039,4 +1322,71 @@ func convertPeriodTsToDuration(periodTs int) (*durationpb.Duration, error) {
 		return nil, errors.New("invalid period")
 	}
 	return durationpb.New(time.Duration(periodTs) * time.Second), nil
+}
+
+// isProjectOwnerOrDeveloper returns whether a principal is a project owner or developer in the project.
+func isProjectOwnerOrDeveloper(principalID int, projectPolicy *store.IAMPolicyMessage) bool {
+	for _, binding := range projectPolicy.Bindings {
+		if binding.Role != api.Owner && binding.Role != api.Developer {
+			continue
+		}
+		for _, member := range binding.Members {
+			if member.ID == principalID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func stripeAndConvertToServiceSecrets(secrets *storepb.Secrets, environmentID, instanceID, databaseName string) []*v1pb.Secret {
+	var serviceSecrets []*v1pb.Secret
+	if secrets == nil || len(secrets.Items) == 0 {
+		return serviceSecrets
+	}
+	for _, secret := range secrets.Items {
+		serviceSecrets = append(serviceSecrets, stripeAndConvertToServiceSecret(secret, environmentID, instanceID, databaseName))
+	}
+	return serviceSecrets
+}
+
+func stripeAndConvertToServiceSecret(secretEntry *storepb.SecretItem, environmentID, instanceID, databaseName string) *v1pb.Secret {
+	return &v1pb.Secret{
+		Name:        fmt.Sprintf("%s%s/%s%s/%s%s/%s%s", environmentNamePrefix, environmentID, instanceNamePrefix, instanceID, databaseIDPrefix, databaseName, secretNamePrefix, secretEntry.Name),
+		Value:       "", /* stripped */
+		Description: secretEntry.Description,
+	}
+}
+
+func isSecretValid(secret *storepb.SecretItem) error {
+	// Names can not be empty.
+	if secret.Name == "" {
+		return errors.Errorf("invalid secret name: %s, name can not be empty", secret.Name)
+	}
+	// Values can not be empty.
+	if secret.Value == "" {
+		return errors.Errorf("the value of secret: %s can not be empty", secret.Name)
+	}
+
+	// Names must not start with the 'BYTEBASE_' prefix.
+	bytebaseCaseInsensitivePrefixRegexp := regexp.MustCompile(`(?i)^BYTEBASE_`)
+	if bytebaseCaseInsensitivePrefixRegexp.MatchString(secret.Name) {
+		return errors.Errorf("invalid secret name: %s, name must not start with the 'BYTEBASE_' prefix", secret.Name)
+	}
+	// Names must not start with a number.
+	if unicode.IsDigit(rune(secret.Name[0])) {
+		return errors.Errorf("invalid secret name: %s, name must not start with a number", secret.Name)
+	}
+
+	// Names can only contain alphanumeric characters ([A-Z], [0-9]) or underscores (_). Spaces are not allowed.
+	for _, c := range secret.Name {
+		if !isUpperCaseLetter(c) && !unicode.IsDigit(c) && c != '_' {
+			return errors.Errorf("invalid secret name: %s, expect [A-Z], [0-9], '_', but meet: %v", secret.Name, c)
+		}
+	}
+	return nil
+}
+
+func isUpperCaseLetter(c rune) bool {
+	return 'A' <= c && c <= 'Z'
 }

@@ -66,6 +66,9 @@ const (
 	// FeatureAuditLog enables viewing audit logs.
 	FeatureAuditLog FeatureType = "bb.feature.audit-log"
 
+	// FeatureCustomRole enables customizing roles.
+	FeatureCustomRole FeatureType = "bb.feature.custom-role"
+
 	// Branding.
 
 	// FeatureBranding enables customized branding.
@@ -113,6 +116,8 @@ const (
 	FeatureSQLReview FeatureType = "bb.feature.sql-review"
 	// FeatureTaskScheduleTime allows user to run task at a scheduled time.
 	FeatureTaskScheduleTime FeatureType = "bb.feature.task-schedule-time"
+	// FeatureEncryptedSecrets is a feature that allows user to setting the encrypted secrets for the database.
+	FeatureEncryptedSecrets FeatureType = "bb.feature.encrypted-secrets"
 
 	// VCS Integration.
 
@@ -182,6 +187,8 @@ func (e FeatureType) Name() string {
 		return "Watermark"
 	case FeatureAuditLog:
 		return "Audit log"
+	case FeatureCustomRole:
+		return "Custom role"
 	// Branding
 	case FeatureBranding:
 		return "Branding"
@@ -202,6 +209,8 @@ func (e FeatureType) Name() string {
 		return "SQL review"
 	case FeatureTaskScheduleTime:
 		return "Task schedule time"
+	case FeatureEncryptedSecrets:
+		return "Encrypted secrets"
 	// VCS Integration
 	case FeatureVCSSchemaWriteBack:
 		return "Schema write-back"
@@ -260,11 +269,12 @@ func (e FeatureType) minimumSupportedPlan() PlanType {
 // plan in [FREE, TEAM, Enterprise].
 var FeatureMatrix = map[FeatureType][3]bool{
 	// Admin & Security
-	FeatureSSO:       {false, false, true},
-	Feature2FA:       {false, false, true},
-	FeatureRBAC:      {true, true, true},
-	FeatureWatermark: {false, false, true},
-	FeatureAuditLog:  {false, false, true},
+	FeatureSSO:        {false, false, true},
+	Feature2FA:        {false, false, true},
+	FeatureRBAC:       {true, true, true},
+	FeatureWatermark:  {false, false, true},
+	FeatureAuditLog:   {false, false, true},
+	FeatureCustomRole: {false, false, true},
 	// Branding
 	FeatureBranding: {false, false, true},
 	// Change Workflow
@@ -276,6 +286,7 @@ var FeatureMatrix = map[FeatureType][3]bool{
 	FeatureSchemaDrift:      {false, false, true},
 	FeatureSQLReview:        {true, true, true},
 	FeatureTaskScheduleTime: {false, true, true},
+	FeatureEncryptedSecrets: {false, true, true},
 	// VCS Integration
 	FeatureVCSSchemaWriteBack:   {false, true, true},
 	FeatureVCSSheetSync:         {false, true, true},

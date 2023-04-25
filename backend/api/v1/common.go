@@ -31,6 +31,7 @@ const (
 	riskPrefix                   = "risks/"
 	reviewPrefix                 = "reviews/"
 	rolePrefix                   = "roles/"
+	secretNamePrefix             = "secrets/"
 
 	deploymentConfigSuffix = "/deploymentConfig"
 	backupSettingSuffix    = "/backupSetting"
@@ -110,6 +111,15 @@ func getEnvironmentInstanceDatabaseID(name string) (string, string, string, erro
 		return "", "", "", err
 	}
 	return tokens[0], tokens[1], tokens[2], nil
+}
+
+func getEnvironmentInstanceDatabaseIDSecretName(name string) (string, string, string, string, error) {
+	// the instance request should be environments/{environment-id}/instances/{instance-id}/databases/{database-id}/secrets/{secret-name}
+	tokens, err := getNameParentTokens(name, environmentNamePrefix, instanceNamePrefix, databaseIDPrefix, secretNamePrefix)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return tokens[0], tokens[1], tokens[2], tokens[3], nil
 }
 
 func getEnvironmentIDInstanceDatabaseIDBackupName(name string) (string, string, string, string, error) {
@@ -506,6 +516,8 @@ func convertToEngine(engine db.Type) v1pb.Engine {
 		return v1pb.Engine_REDSHIFT
 	case db.MariaDB:
 		return v1pb.Engine_MARIADB
+	case db.OceanBase:
+		return v1pb.Engine_OCEANBASE
 	}
 	return v1pb.Engine_ENGINE_UNSPECIFIED
 }
@@ -538,6 +550,8 @@ func convertEngine(engine v1pb.Engine) db.Type {
 		return db.Redshift
 	case v1pb.Engine_MARIADB:
 		return db.MariaDB
+	case v1pb.Engine_OCEANBASE:
+		return db.OceanBase
 	}
 	return db.UnknownType
 }

@@ -10,6 +10,7 @@ import (
 	advisorDB "github.com/bytebase/bytebase/backend/plugin/advisor/db"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/store"
+	"github.com/bytebase/bytebase/backend/utils"
 )
 
 // NewStatementAdvisorSimpleExecutor creates a task check statement simple advisor executor.
@@ -60,7 +61,7 @@ func (e *StatementAdvisorSimpleExecutor) Run(ctx context.Context, taskCheckRun *
 		advisorType = advisor.Fake
 	case api.TaskCheckDatabaseStatementSyntax:
 		switch instance.Engine {
-		case db.MySQL, db.TiDB, db.MariaDB:
+		case db.MySQL, db.TiDB, db.MariaDB, db.OceanBase:
 			advisorType = advisor.MySQLSyntax
 		case db.Postgres:
 			advisorType = advisor.PostgreSQLSyntax
@@ -74,6 +75,10 @@ func (e *StatementAdvisorSimpleExecutor) Run(ctx context.Context, taskCheckRun *
 		return nil, err
 	}
 
+	materials := utils.GetSecretMapFromDatabaseMessage(database)
+	// To avoid leaking the rendered statement, the error message should use the original statement and not the rendered statement.
+	renderedStatement := utils.RenderStatement(payload.Statement, materials)
+
 	adviceList, err := advisor.Check(
 		dbType,
 		advisorType,
@@ -82,7 +87,7 @@ func (e *StatementAdvisorSimpleExecutor) Run(ctx context.Context, taskCheckRun *
 			Collation:  dbSchema.Metadata.Collation,
 			SyntaxMode: task.GetSyntaxMode(),
 		},
-		payload.Statement,
+		renderedStatement,
 	)
 	if err != nil {
 		return nil, common.Wrapf(err, common.Internal, "failed to check statement")

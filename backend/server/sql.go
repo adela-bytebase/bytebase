@@ -66,7 +66,7 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 		}
 
 		var tlsConfig db.TLSConfig
-		supportTLS := (connectionInfo.Engine == db.ClickHouse || connectionInfo.Engine == db.MySQL || connectionInfo.Engine == db.TiDB || connectionInfo.Engine == db.MariaDB)
+		supportTLS := connectionInfo.Engine == db.ClickHouse || connectionInfo.Engine == db.MySQL || connectionInfo.Engine == db.TiDB || connectionInfo.Engine == db.MariaDB || connectionInfo.Engine == db.OceanBase
 		if supportTLS {
 			if connectionInfo.SslCa == nil && connectionInfo.SslCert == nil && connectionInfo.SslKey == nil && connectionInfo.InstanceID != nil {
 				// Frontend will not pass ssl related field if user don't modify ssl suite, we need get ssl suite from database for this case.
@@ -261,7 +261,7 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 		// Database Access Control for MySQL dialect.
 		// MySQL dialect can query cross the database.
 		// We need special check.
-		if instance.Engine == db.MySQL || instance.Engine == db.TiDB || instance.Engine == db.MariaDB {
+		if instance.Engine == db.MySQL || instance.Engine == db.TiDB || instance.Engine == db.MariaDB || instance.Engine == db.OceanBase {
 			databaseList, err := parser.ExtractDatabaseList(parser.MySQL, exec.Statement)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to extract database list: %q", exec.Statement)).SetInternal(err)
@@ -385,7 +385,7 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 
 		var sensitiveSchemaInfo *db.SensitiveSchemaInfo
 		switch instance.Engine {
-		case db.MySQL, db.TiDB, db.MariaDB:
+		case db.MySQL, db.TiDB, db.MariaDB, db.OceanBase:
 			databaseList, err := parser.ExtractDatabaseList(parser.MySQL, exec.Statement)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to get database list: %s", exec.Statement)).SetInternal(err)
@@ -644,7 +644,7 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 
 			var singleSQLResults []api.SingleSQLResult
 			// We split the query into multiple statements and execute them one by one for MySQL and PostgreSQL.
-			if instance.Engine == db.MySQL || instance.Engine == db.TiDB || instance.Engine == db.MariaDB || instance.Engine == db.Postgres || instance.Engine == db.Oracle || instance.Engine == db.Redshift {
+			if instance.Engine == db.MySQL || instance.Engine == db.TiDB || instance.Engine == db.MariaDB || instance.Engine == db.Postgres || instance.Engine == db.Oracle || instance.Engine == db.Redshift || instance.Engine == db.OceanBase {
 				singleSQLs, err := parser.SplitMultiSQL(parser.EngineType(instance.Engine), exec.Statement)
 				if err != nil {
 					return nil, errors.Wrapf(err, "failed to split statements")
@@ -789,6 +789,8 @@ func convertToParserEngine(engine db.Type) parser.EngineType {
 		return parser.Oracle
 	case db.MSSQL:
 		return parser.MSSQL
+	case db.OceanBase:
+		return parser.OceanBase
 	}
 	return parser.Standard
 }
@@ -1037,12 +1039,12 @@ func (s *Server) hasDatabaseAccessRights(ctx context.Context, principalID int, r
 		return false, err
 	}
 
-	// Only project member can access database.
+	// Only project owner or developer can access database.
 	projectPolicy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{ProjectID: &project.ResourceID})
 	if err != nil {
 		return false, err
 	}
-	if !hasActiveProjectMembership(principalID, projectPolicy) {
+	if !isProjectOwnerOrDeveloper(principalID, projectPolicy) {
 		return false, nil
 	}
 

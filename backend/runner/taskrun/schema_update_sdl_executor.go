@@ -18,6 +18,7 @@ import (
 	"github.com/bytebase/bytebase/backend/runner/schemasync"
 	"github.com/bytebase/bytebase/backend/runner/utils"
 	"github.com/bytebase/bytebase/backend/store"
+	backendutils "github.com/bytebase/bytebase/backend/utils"
 )
 
 // NewSchemaUpdateSDLExecutor creates a schema update (SDL) task executor.
@@ -51,6 +52,18 @@ func (exec *SchemaUpdateSDLExecutor) RunOnce(ctx context.Context, task *store.Ta
 		return true, nil, errors.Wrap(err, "invalid database schema update payload")
 	}
 
+	statement := payload.Statement
+	if payload.SheetID > 0 {
+		sheet, err := exec.store.GetSheet(ctx, &api.SheetFind{ID: &payload.SheetID, LoadFull: true}, api.SystemBotID)
+		if err != nil {
+			return true, nil, err
+		}
+		if sheet == nil {
+			return true, nil, errors.Errorf("sheet ID %v not found", payload.SheetID)
+		}
+		statement = sheet.Statement
+	}
+
 	instance, err := exec.store.GetInstanceV2(ctx, &store.FindInstanceMessage{UID: &task.InstanceID})
 	if err != nil {
 		return true, nil, err
@@ -60,7 +73,11 @@ func (exec *SchemaUpdateSDLExecutor) RunOnce(ctx context.Context, task *store.Ta
 		return true, nil, err
 	}
 
-	ddl, err := utils.ComputeDatabaseSchemaDiff(ctx, instance, database.DatabaseName, exec.dbFactory, payload.Statement)
+	materials := backendutils.GetSecretMapFromDatabaseMessage(database)
+	// To avoid leaking the rendered statement, the error message should use the original statement and not the rendered statement.
+	renderedStatement := backendutils.RenderStatement(statement, materials)
+
+	ddl, err := utils.ComputeDatabaseSchemaDiff(ctx, instance, database.DatabaseName, exec.dbFactory, renderedStatement)
 	if err != nil {
 		return true, nil, errors.Wrap(err, "invalid database schema diff")
 	}

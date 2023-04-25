@@ -31,6 +31,7 @@ func init() {
 	db.Register(db.MySQL, newDriver)
 	db.Register(db.TiDB, newDriver)
 	db.Register(db.MariaDB, newDriver)
+	db.Register(db.OceanBase, newDriver)
 }
 
 // Driver is the MySQL driver.
@@ -69,9 +70,13 @@ func (driver *Driver) Open(ctx context.Context, dbType db.Type, connCfg db.Conne
 
 	port := connCfg.Port
 	if port == "" {
-		port = "3306"
-		if dbType == db.TiDB {
+		switch dbType {
+		case db.TiDB:
 			port = "4000"
+		case db.OceanBase:
+			port = "2883"
+		default:
+			port = "3306"
 		}
 	}
 
@@ -253,24 +258,12 @@ func splitAndTransformDelimiter(statement string) ([]string, error) {
 	var trunks []string
 
 	var out bytes.Buffer
-	statements, err := bbparser.SplitMultiSQL(bbparser.MySQL, statement)
+	statements, err := bbparser.SplitMultiSQLAndNormalize(bbparser.MySQL, statement)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to split SQL statements")
 	}
-	delimiter := `;`
 	for _, singleSQL := range statements {
 		stmt := singleSQL.Text
-		if bbparser.IsDelimiter(stmt) {
-			delimiter, err = bbparser.ExtractDelimiter(stmt)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to extract delimiter")
-			}
-			continue
-		}
-		if delimiter != ";" {
-			// Trim delimiter
-			stmt = fmt.Sprintf("%s;", stmt[:len(stmt)-len(delimiter)])
-		}
 		if _, err = out.Write([]byte(stmt)); err != nil {
 			return nil, errors.Wrapf(err, "failed to write SQL statement")
 		}

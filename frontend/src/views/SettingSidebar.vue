@@ -1,7 +1,7 @@
 <template>
   <!-- Navigation -->
   <nav class="flex-1 flex flex-col px-2 overflow-y-auto">
-    <BytebaseLogo class="w-full px-2 mb-3" />
+    <BytebaseLogo class="w-full px-2" />
     <div class="space-y-1">
       <button
         class="group flex items-center px-1 py-2 text-base leading-5 font-normal rounded-md text-gray-700 focus:outline-none"
@@ -54,7 +54,7 @@
           <router-link
             to="/setting/role"
             class="outline-item group w-full flex items-center pl-11 pr-2 py-2"
-            >{{ $t("settings.sidebar.roles") }}</router-link
+            >{{ $t("settings.sidebar.custom-roles") }}</router-link
           >
           <router-link
             v-if="showProjectItem"

@@ -195,6 +195,42 @@ func collapseUnion(query string) (string, error) {
 	return buf.String(), nil
 }
 
+// SplitMultiSQLAndNormalize split multiple SQLs and normalize them.
+// For MySQL, filter DELIMITER statements and replace all non-semicolon delimiters with semicolons.
+func SplitMultiSQLAndNormalize(engineType EngineType, statement string) ([]SingleSQL, error) {
+	switch engineType {
+	case MySQL:
+		list, err := SplitMultiSQL(MySQL, statement)
+		if err != nil {
+			return nil, err
+		}
+
+		var result []SingleSQL
+		delimiter := `;`
+		for _, sql := range list {
+			if IsDelimiter(sql.Text) {
+				delimiter, err = ExtractDelimiter(sql.Text)
+				if err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if delimiter != ";" {
+				result = append(result, SingleSQL{
+					Text:     fmt.Sprintf("%s;", strings.TrimSuffix(sql.Text, delimiter)),
+					LastLine: sql.LastLine,
+					Empty:    sql.Empty,
+				})
+			} else {
+				result = append(result, sql)
+			}
+		}
+		return result, nil
+	default:
+		return SplitMultiSQL(engineType, statement)
+	}
+}
+
 // SplitMultiSQL splits statement into a slice of the single SQL.
 func SplitMultiSQL(engineType EngineType, statement string) ([]SingleSQL, error) {
 	var list []SingleSQL
@@ -206,7 +242,7 @@ func SplitMultiSQL(engineType EngineType, statement string) ([]SingleSQL, error)
 	case Postgres, Redshift:
 		t := newTokenizer(statement)
 		list, err = t.splitPostgreSQLMultiSQL()
-	case MySQL, TiDB, MariaDB:
+	case MySQL, TiDB, MariaDB, OceanBase:
 		t := newTokenizer(statement)
 		list, err = t.splitMySQLMultiSQL()
 	default:
@@ -241,7 +277,7 @@ func SplitMultiSQLStream(engineType EngineType, src io.Reader, f func(string) er
 	case Postgres, Redshift:
 		t := newStreamTokenizer(src, f)
 		list, err = t.splitPostgreSQLMultiSQL()
-	case MySQL, TiDB, MariaDB:
+	case MySQL, TiDB, MariaDB, OceanBase:
 		t := newStreamTokenizer(src, f)
 		list, err = t.splitMySQLMultiSQL()
 	default:
@@ -429,7 +465,7 @@ func TypeString(tp byte) string {
 // ExtractDatabaseList extracts all databases from statement.
 func ExtractDatabaseList(engineType EngineType, statement string) ([]string, error) {
 	switch engineType {
-	case MySQL, TiDB, MariaDB:
+	case MySQL, TiDB, MariaDB, OceanBase:
 		return extractMySQLDatabaseList(statement)
 	default:
 		return nil, errors.Errorf("engine type is not supported: %s", engineType)

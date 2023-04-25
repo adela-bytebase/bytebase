@@ -92,12 +92,7 @@ export const useSubscriptionStore = defineStore("subscription", {
       return this.canUpgradeTrial;
     },
     canUpgradeTrial(state): boolean {
-      if (!state.subscription) {
-        return false;
-      }
-      return (
-        state.subscription.trialing && this.currentPlan < PlanType.ENTERPRISE
-      );
+      return this.currentPlan < PlanType.ENTERPRISE;
     },
   },
   actions: {
@@ -130,6 +125,21 @@ export const useSubscriptionStore = defineStore("subscription", {
         )}.title`
       );
       return t("subscription.require-subscription", { requiredPlan: plan });
+    },
+    getFeatureRequiredPlanString(type: FeatureType): string {
+      const { t } = useI18n();
+      const minRequiredPlan = this.getMinimumRequiredPlan(type);
+
+      const requiredPlan = t(
+        `subscription.plan.${planTypeToString(minRequiredPlan)}.title`
+      );
+      const feature = t(
+        `subscription.features.${type.replace(/\./g, "-")}.title`
+      );
+      return t("subscription.feature-require-subscription", {
+        feature,
+        requiredPlan,
+      });
     },
     setSubscription(subscription: Subscription) {
       this.subscription = subscription;

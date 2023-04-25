@@ -42,7 +42,19 @@ func (exec *SchemaUpdateGhostSyncExecutor) RunOnce(ctx context.Context, task *st
 	if err := json.Unmarshal([]byte(task.Payload), payload); err != nil {
 		return true, nil, errors.Wrap(err, "invalid database schema update gh-ost sync payload")
 	}
-	return exec.runGhostMigration(ctx, exec.store, task, payload.Statement)
+	statement := payload.Statement
+	if payload.SheetID > 0 {
+		sheet, err := exec.store.GetSheet(ctx, &api.SheetFind{ID: &payload.SheetID, LoadFull: true}, api.SystemBotID)
+		if err != nil {
+			return true, nil, err
+		}
+		if sheet == nil {
+			return true, nil, errors.Errorf("sheet ID %v not found", payload.SheetID)
+		}
+		statement = sheet.Statement
+	}
+
+	return exec.runGhostMigration(ctx, exec.store, task, statement)
 }
 
 type sharedGhostState struct {
@@ -88,7 +100,11 @@ func (exec *SchemaUpdateGhostSyncExecutor) runGhostMigration(ctx context.Context
 		return true, nil, common.Errorf(common.Internal, "failed to find instance user by instanceID %d", task.InstanceID)
 	}
 
-	config, err := utils.GetGhostConfig(task.ID, database, adminDataSource, exec.secret, instanceUsers, tableName, statement, false, 10000000)
+	materials := utils.GetSecretMapFromDatabaseMessage(database)
+	// To avoid leaking the rendered statement, the error message should use the original statement and not the rendered statement.
+	renderedStatement := utils.RenderStatement(statement, materials)
+
+	config, err := utils.GetGhostConfig(task.ID, database, adminDataSource, exec.secret, instanceUsers, tableName, renderedStatement, false, 10000000)
 	if err != nil {
 		return true, nil, err
 	}

@@ -30,7 +30,7 @@
           :closable="allowRemoveRole(role)"
           @close="removeRole(item, role)"
         >
-          {{ roleNameText(extractRoleResourceName(role)) }}
+          {{ displayRoleTitle(role) }}
         </NTag>
         <NPopselect
           v-if="allowAddRole(item)"
@@ -80,48 +80,41 @@ import {
   SelectOption,
   useDialog,
 } from "naive-ui";
-import { cloneDeep, uniq } from "lodash-es";
+import { cloneDeep } from "lodash-es";
 import { useI18n } from "vue-i18n";
 
-import { Principal, Project, ProjectRoleType, unknown } from "@/types";
+import { Project, ProjectRoleType } from "@/types";
 import { type BBGridColumn, type BBGridRow, BBGrid } from "@/bbkit";
 import { IamPolicy } from "@/types/proto/v1/project_service";
 import {
-  convertUserToPrincipal,
-  extractUserEmail,
   featureToRef,
   useCurrentUser,
   useProjectIamPolicyStore,
   useRoleStore,
-  useUserStore,
 } from "@/store";
 import {
-  extractRoleResourceName,
   hasPermissionInProject,
   hasWorkspacePermission,
-  roleNameText,
+  displayRoleTitle,
   addRoleToProjectIamPolicy,
   removeRoleFromProjectIamPolicy,
   removeUserFromProjectIamPolicy,
 } from "@/utils";
+import { ComposedPrincipal } from "../common";
 
-export type ComposedPrincipal = {
-  email: string;
-  principal: Principal;
-  roleList: ProjectRoleType[];
-};
 export type ComposedPrincipalRow = BBGridRow<ComposedPrincipal>;
 
 const props = defineProps<{
   project: Project;
   iamPolicy: IamPolicy;
+  editable: boolean;
+  composedPrincipalList: ComposedPrincipal[];
 }>();
 
 const ROLE_OWNER = "roles/OWNER";
 const { t } = useI18n();
 const hasRBACFeature = featureToRef("bb.feature.rbac");
 const currentUser = useCurrentUser();
-const userStore = useUserStore();
 const roleStore = useRoleStore();
 const projectIamPolicyStore = useProjectIamPolicyStore();
 const dialog = useDialog();
@@ -149,55 +142,11 @@ const columnList = computed(() => {
   return [ACCOUNT, OPERATIONS];
 });
 
-const composedPrincipalList = computed(() => {
-  const distinctUserResourceNameList = uniq(
-    props.iamPolicy.bindings.flatMap((binding) => binding.members)
-  );
-
-  const userEmailList = distinctUserResourceNameList.map((user) =>
-    extractUserEmail(user)
-  );
-
-  const composedUserList = userEmailList.map((email) => {
-    const user = userStore.getUserByEmail(email);
-    const principal = user
-      ? convertUserToPrincipal(user)
-      : unknown("PRINCIPAL");
-    return { email, user, principal };
-  });
-
-  const usersByRole = props.iamPolicy.bindings.map((binding) => {
-    return {
-      role: binding.role,
-      users: new Set(binding.members),
-    };
-  });
-  const composedPrincipalList = composedUserList.map<ComposedPrincipal>(
-    ({ email, principal }) => {
-      const resourceName = `user:${email}`;
-      const roleList = usersByRole
-        .filter((binding) => binding.users.has(resourceName))
-        .map((binding) => binding.role);
-      return {
-        email,
-        principal,
-        roleList,
-      };
-    }
-  );
-
-  composedPrincipalList.sort((a, b) => {
-    const aIsOwner = a.roleList.includes(ROLE_OWNER);
-    const bIsOwner = b.roleList.includes(ROLE_OWNER);
-    if (aIsOwner && !bIsOwner) return -1;
-    if (!aIsOwner && bIsOwner) return 1;
-    return Number(a.principal.id) - Number(b.principal.id);
-  });
-
-  return composedPrincipalList;
-});
-
 const allowAdmin = computed(() => {
+  if (!props.editable) {
+    return false;
+  }
+
   if (
     hasWorkspacePermission(
       "bb.permission.workspace.manage-project",
@@ -242,7 +191,7 @@ const allowRemoveRole = (role: ProjectRoleType) => {
 
 const removeRole = (item: ComposedPrincipal, role: string) => {
   const title = t("project.settings.members.revoke-role-from-user", {
-    role: roleNameText(extractRoleResourceName(role)),
+    role: displayRoleTitle(role),
     user: item.principal.name,
   });
   const d = dialog.error({
@@ -277,9 +226,8 @@ const getRoleOptions = (item: ComposedPrincipal) => {
   return roleStore.roleList
     .filter((role) => !item.roleList.includes(role.name))
     .map<SelectOption>((role) => {
-      const name = extractRoleResourceName(role.name);
       return {
-        label: roleNameText(name),
+        label: displayRoleTitle(role.name),
         value: role.name,
       };
     });

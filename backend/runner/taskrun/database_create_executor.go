@@ -51,8 +51,19 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 	if err := json.Unmarshal([]byte(task.Payload), payload); err != nil {
 		return true, nil, errors.Wrap(err, "invalid create database payload")
 	}
+	statement := payload.Statement
+	if payload.SheetID > 0 {
+		sheet, err := exec.store.GetSheet(ctx, &api.SheetFind{ID: &payload.SheetID, LoadFull: true}, api.SystemBotID)
+		if err != nil {
+			return true, nil, err
+		}
+		if sheet == nil {
+			return true, nil, errors.Errorf("sheet ID %v not found", payload.SheetID)
+		}
+		statement = sheet.Statement
+	}
 
-	statement := strings.TrimSpace(payload.Statement)
+	statement = strings.TrimSpace(statement)
 	if statement == "" {
 		return true, nil, errors.Errorf("empty create database statement")
 	}
@@ -85,9 +96,19 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 		zap.String("database", payload.DatabaseName),
 		zap.String("statement", statement),
 	)
-	defaultDBDriver, err := exec.dbFactory.GetAdminDatabaseDriver(ctx, instance, "")
-	if err != nil {
-		return true, nil, err
+	var defaultDBDriver db.Driver
+	if instance.Engine == db.MongoDB {
+		// For MongoDB, it allows us to connect to the non-existing database. So we pass the database name to driver to let us connect to the specific database.
+		// And run the create collection statement later.
+		defaultDBDriver, err = exec.dbFactory.GetAdminDatabaseDriver(ctx, instance, payload.DatabaseName)
+		if err != nil {
+			return true, nil, err
+		}
+	} else {
+		defaultDBDriver, err = exec.dbFactory.GetAdminDatabaseDriver(ctx, instance, "")
+		if err != nil {
+			return true, nil, err
+		}
 	}
 	defer defaultDBDriver.Close(ctx)
 	if _, err := defaultDBDriver.Execute(ctx, statement, true /* createDatabase */); err != nil {
@@ -247,7 +268,7 @@ func (exec *DatabaseCreateExecutor) createInitialSchema(ctx context.Context, env
 
 func getConnectionStatement(dbType db.Type, databaseName string) (string, error) {
 	switch dbType {
-	case db.MySQL, db.TiDB, db.MariaDB:
+	case db.MySQL, db.TiDB, db.MariaDB, db.OceanBase:
 		return fmt.Sprintf("USE `%s`;\n", databaseName), nil
 	case db.MSSQL:
 		return fmt.Sprintf(`USE "%s";\n`, databaseName), nil
