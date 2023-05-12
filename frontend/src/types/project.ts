@@ -1,13 +1,20 @@
 import { RowStatus } from "./common";
-import { ProjectId, ResourceId } from "./id";
+import { ProjectId } from "./id";
 import { OAuthToken } from "./oauth";
 import { Principal } from "./principal";
 import { ExternalRepositoryInfo, RepositoryConfig } from "./repository";
 import { VCS } from "./vcs";
 
-export type ProjectRoleType = "OWNER" | "DEVELOPER" | string;
+export type ProjectRoleType =
+  | "OWNER"
+  | "DEVELOPER"
+  | "EXPORTER"
+  | "QUERIER"
+  | string;
 export const ProjectRoleTypeOwner: ProjectRoleType = "OWNER";
 export const ProjectRoleTypeDeveloper: ProjectRoleType = "DEVELOPER";
+export const ProjectRoleTypeExporter: ProjectRoleType = "EXPORTER";
+export const ProjectRoleTypeQuerier: ProjectRoleType = "QUERIER";
 
 export type ProjectWorkflowType = "UI" | "VCS";
 
@@ -31,17 +38,6 @@ export type Project = {
   memberList: ProjectMember[];
   workflowType: ProjectWorkflowType;
   visibility: ProjectVisibility;
-  tenantMode: ProjectTenantMode;
-  dbNameTemplate: string;
-  schemaChangeType: SchemaChangeType;
-};
-
-export type ProjectCreate = {
-  resourceId: ResourceId;
-
-  // Domain specific fields
-  name: string;
-  key: string;
   tenantMode: ProjectTenantMode;
   dbNameTemplate: string;
   schemaChangeType: SchemaChangeType;

@@ -3,6 +3,8 @@ package v1
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -50,6 +52,9 @@ func (s *ReviewService) GetReview(ctx context.Context, request *v1pb.GetReviewRe
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
 	}
+	if issue == nil {
+		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
+	}
 	review, err := convertToReview(ctx, s.store, issue)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert to review, error: %v", err)
@@ -66,6 +71,9 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
+	}
+	if issue == nil {
+		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
 	}
 	payload := &storepb.IssuePayload{}
 	if err := protojson.Unmarshal([]byte(issue.Payload), payload); err != nil {
@@ -112,6 +120,58 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 		Status:      storepb.IssuePayloadApproval_Approver_APPROVED,
 		PrincipalId: int32(principalID),
 	})
+
+	// Grant the privilege if the issue is approved.
+	if len(payload.Approval.Approvers) > 0 && issue.Type == api.IssueGrantRequest {
+		policy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{ProjectID: &issue.Project.ResourceID})
+		if err != nil {
+			return nil, err
+		}
+		var newConditionExpr string
+		if payload.GrantRequest.Condition != nil {
+			newConditionExpr = payload.GrantRequest.Condition.Expression
+		}
+		updated := false
+
+		userID, err := strconv.Atoi(strings.TrimPrefix(payload.GrantRequest.User, "users/"))
+		if err != nil {
+			return nil, err
+		}
+		newUser, err := s.store.GetUserByID(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if newUser == nil {
+			return nil, status.Errorf(codes.Internal, "user %v not found", userID)
+		}
+		for _, binding := range policy.Bindings {
+			if binding.Role != api.Role(payload.GrantRequest.Role) {
+				continue
+			}
+			var oldConditionExpr string
+			if binding.Condition != nil {
+				oldConditionExpr = binding.Condition.Expression
+			}
+			if oldConditionExpr != newConditionExpr {
+				continue
+			}
+			// Append
+			binding.Members = append(binding.Members, newUser)
+			updated = true
+			break
+		}
+		if !updated {
+			role := api.Role(strings.TrimPrefix(payload.GrantRequest.Role, "roles/"))
+			policy.Bindings = append(policy.Bindings, &store.PolicyBinding{
+				Role:      role,
+				Members:   []*store.UserMessage{newUser},
+				Condition: payload.GrantRequest.Condition,
+			})
+		}
+		if _, err := s.store.SetProjectIAMPolicy(ctx, policy, api.SystemBotID, issue.Project.UID); err != nil {
+			return nil, err
+		}
+	}
 
 	stepsSkipped, err := utils.SkipApprovalStepIfNeeded(ctx, s.store, issue.Project.UID, payload.Approval)
 	if err != nil {
@@ -198,6 +258,9 @@ func (s *ReviewService) UpdateReview(ctx context.Context, request *v1pb.UpdateRe
 	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
+	}
+	if issue == nil {
+		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
 	}
 
 	patch := &store.UpdateIssueMessage{}

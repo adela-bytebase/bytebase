@@ -57,6 +57,7 @@ import {
   useCurrentUser,
   useSubscriptionStore,
   useUserStore,
+  useProjectV1Store,
 } from "@/store";
 import { useConversationStore } from "@/plugins/ai/store";
 import { PlanType } from "@/types/proto/v1/subscription_service";
@@ -165,6 +166,8 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
                       "quickaction.bb.instance.create",
+                      "quickaction.bb.issue.grant.request.querier",
+                      "quickaction.bb.issue.grant.request.exporter",
                     ]
                   : [
                       "quickaction.bb.database.schema.update",
@@ -172,6 +175,8 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
                       "quickaction.bb.instance.create",
+                      "quickaction.bb.issue.grant.request.querier",
+                      "quickaction.bb.issue.grant.request.exporter",
                     ];
                 const dbaList: QuickActionType[] = hasDBAWorkflowFeature
                   ? [
@@ -180,6 +185,8 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
                       "quickaction.bb.instance.create",
+                      "quickaction.bb.issue.grant.request.querier",
+                      "quickaction.bb.issue.grant.request.exporter",
                     ]
                   : [
                       "quickaction.bb.database.schema.update",
@@ -187,18 +194,24 @@ const routes: Array<RouteRecordRaw> = [
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
                       "quickaction.bb.instance.create",
+                      "quickaction.bb.issue.grant.request.querier",
+                      "quickaction.bb.issue.grant.request.exporter",
                     ];
                 const developerList: QuickActionType[] = hasDBAWorkflowFeature
                   ? [
                       "quickaction.bb.database.schema.update",
                       "quickaction.bb.database.data.update",
                       "quickaction.bb.database.schema.sync",
+                      "quickaction.bb.issue.grant.request.querier",
+                      "quickaction.bb.issue.grant.request.exporter",
                     ]
                   : [
                       "quickaction.bb.database.schema.update",
                       "quickaction.bb.database.data.update",
                       "quickaction.bb.database.schema.sync",
                       "quickaction.bb.database.create",
+                      "quickaction.bb.issue.grant.request.querier",
+                      "quickaction.bb.issue.grant.request.exporter",
                     ];
                 return new Map([
                   ["OWNER", ownerList],
@@ -559,7 +572,7 @@ const routes: Array<RouteRecordRaw> = [
                   title: (route: RouteLocationNormalized) => {
                     const slug = route.params.sqlReviewPolicySlug as string;
                     return (
-                      useSQLReviewStore().getReviewPolicyByEnvironmentId(
+                      useSQLReviewStore().getReviewPolicyByEnvironmentUID(
                         idFromSlug(slug)
                       )?.name ?? ""
                     );
@@ -690,6 +703,7 @@ const routes: Array<RouteRecordRaw> = [
                   let allowAlterSchemaOrChangeData = false;
                   let allowCreateDB = false;
                   let allowTransferDB = false;
+                  let allowTransferOutDB = false;
                   if (
                     hasWorkspacePermission(
                       "bb.permission.workspace.manage-instance",
@@ -699,6 +713,7 @@ const routes: Array<RouteRecordRaw> = [
                     allowAlterSchemaOrChangeData = true;
                     allowCreateDB = true;
                     allowTransferDB = true;
+                    allowTransferOutDB = true;
                   } else {
                     const memberList = memberListInProject(
                       project,
@@ -711,6 +726,11 @@ const routes: Array<RouteRecordRaw> = [
                         "bb.permission.project.change-database"
                       );
                       allowTransferDB = hasPermissionInProject(
+                        project,
+                        currentUser.value,
+                        "bb.permission.project.transfer-database"
+                      );
+                      allowTransferOutDB = hasPermissionInProject(
                         project,
                         currentUser.value,
                         "bb.permission.project.transfer-database"
@@ -752,6 +772,16 @@ const routes: Array<RouteRecordRaw> = [
                   if (allowTransferDB) {
                     actionList.push("quickaction.bb.project.database.transfer");
                   }
+                  if (allowTransferOutDB) {
+                    actionList.push(
+                      "quickaction.bb.project.database.transfer-out"
+                    );
+                  }
+
+                  actionList.push(
+                    "quickaction.bb.issue.grant.request.querier",
+                    "quickaction.bb.issue.grant.request.exporter"
+                  );
 
                   return new Map([
                     ["OWNER", actionList],
@@ -1095,6 +1125,7 @@ router.beforeEach((to, from, next) => {
   const routerStore = useRouterStore();
   const projectWebhookStore = useProjectWebhookStore();
   const projectStore = useProjectStore();
+  const projectV1Store = useProjectV1Store();
 
   const isLoggedIn = authStore.isLoggedIn();
 
@@ -1414,6 +1445,7 @@ router.beforeEach((to, from, next) => {
   if (projectSlug) {
     projectStore
       .fetchProjectById(idFromSlug(projectSlug))
+      .then(() => projectV1Store.fetchProjectByUID(idFromSlug(projectSlug)))
       .then(() => {
         if (!projectWebhookSlug) {
           next();
@@ -1545,7 +1577,7 @@ router.beforeEach((to, from, next) => {
 
   if (sqlReviewPolicySlug) {
     useSQLReviewStore()
-      .fetchReviewPolicyByEnvironmentId(idFromSlug(sqlReviewPolicySlug))
+      .getOrFetchReviewPolicyByEnvironmentUID(idFromSlug(sqlReviewPolicySlug))
       .then(() => {
         next();
       })

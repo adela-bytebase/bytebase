@@ -29,7 +29,6 @@ import (
 	"github.com/pkg/errors"
 	scas "github.com/qiangmzsx/string-adapter/v2"
 	echoSwagger "github.com/swaggo/echo-swagger"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -79,13 +78,11 @@ import (
 	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 
 	// Register clickhouse driver.
-	"github.com/bytebase/bytebase/backend/plugin/db/clickhouse"
-	"github.com/bytebase/bytebase/backend/plugin/db/util"
 
 	// Register mysql driver.
-	"github.com/bytebase/bytebase/backend/plugin/db/mysql"
+
 	// Register postgres driver.
-	"github.com/bytebase/bytebase/backend/plugin/db/pg"
+
 	// Register snowflake driver.
 	_ "github.com/bytebase/bytebase/backend/plugin/db/snowflake"
 	// Register sqlite driver.
@@ -112,17 +109,17 @@ import (
 	_ "github.com/bytebase/bytebase/backend/plugin/advisor/pg"
 
 	// Register mysql differ driver.
-	_ "github.com/bytebase/bytebase/backend/plugin/parser/differ/mysql"
+	_ "github.com/bytebase/bytebase/backend/plugin/parser/sql/differ/mysql"
 	// Register postgres differ driver.
-	_ "github.com/bytebase/bytebase/backend/plugin/parser/differ/pg"
+	_ "github.com/bytebase/bytebase/backend/plugin/parser/sql/differ/pg"
 	// Register mysql edit driver.
-	_ "github.com/bytebase/bytebase/backend/plugin/parser/edit/mysql"
+	_ "github.com/bytebase/bytebase/backend/plugin/parser/sql/edit/mysql"
 	// Register postgres edit driver.
-	_ "github.com/bytebase/bytebase/backend/plugin/parser/edit/pg"
+	_ "github.com/bytebase/bytebase/backend/plugin/parser/sql/edit/pg"
 	// Register postgres parser driver.
-	_ "github.com/bytebase/bytebase/backend/plugin/parser/engine/pg"
+	_ "github.com/bytebase/bytebase/backend/plugin/parser/sql/engine/pg"
 	// Register mysql transform driver.
-	_ "github.com/bytebase/bytebase/backend/plugin/parser/transform/mysql"
+	_ "github.com/bytebase/bytebase/backend/plugin/parser/sql/transform/mysql"
 )
 
 const (
@@ -314,7 +311,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		InstanceDatabaseSyncChan:       make(chan *api.Instance, 100),
 		InstanceSlowQuerySyncChan:      make(chan *api.Instance, 100),
 		InstanceOutstandingConnections: make(map[int]int),
-		TestSlowQueryWeeklyEmailChan:   make(chan bool, 100),
 	}
 	s.store = storeInstance
 	s.licenseService, err = enterpriseService.NewLicenseService(profile.Mode, storeInstance)
@@ -649,9 +645,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	// Register prometheus metrics endpoint.
 	p := prometheus.NewPrometheus("api", nil)
 	p.Use(e)
-
-	// TODO: remove this on May 2023
-	go s.backfillInstanceChangeHistory(ctx)
 
 	serverStarted = true
 	return s, nil
@@ -1065,6 +1058,23 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 		return errors.Wrapf(err, "failed to create onboarding SQL Review policy")
 	}
 
+	sheet, err := s.store.CreateSheet(ctx, &api.SheetCreate{
+		CreatorID: api.SystemBotID,
+
+		ProjectID:  project.UID,
+		DatabaseID: &database.UID,
+
+		Name:       "Sheet for Sample Project",
+		Statement:  "ALTER TABLE employee ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';",
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebaseArtifact,
+		Type:       api.SheetForSQL,
+		Payload:    "{}",
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to create sheet for sample project")
+	}
+
 	// Create a schema update issue.
 	createContext, err := json.Marshal(
 		&api.MigrationContext{
@@ -1074,7 +1084,7 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 					DatabaseID:    database.UID,
 					// This will violate the NOT NULL SQL Review policy configured above and emit a
 					// warning. Thus to demonstrate the SQL Review capability.
-					Statement: "ALTER TABLE employee ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';",
+					SheetID: sheet.ID,
 				},
 			},
 		})
@@ -1155,181 +1165,4 @@ Click "Approve" button to apply the schema update.`,
 	}
 
 	return nil
-}
-
-func (s *Server) backfillInstanceChangeHistory(ctx context.Context) {
-	err := func() error {
-		migratedInstanceList, err := s.store.ListInstanceHavingInstanceChangeHistory(ctx)
-		if err != nil {
-			return err
-		}
-		instanceMigrated := make(map[int]bool)
-		for _, id := range migratedInstanceList {
-			instanceMigrated[id] = true
-		}
-
-		instanceList, err := s.store.ListInstancesV2(ctx, &store.FindInstanceMessage{})
-		if err != nil {
-			return err
-		}
-
-		issueList, err := s.store.ListIssueV2(ctx, &store.FindIssueMessage{})
-		if err != nil {
-			return err
-		}
-		hasIssueID := make(map[int]bool)
-		for _, issue := range issueList {
-			hasIssueID[issue.UID] = true
-		}
-
-		principalList, err := s.store.GetPrincipalList(ctx)
-		if err != nil {
-			return err
-		}
-		nameToPrincipal := make(map[string]*api.Principal)
-		for _, principal := range principalList {
-			nameToPrincipal[principal.Name] = principal
-		}
-
-		var errList error
-		for _, instance := range instanceList {
-			err := func(instance *store.InstanceMessage) error {
-				limit := 10
-				offset := 0
-
-				if !(instance.Engine == db.MySQL || instance.Engine == db.Postgres || instance.Engine == db.ClickHouse) {
-					return nil
-				}
-				if instanceMigrated[instance.UID] {
-					return nil
-				}
-
-				databaseList, err := s.store.ListDatabases(ctx, &store.FindDatabaseMessage{InstanceID: &instance.ResourceID, ShowDeleted: true})
-				if err != nil {
-					return err
-				}
-				nameToDatabase := make(map[string]*store.DatabaseMessage)
-				for i, db := range databaseList {
-					nameToDatabase[db.DatabaseName] = databaseList[i]
-				}
-
-				driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, "bytebase")
-				if err != nil {
-					return err
-				}
-				defer driver.Close(ctx)
-
-				for {
-					var history []*db.MigrationHistory
-					if instance.Engine == db.MySQL {
-						myDriver := driver.(*mysql.Driver)
-						history, err = myDriver.FindMigrationHistoryList(ctx, &db.MigrationHistoryFind{
-							InstanceID: &instance.UID,
-							Limit:      &limit,
-							Offset:     &offset,
-						})
-						if err != nil {
-							return err
-						}
-					} else if instance.Engine == db.Postgres {
-						pgDriver := driver.(*pg.Driver)
-						history, err = pgDriver.FindMigrationHistoryList(ctx, &db.MigrationHistoryFind{
-							InstanceID: &instance.UID,
-							Limit:      &limit,
-							Offset:     &offset,
-						})
-						if err != nil {
-							return err
-						}
-					} else if instance.Engine == db.ClickHouse {
-						cDriver := driver.(*clickhouse.Driver)
-						history, err = cDriver.FindMigrationHistoryList(ctx, &db.MigrationHistoryFind{
-							InstanceID: &instance.UID,
-							Limit:      &limit,
-							Offset:     &offset,
-						})
-						if err != nil {
-							return err
-						}
-					}
-					if len(history) == 0 {
-						break
-					}
-					offset += limit
-
-					var creates []*store.InstanceChangeHistoryMessage
-					for _, h := range history {
-						var databaseID *int
-						if database, ok := nameToDatabase[h.Namespace]; ok {
-							databaseID = &database.UID
-						}
-
-						var issueID *int
-						if id, err := strconv.Atoi(h.IssueID); err != nil {
-							errList = multierr.Append(errList, err)
-						} else if hasIssueID[id] {
-							// Has FK constraint on issue_id.
-							// Set to id if issue exists.
-							issueID = &id
-						}
-
-						creatorID := api.SystemBotID
-						updaterID := api.SystemBotID
-						if principal, ok := nameToPrincipal[h.Creator]; ok {
-							creatorID = principal.ID
-						}
-						if principal, ok := nameToPrincipal[h.Updater]; ok {
-							updaterID = principal.ID
-						}
-
-						storedVersion, err := util.ToStoredVersion(h.UseSemanticVersion, h.Version, h.SemanticVersionSuffix)
-						if err != nil {
-							return err
-						}
-
-						changeHistory := store.InstanceChangeHistoryMessage{
-							CreatorID:           creatorID,
-							CreatedTs:           h.CreatedTs,
-							UpdaterID:           updaterID,
-							UpdatedTs:           h.UpdatedTs,
-							InstanceID:          &instance.UID,
-							DatabaseID:          databaseID,
-							IssueID:             issueID,
-							ReleaseVersion:      h.ReleaseVersion,
-							Sequence:            int64(h.Sequence),
-							Source:              h.Source,
-							Type:                h.Type,
-							Status:              h.Status,
-							Version:             storedVersion,
-							Description:         h.Description,
-							Statement:           h.Statement,
-							Schema:              h.Schema,
-							SchemaPrev:          h.SchemaPrev,
-							ExecutionDurationNs: h.ExecutionDurationNs,
-							Payload:             h.Payload,
-						}
-
-						creates = append(creates, &changeHistory)
-					}
-
-					if _, err := s.store.CreateInstanceChangeHistory(ctx, creates...); err != nil {
-						return err
-					}
-				}
-				return nil
-			}(instance)
-			if err != nil {
-				// New instances may not have the "bytebase" database.
-				if strings.Contains(err.Error(), "database \"bytebase\" does not exist") {
-					return nil
-				}
-				errList = multierr.Append(errList, err)
-			}
-		}
-		return errList
-	}()
-
-	if err != nil {
-		log.Warn("failed to backfill migration history", zap.Error(err))
-	}
 }

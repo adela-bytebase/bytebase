@@ -6,18 +6,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/bytebase/bytebase/backend/common"
 	"github.com/bytebase/bytebase/backend/common/log"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/plugin/db/util"
-	bbparser "github.com/bytebase/bytebase/backend/plugin/parser"
+	bbparser "github.com/bytebase/bytebase/backend/plugin/parser/sql"
 )
 
 var (
@@ -47,6 +49,7 @@ type Driver struct {
 	// Use a single connection for executing migrations in the lifetime of the driver can keep the thread ID unchanged.
 	// So that it's easy to get the thread ID for rollback SQL.
 	migrationConn *sql.Conn
+	sshClient     *ssh.Client
 
 	replayedBinlogBytes *common.CountingReader
 	restoredBackupBytes *common.CountingReader
@@ -80,12 +83,23 @@ func (driver *Driver) Open(ctx context.Context, dbType db.Type, connCfg db.Conne
 		}
 	}
 
-	tlsConfig, err := connCfg.TLSConfig.GetSslConfig()
+	if connCfg.SSHConfig.Host != "" {
+		sshClient, err := util.GetSSHClient(connCfg.SSHConfig)
+		if err != nil {
+			return nil, err
+		}
+		driver.sshClient = sshClient
+		// Now we register the dialer with the ssh connection as a parameter.
+		mysql.RegisterDialContext("mysql+tcp", func(ctx context.Context, addr string) (net.Conn, error) {
+			return sshClient.Dial("tcp", addr)
+		})
+		protocol = "mysql+tcp"
+	}
 
+	tlsConfig, err := connCfg.TLSConfig.GetSslConfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "sql: tls config error")
 	}
-
 	tlsKey := "db.mysql.tls"
 	if tlsConfig != nil {
 		if err := mysql.RegisterTLSConfig(tlsKey, tlsConfig); err != nil {
@@ -95,10 +109,8 @@ func (driver *Driver) Open(ctx context.Context, dbType db.Type, connCfg db.Conne
 		defer mysql.DeregisterTLSConfig(tlsKey)
 		params = append(params, fmt.Sprintf("tls=%s", tlsKey))
 	}
-	dsn := fmt.Sprintf("%s@%s(%s:%s)/%s?%s", connCfg.Username, protocol, connCfg.Host, port, connCfg.Database, strings.Join(params, "&"))
-	if connCfg.Password != "" {
-		dsn = fmt.Sprintf("%s:%s@%s(%s:%s)/%s?%s", connCfg.Username, connCfg.Password, protocol, connCfg.Host, port, connCfg.Database, strings.Join(params, "&"))
-	}
+
+	dsn := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?%s", connCfg.Username, connCfg.Password, protocol, connCfg.Host, port, connCfg.Database, strings.Join(params, "&"))
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
@@ -125,6 +137,9 @@ func (driver *Driver) Close(context.Context) error {
 	var err error
 	err = multierr.Append(err, driver.db.Close())
 	err = multierr.Append(err, driver.migrationConn.Close())
+	if driver.sshClient != nil {
+		err = multierr.Append(err, driver.sshClient.Close())
+	}
 	return err
 }
 

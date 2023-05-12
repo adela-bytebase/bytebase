@@ -41,6 +41,19 @@ func NewStatusBySQLReviewRuleLevel(level SQLReviewRuleLevel) (Status, error) {
 	return "", errors.Errorf("unexpected rule level type: %s", level)
 }
 
+// GetPriority returns the priority of status.
+func (s Status) GetPriority() int {
+	switch s {
+	case Success:
+		return 0
+	case Warn:
+		return 1
+	case Error:
+		return 2
+	}
+	return 0
+}
+
 // Type is the type of advisor.
 // nolint
 type Type string
@@ -319,6 +332,44 @@ const (
 
 	// PostgreSQLCollationAllowlist is an advisor type for PostgreSQL collation allowlist.
 	PostgreSQLCollationAllowlist Type = "bb.plugin.advisor.postgresql.collation.allowlist"
+
+	// Oracle Advisor.
+
+	// OracleTableRequirePK is an advisor type for Oracle table require primary key.
+	OracleTableRequirePK Type = "bb.plugin.advisor.oracle.table.require-pk"
+
+	// OracleTableNoFK is an advisor type for Oracle table disallow foreign key.
+	OracleTableNoFK Type = "bb.plugin.advisor.oracle.table.no-foreign-key"
+
+	// OracleNamingTableConvention is an advisor type for Oracle table naming convention.
+	OracleNamingTableConvention Type = "bb.plugin.advisor.oracle.naming.table"
+
+	// OracleColumnRequirement is an advisor type for Oracle column requirement.
+	OracleColumnRequirement Type = "bb.plugin.advisor.oracle.column.require"
+
+	// OracleColumnTypeDisallowList is an advisor type for Oracle column type disallow list.
+	OracleColumnTypeDisallowList Type = "bb.plugin.advisor.oracle.column.type-disallow-list"
+
+	// OracleColumnMaximumCharacterLength is an advisor type for Oracle maximum character length.
+	OracleColumnMaximumCharacterLength Type = "bb.plugin.advisor.oracle.column.maximum-character-length"
+
+	// OracleNoSelectAll is an advisor type for Oracle no select all.
+	OracleNoSelectAll Type = "bb.plugin.advisor.oracle.select.no-select-all"
+
+	// OracleNoLeadingWildcardLike is an advisor type for Oracle no leading wildcard LIKE.
+	OracleNoLeadingWildcardLike Type = "bb.plugin.advisor.oracle.where.no-leading-wildcard-like"
+
+	// OracleWhereRequirement is an advisor type for Oracle WHERE clause requirement.
+	OracleWhereRequirement Type = "bb.plugin.advisor.oracle.where.require"
+
+	// OracleInsertMustSpecifyColumn is an advisor type for Oracle to enforce column specified.
+	OracleInsertMustSpecifyColumn Type = "bb.plugin.advisor.oracle.insert.must-specify-column"
+
+	// OracleIndexKeyNumberLimit is an advisor type for Oracle index key number limit.
+	OracleIndexKeyNumberLimit Type = "bb.plugin.advisor.oracle.index.key-number-limit"
+
+	// OracleColumnNoNull is an advisor type for Oracle column no NULL value.
+	OracleColumnNoNull Type = "bb.plugin.advisor.oracle.column.no-null"
 )
 
 // Advice is the result of an advisor.
@@ -378,6 +429,9 @@ type Context struct {
 	Catalog *catalog.Finder
 	Driver  *sql.DB
 	Context context.Context
+
+	// CurrentSchema is the current schema. Special for Oracle.
+	CurrentSchema string
 }
 
 // Advisor is the interface for advisor.

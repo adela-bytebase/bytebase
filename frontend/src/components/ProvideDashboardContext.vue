@@ -13,9 +13,12 @@ import {
   useProjectStore,
   useDebugStore,
   useUserStore,
+  useDatabaseStore,
+  useProjectV1Store,
 } from "@/store";
 import { defineComponent } from "vue";
 import { DEFAULT_PROJECT_ID } from "../types";
+import { useEnvironmentV1Store } from "@/store/modules/v1/environment";
 
 export default defineComponent({
   name: "ProvideDashboardContext",
@@ -31,9 +34,15 @@ export default defineComponent({
       // the principal list as well.
       // We also need this to render the proper inbox and activity entry.
       usePrincipalStore().fetchPrincipalList(),
+      useUserStore().fetchUserList(),
       useEnvironmentStore().fetchEnvironmentList(),
+      useEnvironmentV1Store().fetchEnvironments(),
       // The default project hosts databases not explicitly assigned to other users project.
       useProjectStore().fetchProjectById(DEFAULT_PROJECT_ID),
+      // For legacy project API support. Remove this after shipping to project v1.
+      useProjectStore().fetchAllProjectList(),
+      useProjectV1Store().fetchProjectList(),
+      useDatabaseStore().fetchDatabaseList(),
       useUIStateStore().restoreState(),
       useDebugStore().fetchDebug(),
     ]);

@@ -105,13 +105,23 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 	database := databases[0]
 	a.Equal(instance.ID, database.Instance.ID)
 
+	migrationStatementSheet, err := ctl.createSheet(api.SheetCreate{
+		ProjectID:  project.ID,
+		Name:       "migration statement sheet",
+		Statement:  migrationStatement,
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebaseArtifact,
+		Type:       api.SheetForSQL,
+	})
+	a.NoError(err)
+
 	// Create an issue that updates database schema.
 	createContext, err := json.Marshal(&api.MigrationContext{
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
 				DatabaseID:    database.ID,
-				Statement:     migrationStatement,
+				SheetID:       migrationStatementSheet.ID,
 			},
 		},
 	})
@@ -121,7 +131,7 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
-		AssigneeID:    ownerID,
+		AssigneeID:    api.SystemBotID,
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
@@ -134,13 +144,23 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 	a.NoError(err)
 	a.Equal(bookSchemaSQLResult, result)
 
+	dataUpdateStatementSheet, err := ctl.createSheet(api.SheetCreate{
+		ProjectID:  project.ID,
+		Name:       "dataUpdateStatement",
+		Statement:  dataUpdateStatement,
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebaseArtifact,
+		Type:       api.SheetForSQL,
+	})
+	a.NoError(err)
+
 	// Create an issue that updates database data.
 	createContext, err = json.Marshal(&api.MigrationContext{
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Data,
 				DatabaseID:    database.ID,
-				Statement:     dataUpdateStatement,
+				SheetID:       dataUpdateStatementSheet.ID,
 			},
 		},
 	})
@@ -150,7 +170,7 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 		Name:          fmt.Sprintf("update data for database %q", databaseName),
 		Type:          api.IssueDatabaseDataUpdate,
 		Description:   fmt.Sprintf("This updates the data of database %q.", databaseName),
-		AssigneeID:    ownerID,
+		AssigneeID:    api.SystemBotID,
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
@@ -253,6 +273,7 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 		Name:       "my-sheet",
 		Statement:  "SELECT * FROM demo",
 		Visibility: api.PrivateSheet,
+		Source:     api.SheetFromBytebase,
 	})
 	a.NoError(err)
 
@@ -604,9 +625,9 @@ func TestVCS(t *testing.T) {
 			// simulate retrying the failed task.
 			_, err = ctl.patchTaskStatus(api.TaskStatusPatch{
 				ID:        task.ID,
-				UpdaterID: ownerID,
+				UpdaterID: api.SystemBotID,
 				Status:    api.TaskPendingApproval,
-			}, issue.PipelineID, task.ID)
+			}, issue.Pipeline.ID, task.ID)
 			a.NoError(err)
 
 			status, err = ctl.waitIssuePipeline(issue.ID)
@@ -625,6 +646,16 @@ func TestVCS(t *testing.T) {
 			)
 			a.NoError(err)
 
+			sheet, err := ctl.createSheet(api.SheetCreate{
+				ProjectID:  project.ID,
+				Name:       "migration statement 4 sheet",
+				Statement:  migrationStatement4,
+				Visibility: api.ProjectSheet,
+				Source:     api.SheetFromBytebaseArtifact,
+				Type:       api.SheetForSQL,
+			})
+			a.NoError(err)
+
 			// Schema change from UI.
 			// Create an issue that updates database schema.
 			createContext, err := json.Marshal(&api.MigrationContext{
@@ -632,7 +663,7 @@ func TestVCS(t *testing.T) {
 					{
 						MigrationType: db.Migrate,
 						DatabaseID:    database.ID,
-						Statement:     migrationStatement4,
+						SheetID:       sheet.ID,
 					},
 				},
 			})
@@ -642,7 +673,7 @@ func TestVCS(t *testing.T) {
 				Name:          fmt.Sprintf("update schema for database %q", databaseName),
 				Type:          api.IssueDatabaseSchemaUpdate,
 				Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
-				AssigneeID:    ownerID,
+				AssigneeID:    api.SystemBotID,
 				CreateContext: string(createContext),
 			})
 			a.NoError(err)
@@ -720,10 +751,10 @@ func TestVCS(t *testing.T) {
 				a.Equalf(wantHistories[i], got, "got histories %+v", historiesDeref)
 				a.NotEmpty(history.Version)
 			}
-			a.Equal("ver4", histories[1].Version)
-			a.Equal("ver3", histories[2].Version)
-			a.Equal("ver2", histories[3].Version)
-			a.Equal("ver1", histories[4].Version)
+			a.Equal("ver4-dml", histories[1].Version)
+			a.Equal("ver3-ddl", histories[2].Version)
+			a.Equal("ver2-ddl", histories[3].Version)
+			a.Equal("ver1-ddl", histories[4].Version)
 		})
 	}
 }
@@ -1474,7 +1505,7 @@ func TestVCS_SQL_Review(t *testing.T) {
 					Status: advisor.Warn,
 					Content: []string{
 						fmt.Sprintf(
-							"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"SQL Review\">\n<testsuite name=\"%s\">\n<testcase name=\"%s#L1: SQL review policy not found\" classname=\"%s\" file=\"%s#L1\">\n<failure>\nError: You can configure the SQL review policy on %s/setting/sql-review.\nYou can check the docs at https://www.bytebase.com/docs/reference/error-code/advisor#2\n</failure>\n</testcase>\n</testsuite>\n</testsuites>",
+							"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"SQL Review\">\n<testsuite name=\"%s\">\n<testcase name=\"[WARN] %s#L1: SQL review policy not found\" classname=\"%s\" file=\"%s#L1\">\n<failure>\nError: You can configure the SQL review policy on %s/setting/sql-review.\nYou can check the docs at https://www.bytebase.com/docs/reference/error-code/advisor#2\n</failure>\n</testcase>\n</testsuite>\n</testsuites>",
 							filePath,
 							pathes[len(pathes)-1],
 							filePath,
@@ -1491,7 +1522,7 @@ func TestVCS_SQL_Review(t *testing.T) {
 					Status: advisor.Warn,
 					Content: []string{
 						fmt.Sprintf(
-							"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"SQL Review\">\n<testsuite name=\"%s\">\n<testcase name=\"%s#L1: column.required\" classname=\"%s\" file=\"%s#L1\">\n<failure>\nError: Table \"book\" requires columns: created_ts, creator_id, updated_ts, updater_id.\nYou can check the docs at https://www.bytebase.com/docs/reference/error-code/advisor#401\n</failure>\n</testcase>\n<testcase name=\"%s#L1: column.no-null\" classname=\"%s\" file=\"%s#L1\">\n<failure>\nError: Column \"name\" in \"public\".\"book\" cannot have NULL value.\nYou can check the docs at https://www.bytebase.com/docs/reference/error-code/advisor#402\n</failure>\n</testcase>\n</testsuite>\n</testsuites>",
+							"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"SQL Review\">\n<testsuite name=\"%s\">\n<testcase name=\"[WARN] %s#L1: column.required\" classname=\"%s\" file=\"%s#L1\">\n<failure>\nError: Table \"book\" requires columns: created_ts, creator_id, updated_ts, updater_id.\nYou can check the docs at https://www.bytebase.com/docs/reference/error-code/advisor#401\n</failure>\n</testcase>\n<testcase name=\"[WARN] %s#L1: column.no-null\" classname=\"%s\" file=\"%s#L1\">\n<failure>\nError: Column \"name\" in \"public\".\"book\" cannot have NULL value.\nYou can check the docs at https://www.bytebase.com/docs/reference/error-code/advisor#402\n</failure>\n</testcase>\n</testsuite>\n</testsuites>",
 							filePath,
 							filename,
 							filePath,
@@ -2155,13 +2186,24 @@ CREATE TABLE public.book (
 				}
 			}
 			a.NotNil(database)
+
+			ddlSheet, err := ctl.createSheet(api.SheetCreate{
+				ProjectID:  project.ID,
+				Name:       "test ddl",
+				Statement:  test.ddl,
+				Visibility: api.ProjectSheet,
+				Source:     api.SheetFromBytebaseArtifact,
+				Type:       api.SheetForSQL,
+			})
+			a.NoError(err)
+
 			// Create an issue that updates database schema.
 			createContext, err := json.Marshal(&api.MigrationContext{
 				DetailList: []*api.MigrationDetail{
 					{
 						MigrationType: db.Migrate,
 						DatabaseID:    database.ID,
-						Statement:     test.ddl,
+						SheetID:       ddlSheet.ID,
 					},
 				},
 			})
@@ -2171,7 +2213,7 @@ CREATE TABLE public.book (
 				Name:          fmt.Sprintf("update schema for database %q", test.databaseName),
 				Type:          api.IssueDatabaseSchemaUpdate,
 				Description:   fmt.Sprintf("This updates the schema of database %q.", test.databaseName),
-				AssigneeID:    ownerID,
+				AssigneeID:    api.SystemBotID,
 				CreateContext: string(createContext),
 			})
 			a.NoError(err)
@@ -2266,13 +2308,23 @@ func TestMarkTaskAsDone(t *testing.T) {
 	database := databases[0]
 	a.Equal(instance.ID, database.Instance.ID)
 
+	sheet, err := ctl.createSheet(api.SheetCreate{
+		ProjectID:  project.ID,
+		Name:       "migration statement sheet",
+		Statement:  migrationStatement,
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebaseArtifact,
+		Type:       api.SheetForSQL,
+	})
+	a.NoError(err)
+
 	// Create an issue that updates database schema.
 	createContext, err := json.Marshal(&api.MigrationContext{
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
 				DatabaseID:    database.ID,
-				Statement:     migrationStatement,
+				SheetID:       sheet.ID,
 			},
 		},
 	})
@@ -2282,7 +2334,7 @@ func TestMarkTaskAsDone(t *testing.T) {
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
-		AssigneeID:    ownerID,
+		AssigneeID:    api.SystemBotID,
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
@@ -2295,7 +2347,7 @@ func TestMarkTaskAsDone(t *testing.T) {
 	task, err = ctl.patchTaskStatus(api.TaskStatusPatch{
 		Status:  api.TaskDone,
 		Comment: &skippedReason,
-	}, issue.PipelineID, task.ID)
+	}, issue.Pipeline.ID, task.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, task.Status)
 

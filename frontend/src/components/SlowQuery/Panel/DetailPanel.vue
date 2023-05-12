@@ -3,6 +3,7 @@
     :show="slowQueryLog !== undefined"
     :auto-focus="false"
     width="auto"
+    :z-index="30"
     @update:show="(show) => !show && $emit('close')"
   >
     <NDrawerContent
@@ -61,7 +62,11 @@
             </div>
           </div>
         </div>
-        <div class="flex-1 overflow-auto border">
+        <IndexAdvisor v-if="slowQueryLog" :slow-query-log="slowQueryLog" />
+        <div
+          v-if="instanceHasSlowQueryDetail(database.instance)"
+          class="flex-1 overflow-auto border"
+        >
           <BBGrid
             :column-list="columns"
             :data-source="log.statistics?.samples"
@@ -88,10 +93,10 @@
                 </div>
               </div>
               <div class="bb-grid-cell">
-                {{ detail.queryTime?.seconds.toFixed(6) }}
+                {{ detail.queryTime?.seconds.toFixed(2) }}s
               </div>
               <div class="bb-grid-cell">
-                {{ detail.lockTime?.seconds.toFixed(6) }}
+                {{ detail.lockTime?.seconds.toFixed(2) }}s
               </div>
               <div class="bb-grid-cell">
                 {{ detail.rowsExamined }}
@@ -124,6 +129,7 @@ import { NButton, NDrawer, NDrawerContent } from "naive-ui";
 import { type BBGridColumn, type BBGridRow, BBGrid } from "@/bbkit";
 import type { ComposedSlowQueryLog } from "@/types";
 import type { SlowQueryDetails } from "@/types/proto/v1/database_service";
+import { instanceHasSlowQueryDetail } from "@/utils";
 import {
   DatabaseName,
   InstanceName,
@@ -131,6 +137,7 @@ import {
   ProjectName,
 } from "@/components/v2";
 import HighlightCodeBlock from "@/components/HighlightCodeBlock";
+import IndexAdvisor from "./IndexAdvisor.vue";
 
 export type SlowQueryDetailsRow = BBGridRow<SlowQueryDetails>;
 

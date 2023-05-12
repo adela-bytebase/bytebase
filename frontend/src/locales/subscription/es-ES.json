@@ -15,7 +15,7 @@
   "billed-annually": "Facturado anualmente",
   "billed-monthly": "Facturado mensualmente",
   "per-instance": "Por instancia",
-  "free-price-intro": "Usuarios, entornos e instancias ilimitados",
+  "free-price-intro": "Usuarios y entornos ilimitados",
   "team-price-intro": "Hasta 20 instancias",
   "enterprise-price-intro": "Personalizado, facturado anualmente",
   "deploy": "Desplegar",
@@ -134,7 +134,8 @@
         "anomaly-detection-basic-tooltip": "Fallo de conexión, falta copia de seguridad",
         "anomaly-detection-advanced": "Avanzado",
         "anomaly-detection-advanced-tooltip": "Básico + Detección de desviación de esquema",
-        "archiving": "Archivado"
+        "archiving": "Archivado",
+        "disallow-signup": "Deshabilitar el registro de autoservicio"
       }
     },
     "bespoke": {
@@ -175,7 +176,7 @@
     "sensitive-data": "Enmascaramiento de datos confidenciales",
     "database-access-control": "Control de acceso a la base de datos",
     "roadmap": "Priorización de la hoja de ruta",
-    "custom-contract": "MSA y BAA personalizados",
+    "custom-contract": "MSA personalizados",
     "sso": "Inicio de Sesión Único (SSO)",
     "2fa": "Autenticación de dos factores (2FA)",
     "custom-approval": "Aprobación personalizada"

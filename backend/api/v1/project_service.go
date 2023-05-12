@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,16 +50,7 @@ func (s *ProjectService) ListProjects(ctx context.Context, request *v1pb.ListPro
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 	response := &v1pb.ListProjectsResponse{}
-	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
-	role := ctx.Value(common.RoleContextKey).(api.Role)
 	for _, project := range projects {
-		policy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{ProjectID: &project.ResourceID})
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, err.Error())
-		}
-		if !isOwnerOrDBA(role) && !isProjectMember(policy, principalID) {
-			continue
-		}
 		response.Projects = append(response.Projects, convertToProject(project))
 	}
 	return response, nil
@@ -161,19 +153,29 @@ func (s *ProjectService) DeleteProject(ctx context.Context, request *v1pb.Delete
 	}
 
 	// Resources prevent project deletion.
-	databases, err := s.store.ListDatabases(ctx, &store.FindDatabaseMessage{ProjectID: &project.ResourceID})
+	databases, err := s.store.ListDatabases(ctx, &store.FindDatabaseMessage{ProjectID: &project.ResourceID, ShowDeleted: true})
 	if err != nil {
 		return nil, err
 	}
-	if len(databases) > 0 {
-		return nil, status.Errorf(codes.FailedPrecondition, "transfer all databases under the project before deleting the project")
-	}
-	openIssues, err := s.store.ListIssueV2(ctx, &store.FindIssueMessage{ProjectUID: &project.UID, StatusList: []api.IssueStatus{api.IssueOpen}})
-	if err != nil {
-		return nil, err
-	}
-	if len(openIssues) > 0 {
-		return nil, status.Errorf(codes.FailedPrecondition, "resolve all open issues before deleting the project")
+	// We don't move the sheet to default project because BYTEBASE_ARTIFACT sheets belong to the issue and issue project.
+	if request.Force {
+		defaultProject := api.DefaultProjectID
+		if _, err := s.store.BatchUpdateDatabaseProject(ctx, databases, defaultProject, api.SystemBotID); err != nil {
+			return nil, err
+		}
+		// We don't close the issues because they might be open still.
+	} else {
+		// Return the open issue error first because that's more important than transferring out databases.
+		openIssues, err := s.store.ListIssueV2(ctx, &store.FindIssueMessage{ProjectUID: &project.UID, StatusList: []api.IssueStatus{api.IssueOpen}})
+		if err != nil {
+			return nil, err
+		}
+		if len(openIssues) > 0 {
+			return nil, status.Errorf(codes.FailedPrecondition, "resolve all open issues before deleting the project")
+		}
+		if len(databases) > 0 {
+			return nil, status.Errorf(codes.FailedPrecondition, "transfer all databases to the default project before deleting the project")
+		}
 	}
 
 	if _, err := s.store.UpdateProjectV2(ctx, &store.UpdateProjectMessage{
@@ -379,10 +381,15 @@ func (s *ProjectService) AddWebhook(ctx context.Context, request *v1pb.AddWebhoo
 
 // UpdateWebhook updates a webhook.
 func (s *ProjectService) UpdateWebhook(ctx context.Context, request *v1pb.UpdateWebhookRequest) (*v1pb.Project, error) {
-	projectID, err := getProjectID(request.Project)
+	projectID, webhookID, err := getProjectIDWebhookID(request.Webhook.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
 	}
+	webhookIDInt, err := strconv.Atoi(webhookID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid webhook id %q", webhookID)
+	}
+
 	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
 		ResourceID: &projectID,
 	})
@@ -390,15 +397,15 @@ func (s *ProjectService) UpdateWebhook(ctx context.Context, request *v1pb.Update
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 	if project == nil {
-		return nil, status.Errorf(codes.NotFound, "project %q not found", request.Project)
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectID)
 	}
 	if project.Deleted {
-		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", request.Project)
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectID)
 	}
 
 	webhook, err := s.store.GetProjectWebhookV2(ctx, &store.FindProjectWebhookMessage{
 		ProjectID: &project.UID,
-		URL:       &request.Webhook.Url,
+		ID:        &webhookIDInt,
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, err.Error())
@@ -442,10 +449,15 @@ func (s *ProjectService) UpdateWebhook(ctx context.Context, request *v1pb.Update
 
 // RemoveWebhook removes a webhook from a given project.
 func (s *ProjectService) RemoveWebhook(ctx context.Context, request *v1pb.RemoveWebhookRequest) (*v1pb.Project, error) {
-	projectID, err := getProjectID(request.Project)
+	projectID, webhookID, err := getProjectIDWebhookID(request.Webhook.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
 	}
+	webhookIDInt, err := strconv.Atoi(webhookID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid webhook id %q", webhookID)
+	}
+
 	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
 		ResourceID: &projectID,
 	})
@@ -453,15 +465,15 @@ func (s *ProjectService) RemoveWebhook(ctx context.Context, request *v1pb.Remove
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 	if project == nil {
-		return nil, status.Errorf(codes.NotFound, "project %q not found", request.Project)
+		return nil, status.Errorf(codes.NotFound, "project %q not found", webhookID)
 	}
 	if project.Deleted {
-		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", request.Project)
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectID)
 	}
 
 	webhook, err := s.store.GetProjectWebhookV2(ctx, &store.FindProjectWebhookMessage{
 		ProjectID: &project.UID,
-		URL:       &request.Webhook.Url,
+		ID:        &webhookIDInt,
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, err.Error())
@@ -560,7 +572,6 @@ func convertToStoreProjectWebhookMessage(webhook *v1pb.Webhook) (*store.ProjectW
 
 func convertToActivityTypeStrings(types []v1pb.Activity_Type) ([]string, error) {
 	var result []string
-
 	for _, tp := range types {
 		switch tp {
 		case v1pb.Activity_TYPE_UNSPECIFIED:
@@ -612,6 +623,57 @@ func convertToActivityTypeStrings(types []v1pb.Activity_Type) ([]string, error) 
 	return result, nil
 }
 
+func convertNotificationTypeStrings(types []string) []v1pb.Activity_Type {
+	var result []v1pb.Activity_Type
+	for _, tp := range types {
+		switch tp {
+		case string(api.ActivityIssueCreate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_CREATE)
+		case string(api.ActivityIssueCommentCreate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_COMMENT_CREATE)
+		case string(api.ActivityIssueFieldUpdate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_FIELD_UPDATE)
+		case string(api.ActivityIssueStatusUpdate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_STATUS_UPDATE)
+		case string(api.ActivityPipelineStageStatusUpdate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_STAGE_STATUS_UPDATE)
+		case string(api.ActivityPipelineTaskStatusUpdate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_STATUS_UPDATE)
+		case string(api.ActivityPipelineTaskFileCommit):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_FILE_COMMIT)
+		case string(api.ActivityPipelineTaskStatementUpdate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_STATEMENT_UPDATE)
+		case string(api.ActivityPipelineTaskEarliestAllowedTimeUpdate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_EARLIEST_ALLOWED_TIME_UPDATE)
+		case string(api.ActivityMemberCreate):
+			result = append(result, v1pb.Activity_TYPE_MEMBER_CREATE)
+		case string(api.ActivityMemberRoleUpdate):
+			result = append(result, v1pb.Activity_TYPE_MEMBER_ROLE_UPDATE)
+		case string(api.ActivityMemberActivate):
+			result = append(result, v1pb.Activity_TYPE_MEMBER_ACTIVATE)
+		case string(api.ActivityMemberDeactivate):
+			result = append(result, v1pb.Activity_TYPE_MEMBER_DEACTIVATE)
+		case string(api.ActivityProjectRepositoryPush):
+			result = append(result, v1pb.Activity_TYPE_PROJECT_REPOSITORY_PUSH)
+		case string(api.ActivityProjectDatabaseTransfer):
+			result = append(result, v1pb.Activity_TYPE_PROJECT_DATABASE_TRANSFER)
+		case string(api.ActivityProjectMemberCreate):
+			result = append(result, v1pb.Activity_TYPE_PROJECT_MEMBER_CREATE)
+		case string(api.ActivityProjectMemberDelete):
+			result = append(result, v1pb.Activity_TYPE_PROJECT_MEMBER_DELETE)
+		case string(api.ActivityProjectMemberRoleUpdate):
+			result = append(result, v1pb.Activity_TYPE_PROJECT_MEMBER_ROLE_UPDATE)
+		case string(api.ActivitySQLEditorQuery):
+			result = append(result, v1pb.Activity_TYPE_SQL_EDITOR_QUERY)
+		case string(api.ActivityDatabaseRecoveryPITRDone):
+			result = append(result, v1pb.Activity_TYPE_DATABASE_RECOVERY_PITR_DONE)
+		default:
+			result = append(result, v1pb.Activity_TYPE_UNSPECIFIED)
+		}
+	}
+	return result
+}
+
 func convertToAPIWebhookTypeString(tp v1pb.Webhook_Type) (string, error) {
 	switch tp {
 	case v1pb.Webhook_TYPE_UNSPECIFIED:
@@ -633,6 +695,27 @@ func convertToAPIWebhookTypeString(tp v1pb.Webhook_Type) (string, error) {
 		return "bb.plugin.webhook.custom", nil
 	default:
 		return "", common.Errorf(common.Invalid, "webhook type %q is not supported", tp)
+	}
+}
+
+func convertWebhookTypeString(tp string) v1pb.Webhook_Type {
+	switch tp {
+	case "bb.plugin.webhook.slack":
+		return v1pb.Webhook_TYPE_SLACK
+	case "bb.plugin.webhook.discord":
+		return v1pb.Webhook_TYPE_DISCORD
+	case "bb.plugin.webhook.teams":
+		return v1pb.Webhook_TYPE_TEAMS
+	case "bb.plugin.webhook.dingtalk":
+		return v1pb.Webhook_TYPE_DINGTALK
+	case "bb.plugin.webhook.feishu":
+		return v1pb.Webhook_TYPE_FEISHU
+	case "bb.plugin.webhook.wecom":
+		return v1pb.Webhook_TYPE_WECOM
+	case "bb.plugin.webhook.custom":
+		return v1pb.Webhook_TYPE_CUSTOM
+	default:
+		return v1pb.Webhook_TYPE_UNSPECIFIED
 	}
 }
 
@@ -683,11 +766,19 @@ func (s *ProjectService) getProjectMessage(ctx context.Context, name string) (*s
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
 	}
-
-	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
-		ResourceID:  &projectID,
-		ShowDeleted: true,
-	})
+	var project *store.ProjectMessage
+	projectUID, isNumber := isNumber(projectID)
+	if isNumber {
+		project, err = s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+			UID:         &projectUID,
+			ShowDeleted: true,
+		})
+	} else {
+		project, err = s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+			ResourceID:  &projectID,
+			ShowDeleted: true,
+		})
+	}
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
@@ -707,8 +798,9 @@ func convertToIamPolicy(iamPolicy *store.IAMPolicyMessage) *v1pb.IamPolicy {
 			members = append(members, getUserIdentifier(member.Email))
 		}
 		bindings = append(bindings, &v1pb.Binding{
-			Role:    convertToProjectRole(binding.Role),
-			Members: members,
+			Role:      convertToProjectRole(binding.Role),
+			Members:   members,
+			Condition: binding.Condition,
 		})
 	}
 	return &v1pb.IamPolicy{
@@ -741,8 +833,9 @@ func (s *ProjectService) convertToIAMPolicyMessage(ctx context.Context, iamPolic
 		}
 
 		bindings = append(bindings, &store.PolicyBinding{
-			Role:    role,
-			Members: users,
+			Role:      role,
+			Members:   users,
+			Condition: binding.Condition,
 		})
 	}
 	return &store.IAMPolicyMessage{
@@ -801,9 +894,21 @@ func convertToProject(projectMessage *store.ProjectMessage) *v1pb.Project {
 		schemaChange = v1pb.SchemaChange_SDL
 	}
 
+	var projectWebhooks []*v1pb.Webhook
+	for _, webhook := range projectMessage.Webhooks {
+		projectWebhooks = append(projectWebhooks, &v1pb.Webhook{
+			Name:              fmt.Sprintf("%s%s/%s%d", projectNamePrefix, projectMessage.ResourceID, webhookIDPrefix, webhook.ID),
+			Type:              convertWebhookTypeString(webhook.Type),
+			Title:             webhook.Title,
+			Url:               webhook.URL,
+			NotificationTypes: convertNotificationTypeStrings(webhook.ActivityList),
+		})
+	}
+
 	return &v1pb.Project{
 		Name:           fmt.Sprintf("%s%s", projectNamePrefix, projectMessage.ResourceID),
 		Uid:            fmt.Sprintf("%d", projectMessage.UID),
+		State:          convertDeletedToState(projectMessage.Deleted),
 		Title:          projectMessage.Title,
 		Key:            projectMessage.Key,
 		Workflow:       workflow,
@@ -813,6 +918,7 @@ func convertToProject(projectMessage *store.ProjectMessage) *v1pb.Project {
 		// TODO(d): schema_version_type for project.
 		SchemaVersion: v1pb.SchemaVersion_SCHEMA_VERSION_UNSPECIFIED,
 		SchemaChange:  schemaChange,
+		Webhooks:      projectWebhooks,
 	}
 }
 
@@ -902,7 +1008,7 @@ func convertToProjectMessage(resourceID string, project *v1pb.Project) (*store.P
 }
 
 func convertToDeploymentConfig(projectID string, deploymentConfig *store.DeploymentConfigMessage) *v1pb.DeploymentConfig {
-	resourceName := fmt.Sprintf("projects/%s/deploymentConfig)", projectID)
+	resourceName := fmt.Sprintf("projects/%s/deploymentConfig", projectID)
 	return &v1pb.DeploymentConfig{
 		Name:     resourceName,
 		Title:    deploymentConfig.Name,
@@ -1044,17 +1150,6 @@ func convertToStoreLabelSelectorOperator(operator v1pb.OperatorType) (store.Oper
 		return store.ExistsOperatorType, nil
 	}
 	return store.OperatorType(""), errors.Errorf("invalid operator type: %v", operator)
-}
-
-func isProjectMember(policy *store.IAMPolicyMessage, userID int) bool {
-	for _, binding := range policy.Bindings {
-		for _, member := range binding.Members {
-			if member.ID == userID {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func validateIAMPolicy(policy *v1pb.IamPolicy, roles []*v1pb.Role) error {

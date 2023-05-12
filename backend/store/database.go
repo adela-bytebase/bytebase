@@ -305,6 +305,7 @@ func (*Store) createDatabaseDefaultImpl(ctx context.Context, tx *Tx, instanceUID
 	}
 
 	// We will do on conflict update the column updater_id for returning the ID because on conflict do nothing will not return anything.
+	// We will also move the deleted database into default project.
 	query := `
 		INSERT INTO db (
 			creator_id,
@@ -319,7 +320,10 @@ func (*Store) createDatabaseDefaultImpl(ctx context.Context, tx *Tx, instanceUID
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (instance_id, name) DO UPDATE SET
-			updater_id = EXCLUDED.updater_id
+			updater_id = EXCLUDED.updater_id,
+			project_id = EXCLUDED.project_id,
+			sync_status = EXCLUDED.sync_status,
+			last_successful_sync_ts = EXCLUDED.last_successful_sync_ts
 		RETURNING id`
 	var databaseUID int
 	if err := tx.QueryRowContext(ctx, query,
@@ -519,11 +523,15 @@ func (s *Store) BatchUpdateDatabaseProject(ctx context.Context, databases []*Dat
 		wheres = append(wheres, fmt.Sprintf("(environment.resource_id = $%d AND instance.resource_id = $%d AND db.name = $%d)", 3*i+3, 3*i+4, 3*i+5))
 		args = append(args, database.EnvironmentID, database.InstanceID, database.DatabaseName)
 	}
+	databaseClause := ""
+	if len(wheres) > 0 {
+		databaseClause = fmt.Sprintf(" AND (%s)", strings.Join(wheres, " OR "))
+	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE db
 			SET project_id = $1, updater_id = $2
 			FROM instance JOIN environment ON instance.environment_id = environment.id
-			WHERE db.instance_id = instance.id AND (%s);`, strings.Join(wheres, " OR ")),
+			WHERE db.instance_id = instance.id %s;`, databaseClause),
 		args...,
 	); err != nil {
 		return nil, err
@@ -582,6 +590,8 @@ func (*Store) listDatabaseImplV2(ctx context.Context, tx *Tx, find *FindDatabase
 	if !find.ShowDeleted {
 		where, args = append(where, fmt.Sprintf("environment.row_status = $%d", len(args)+1)), append(args, api.Normal)
 		where, args = append(where, fmt.Sprintf("instance.row_status = $%d", len(args)+1)), append(args, api.Normal)
+		// We don't show databases that are deleted by users already.
+		where, args = append(where, fmt.Sprintf("db.sync_status = $%d", len(args)+1)), append(args, api.OK)
 	}
 
 	var databaseMessages []*DatabaseMessage

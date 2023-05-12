@@ -145,12 +145,22 @@ func TestTenant(t *testing.T) {
 	a.Equal(testTenantNumber, len(testDatabases))
 	a.Equal(prodTenantNumber, len(prodDatabases))
 
+	sheet, err := ctl.createSheet(api.SheetCreate{
+		ProjectID:  project.ID,
+		Name:       "migration statement sheet",
+		Statement:  migrationStatement,
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebaseArtifact,
+		Type:       api.SheetForSQL,
+	})
+	a.NoError(err)
+
 	// Create an issue that updates database schema.
 	createContext, err := json.Marshal(&api.MigrationContext{
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
-				Statement:     migrationStatement,
+				SheetID:       sheet.ID,
 			},
 		},
 	})
@@ -160,7 +170,7 @@ func TestTenant(t *testing.T) {
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
-		AssigneeID:    ownerID,
+		AssigneeID:    api.SystemBotID,
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
@@ -451,10 +461,6 @@ func TestTenantVCS(t *testing.T) {
 			a.NoError(err)
 			a.Len(issues, 1)
 			issue := issues[0]
-			issue, err = ctl.patchIssue(issue.ID, api.IssuePatch{
-				AssigneeID: &ownerID,
-			})
-			a.NoError(err)
 
 			// Test pipeline stage patch status.
 			status, err := ctl.waitIssuePipelineWithStageApproval(issue.ID)
@@ -487,7 +493,7 @@ func TestTenantVCS(t *testing.T) {
 				)
 				a.NoError(err)
 				a.Len(histories, 1)
-				a.Equal(histories[0].Version, "ver1")
+				a.Equal("ver1-ddl", histories[0].Version)
 				hm1[histories[0].Version] = true
 			}
 			a.Len(hm1, 1)
@@ -604,12 +610,22 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 	a.Equal(len(testDatabases), testTenantNumber)
 	a.Equal(len(prodDatabases), prodTenantNumber)
 
+	sheet, err := ctl.createSheet(api.SheetCreate{
+		ProjectID:  project.ID,
+		Name:       "migration statement sheet",
+		Statement:  migrationStatement,
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebaseArtifact,
+		Type:       api.SheetForSQL,
+	})
+	a.NoError(err)
+
 	// Create an issue that updates database schema.
 	createContext, err := json.Marshal(&api.MigrationContext{
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
-				Statement:     migrationStatement,
+				SheetID:       sheet.ID,
 			},
 		},
 	})
@@ -619,7 +635,7 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 		Name:          "update schema for tenants",
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   "This updates the schema of tenant databases.",
-		AssigneeID:    ownerID,
+		AssigneeID:    api.SystemBotID,
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
@@ -903,10 +919,6 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 			a.NoError(err)
 			a.Len(issues, 1)
 			issue := issues[0]
-			issue, err = ctl.patchIssue(issue.ID, api.IssuePatch{
-				AssigneeID: &ownerID,
-			})
-			a.NoError(err)
 			status, err := ctl.waitIssuePipeline(issue.ID)
 			a.NoError(err)
 			a.Equal(api.TaskDone, status)
@@ -941,7 +953,7 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 				)
 				a.NoError(err)
 				a.Len(histories, 1)
-				a.Equal(histories[0].Version, "ver1")
+				a.Equal("ver1-ddl", histories[0].Version)
 				hm1[histories[0].Version] = true
 			}
 			for i, instance := range prodInstances {
@@ -955,7 +967,7 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 				)
 				a.NoError(err)
 				a.Len(histories, 1)
-				a.Equal("ver1", histories[0].Version)
+				a.Equal("ver1-ddl", histories[0].Version)
 				hm2[histories[0].Version] = true
 			}
 
@@ -1217,10 +1229,6 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 			a.NoError(err)
 			a.Len(issues, 1)
 			issue := issues[0]
-			issue, err = ctl.patchIssue(issue.ID, api.IssuePatch{
-				AssigneeID: &ownerID,
-			})
-			a.NoError(err)
 			status, err := ctl.waitIssuePipeline(issue.ID)
 			a.NoError(err)
 			a.Equal(api.TaskDone, status)
@@ -1247,7 +1255,7 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 				)
 				a.NoError(err)
 				a.Len(histories, 1)
-				a.Equal(histories[0].Version, "ver1")
+				a.Equal("ver1-ddl", histories[0].Version)
 				hm[histories[0].Version] = true
 			}
 
@@ -1499,10 +1507,6 @@ func TestTenantVCS_YAML(t *testing.T) {
 			issues, err := ctl.getIssues(&project.ID, api.IssueOpen)
 			require.NoError(t, err)
 			require.Len(t, issues, 1)
-			_, err = ctl.patchIssue(issues[0].ID, api.IssuePatch{
-				AssigneeID: &ownerID,
-			})
-			require.NoError(t, err)
 			status, err := ctl.waitIssuePipeline(issues[0].ID)
 			require.NoError(t, err)
 			require.Equal(t, api.TaskDone, status)
@@ -1535,11 +1539,6 @@ statement: |
 			// Get data update issues.
 			issues, err = ctl.getIssues(&project.ID, api.IssueOpen)
 			require.NoError(t, err)
-			require.Len(t, issues, 2)
-			_, err = ctl.patchIssue(issues[0].ID, api.IssuePatch{
-				AssigneeID: &ownerID,
-			})
-			require.NoError(t, err)
 			status, err = ctl.waitIssuePipeline(issues[0].ID)
 			require.NoError(t, err)
 			require.Equal(t, api.TaskDone, status)
@@ -1553,7 +1552,7 @@ statement: |
 			)
 			require.NoError(t, err)
 			require.Len(t, histories, 2)
-			require.Equal(t, histories[0].Version, "ver2")
+			require.Equal(t, "ver2-dml", histories[0].Version)
 
 			histories, err = ctl.getInstanceMigrationHistory(
 				testInstances[1].ID,
@@ -1563,7 +1562,7 @@ statement: |
 			)
 			require.NoError(t, err)
 			require.Len(t, histories, 1)
-			require.Equal(t, histories[0].Version, "ver1")
+			require.Equal(t, "ver1-ddl", histories[0].Version)
 		})
 	}
 }

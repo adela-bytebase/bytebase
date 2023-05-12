@@ -1,10 +1,18 @@
-import { ResourceId, UNKNOWN_ID } from "@/types";
+import {
+  ResourceId,
+  UNKNOWN_ID,
+  Instance,
+  Database,
+  Environment,
+} from "@/types";
 
 export const userNamePrefix = "users/";
 export const environmentNamePrefix = "environments/";
 export const projectNamePrefix = "projects/";
 export const instanceNamePrefix = "instances/";
+export const databaseNamePrefix = "databases/";
 export const idpNamePrefix = "idps/";
+export const policyNamePrefix = "policies/";
 
 export const getNameParentTokens = (
   name: string,
@@ -34,13 +42,29 @@ export const getUserId = (name: string): number => {
   return userId;
 };
 
-export const getEnvironmentId = (name: string): number => {
-  const tokens = getNameParentTokens(name, [environmentNamePrefix]);
-  const environmentId = Number(tokens[0] || UNKNOWN_ID);
-  return environmentId;
+export const getUserEmailFromIdentifier = (identifier: string): string => {
+  return identifier.replace(/^user:/, "");
 };
 
 export const getIdentityProviderResourceId = (name: string): ResourceId => {
   const tokens = getNameParentTokens(name, [idpNamePrefix]);
   return tokens[0];
+};
+
+export const getEnvironmentPathByLegacyEnvironment = (
+  env: Environment
+): string => {
+  return `${environmentNamePrefix}${env.resourceId}`;
+};
+
+export const getInstancePathByLegacyInstance = (instance: Instance): string => {
+  return `${getEnvironmentPathByLegacyEnvironment(
+    instance.environment
+  )}/${instanceNamePrefix}${instance.resourceId}`;
+};
+
+export const getDatabasePathByLegacyDatabase = (database: Database): string => {
+  return `${getInstancePathByLegacyInstance(
+    database.instance
+  )}/${databaseNamePrefix}${database.name}`;
 };

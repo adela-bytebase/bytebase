@@ -11,8 +11,10 @@ import (
 	"io"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +32,9 @@ import (
 	"github.com/bytebase/bytebase/backend/plugin/advisor"
 	advisorDB "github.com/bytebase/bytebase/backend/plugin/advisor/db"
 	"github.com/bytebase/bytebase/backend/plugin/db"
+	configparser "github.com/bytebase/bytebase/backend/plugin/parser/mybatis/configuration"
+	mapperparser "github.com/bytebase/bytebase/backend/plugin/parser/mybatis/mapper"
+	"github.com/bytebase/bytebase/backend/plugin/parser/mybatis/mapper/ast"
 	"github.com/bytebase/bytebase/backend/plugin/vcs"
 	"github.com/bytebase/bytebase/backend/plugin/vcs/bitbucket"
 	"github.com/bytebase/bytebase/backend/plugin/vcs/github"
@@ -343,6 +348,8 @@ func (s *Server) registerWebhookRoutes(g *echo.Group) {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 
+		token := c.Request().Header.Get("X-SQL-Review-Token")
+
 		filter := func(repo *api.Repository) (bool, error) {
 			if !repo.EnableSQLReviewCI {
 				log.Debug("Skip repository as the SQL review CI is not enabled.",
@@ -360,13 +367,12 @@ func (s *Server) registerWebhookRoutes(g *echo.Group) {
 				return false, nil
 			}
 
-			token := c.Request().Header.Get("X-SQL-Review-Token")
 			// We will use workspace id as token in integration test for skipping the check.
 			if token == workspaceID {
 				return true, nil
 			}
 
-			return c.Request().Header.Get("X-SQL-Review-Token") == repo.WebhookSecretToken, nil
+			return token == repo.WebhookSecretToken, nil
 		}
 
 		repositoryList, err := s.filterRepository(ctx, c.Param("id"), request.RepositoryID, filter)
@@ -380,8 +386,8 @@ func (s *Server) registerWebhookRoutes(g *echo.Group) {
 				Content: []string{},
 			})
 		}
-
 		repo := repositoryList[0]
+
 		prFiles, err := vcs.Get(repo.VCS.Type, vcs.ProviderConfig{}).ListPullRequestFile(
 			ctx,
 			common.OauthContext{
@@ -399,60 +405,68 @@ func (s *Server) registerWebhookRoutes(g *echo.Group) {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to list pull request file").SetInternal(err)
 		}
 
-		distinctFileList := []vcs.DistinctFileItem{}
-		for _, prFile := range prFiles {
-			if prFile.IsDeleted {
-				continue
+		sqlFileName2Advice := s.sqlAdviceForSQLFiles(ctx, repositoryList, prFiles, setting.ExternalUrl)
+
+		if s.licenseService.IsFeatureEnabled(api.FeatureMybatisSQLReview) {
+			// If the commit file list contains the file which extension is xml and the content
+			// contains "https://mybatis.org/dtd/mybatis-3-mapper.dtd", we will try to apply
+			// sql-review to it.
+			// To apply sql-review to it, proceed as follows:
+			// 1. Look in the sibling and parent directories for directories containing similar
+			// <!DOCTYPE configuration
+			//   PUBLIC "-//mybatis.org//DTD Config 3.0//EN"
+			//   "https://mybatis.org/dtd/mybatis-3-config.dtd">
+			// of the xml file
+			// 2. If we can find it, then we will extract the sql from the mapper xml
+			// 3. match the environments in the configuration xml, look for the sql-review policy in the environment and apply it.
+			var isMybatisMapperXMLRegex = regexp.MustCompile(`(?i)http(s)?://mybatis.org/dtd/mybatis-3-mapper.dtd`)
+
+			mybatisMapperXMLFiles := make(map[string]string)
+			var commitID string
+			for _, prFile := range prFiles {
+				if !strings.HasSuffix(prFile.Path, ".xml") {
+					continue
+				}
+				fileContent, err := vcs.Get(repo.VCS.Type, vcs.ProviderConfig{}).ReadFileContent(
+					ctx,
+					common.OauthContext{
+						ClientID:     repo.VCS.ApplicationID,
+						ClientSecret: repo.VCS.Secret,
+						AccessToken:  repo.AccessToken,
+						RefreshToken: repo.RefreshToken,
+						Refresher:    utils.RefreshToken(ctx, s.store, repo.WebURL),
+					},
+					repo.VCS.InstanceURL,
+					repo.ExternalID,
+					prFile.Path,
+					prFile.LastCommitID,
+				)
+				if err != nil {
+					return echo.NewHTTPError(http.StatusInternalServerError, "Failed to read file content").SetInternal(err)
+				}
+				if !isMybatisMapperXMLRegex.MatchString(fileContent) {
+					continue
+				}
+				mybatisMapperXMLFiles[prFile.Path] = fileContent
+				commitID = prFile.LastCommitID
 			}
-			distinctFileList = append(distinctFileList, vcs.DistinctFileItem{
-				FileName: prFile.Path,
-				Commit: vcs.Commit{
-					ID: prFile.LastCommitID,
-				},
-			})
-		}
-
-		sqlCheckAdvice := map[string][]advisor.Advice{}
-		var wg sync.WaitGroup
-
-		repoID2FileItemList := groupFileInfoByRepo(distinctFileList, repositoryList)
-		for _, fileInfoListInRepo := range repoID2FileItemList {
-			for _, file := range fileInfoListInRepo {
-				wg.Add(1)
-				go func(file fileInfo) {
-					defer wg.Done()
-					adviceList, err := s.sqlAdviceForFile(ctx, file, setting.ExternalUrl)
-					if err != nil {
-						log.Error(
-							"Failed to take SQL review for file",
-							zap.String("file", file.item.FileName),
-							zap.String("external_id", file.repository.ExternalID),
-							zap.Error(err),
-						)
-						sqlCheckAdvice[file.item.FileName] = []advisor.Advice{
-							{
-								Status:  advisor.Warn,
-								Code:    advisor.Internal,
-								Title:   "Failed to take SQL review",
-								Content: fmt.Sprintf("Failed to take SQL review for file %s with error %v", file.item.FileName, err),
-								Line:    1,
-							},
-						}
-					} else if adviceList != nil {
-						sqlCheckAdvice[file.item.FileName] = adviceList
-					}
-				}(file)
+			if len(mybatisMapperXMLFiles) > 0 {
+				mapperAdvices, err := s.sqlAdviceForMybatisMapperFiles(ctx, mybatisMapperXMLFiles, commitID, repo)
+				if err != nil {
+					return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get sql advice for mybatis mapper files").SetInternal(err)
+				}
+				for filename, mapperAdvice := range mapperAdvices {
+					sqlFileName2Advice[filename] = mapperAdvice
+				}
 			}
 		}
-
-		wg.Wait()
 
 		response := &api.VCSSQLReviewResult{}
 		switch repo.VCS.Type {
 		case vcs.GitHub:
-			response = convertSQLAdviceToGitHubActionResult(sqlCheckAdvice)
+			response = convertSQLAdviceToGitHubActionResult(sqlFileName2Advice)
 		case vcs.GitLab:
-			response = convertSQLAdviceToGitLabCIResult(sqlCheckAdvice)
+			response = convertSQLAdviceToGitLabCIResult(sqlFileName2Advice)
 		}
 
 		log.Debug("SQL review finished",
@@ -465,6 +479,195 @@ func (s *Server) registerWebhookRoutes(g *echo.Group) {
 
 		return c.JSON(http.StatusOK, response)
 	})
+}
+
+func (s *Server) sqlAdviceForMybatisMapperFiles(ctx context.Context, mybatisMapperContent map[string]string, commitID string, repo *api.Repository) (map[string][]advisor.Advice, error) {
+	if len(mybatisMapperContent) == 0 {
+		return map[string][]advisor.Advice{}, nil
+	}
+	if commitID == "" {
+		return nil, errors.Errorf("Unexpected empty commit id")
+	}
+
+	sqlCheckAdvices := make(map[string][]advisor.Advice)
+	mybatisMapperXMLFileData, err := s.buildMybatisMapperXMLFileData(ctx, repo, commitID, mybatisMapperContent)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to build mybatis mapper xml file data")
+	}
+	var wg sync.WaitGroup
+	for _, mybatisMapperXMLFile := range mybatisMapperXMLFileData {
+		log.Debug("Mybatis mapper xml file data",
+			zap.String("mapper file", mybatisMapperXMLFile.mapperPath),
+			zap.String("config file", mybatisMapperXMLFile.configPath),
+		)
+		if mybatisMapperXMLFile.configContent == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(datum *mybatisMapperXMLFileDatum) {
+			defer wg.Done()
+			adviceList, err := s.sqlAdviceForMybatisMapperFile(ctx, datum)
+			if err != nil {
+				log.Error(
+					"Failed to take SQL review for file",
+					zap.String("file", datum.mapperContent),
+					zap.String("repository", repo.WebURL),
+					zap.Error(err),
+				)
+				sqlCheckAdvices[datum.configPath] = []advisor.Advice{
+					{
+						Status:  advisor.Warn,
+						Code:    advisor.Internal,
+						Title:   "Failed to take SQL review",
+						Content: fmt.Sprintf("Failed to take SQL review for file %s with error %v", datum.mapperPath, err),
+						Line:    1,
+					},
+				}
+			} else if len(adviceList) > 0 {
+				sqlCheckAdvices[datum.mapperPath] = adviceList
+			}
+		}(mybatisMapperXMLFile)
+	}
+	wg.Wait()
+
+	return sqlCheckAdvices, nil
+}
+
+func (s *Server) sqlAdviceForMybatisMapperFile(ctx context.Context, datum *mybatisMapperXMLFileDatum) ([]advisor.Advice, error) {
+	var result []advisor.Advice
+	var environmentIDs []string
+	// If the configuration file is found, we extract the environment from the configuration file.
+	conf, err := configparser.ParseConfiguration(datum.configContent)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to extract environment ids").SetInternal(err)
+	}
+
+	allEnvironments, err := s.store.ListEnvironmentV2(ctx, &store.FindEnvironmentMessage{})
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to list environments").SetInternal(err)
+	}
+
+	for _, confEnv := range conf.Environments {
+		environmentIDs = append(environmentIDs, confEnv.ID)
+		for _, env := range allEnvironments {
+			if strings.EqualFold(env.Title, confEnv.ID) {
+				// If the environment is found, we extract the sql-review policy from the environment.
+				policy, err := s.store.GetSQLReviewPolicy(ctx, env.UID)
+				if err != nil {
+					if e, ok := err.(*common.Error); ok && e.Code == common.NotFound {
+						log.Debug("Cannot found SQL review policy in environment", zap.String("Environment", confEnv.ID), zap.Error(err))
+						continue
+					}
+					return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to get SQL review policy").SetInternal(err)
+				}
+				if policy == nil {
+					continue
+				}
+				engineType, err := extractDBTypeFromJDBCConnectionString(confEnv.JDBCConnString)
+				if err != nil {
+					return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to extract db type").SetInternal(err)
+				}
+				if engineType == db.UnknownType {
+					continue
+				}
+				emptyCatalog, err := store.NewEmptyCatalog(engineType)
+				if err != nil {
+					return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to get empty catalog").SetInternal(err)
+				}
+
+				mybatisSQLs, lineMapping, err := extractMybatisMapperSQL(datum.mapperContent)
+				if err != nil {
+					return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to extract mybatis mapper sql").SetInternal(err)
+				}
+
+				dbType, err := advisorDB.ConvertToAdvisorDBType(string(engineType))
+				if err != nil {
+					return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to convert to advisor db type").SetInternal(err)
+				}
+				adviceList, err := advisor.SQLReviewCheck(mybatisSQLs, policy.RuleList, advisor.SQLReviewCheckContext{
+					Catalog: emptyCatalog,
+					DbType:  dbType,
+				})
+				if err != nil {
+					return nil, echo.NewHTTPError(http.StatusInternalServerError, "Failed to check sql review").SetInternal(err)
+				}
+				// Remap the line number to the original file.
+				for _, advice := range adviceList {
+					for _, line := range lineMapping {
+						if advice.Line <= line.SQLLastLine {
+							advice.Line = line.OriginalEleLine
+							break
+						}
+					}
+					result = append(result, advice)
+				}
+			}
+		}
+	}
+	if len(result) == 0 {
+		return []advisor.Advice{
+			{
+				Status: advisor.Warn,
+				Code:   advisor.NotFound,
+				Title:  fmt.Sprintf("SQL review policy not found for environment %s", strings.Join(environmentIDs, ",")),
+				// TODO(zp): add link to doc.
+				Content: "check doc for details.",
+				Line:    1,
+			},
+		}, nil
+	}
+	return result, nil
+}
+
+func (s *Server) sqlAdviceForSQLFiles(ctx context.Context, repositoryList []*api.Repository, prFiles []*vcs.PullRequestFile, externalURL string) map[string][]advisor.Advice {
+	distinctFileList := []vcs.DistinctFileItem{}
+	for _, prFile := range prFiles {
+		if prFile.IsDeleted {
+			continue
+		}
+		distinctFileList = append(distinctFileList, vcs.DistinctFileItem{
+			FileName: prFile.Path,
+			Commit: vcs.Commit{
+				ID: prFile.LastCommitID,
+			},
+		})
+	}
+
+	sqlCheckAdvice := map[string][]advisor.Advice{}
+	var wg sync.WaitGroup
+
+	repoID2FileItemList := groupFileInfoByRepo(distinctFileList, repositoryList)
+
+	for _, fileInfoListInRepo := range repoID2FileItemList {
+		for _, file := range fileInfoListInRepo {
+			wg.Add(1)
+			go func(file fileInfo) {
+				defer wg.Done()
+				adviceList, err := s.sqlAdviceForFile(ctx, file, externalURL)
+				if err != nil {
+					log.Error(
+						"Failed to take SQL review for file",
+						zap.String("file", file.item.FileName),
+						zap.String("external_id", file.repository.ExternalID),
+						zap.Error(err),
+					)
+					sqlCheckAdvice[file.item.FileName] = []advisor.Advice{
+						{
+							Status:  advisor.Warn,
+							Code:    advisor.Internal,
+							Title:   "Failed to take SQL review",
+							Content: fmt.Sprintf("Failed to take SQL review for file %s with error %v", file.item.FileName, err),
+							Line:    1,
+						},
+					}
+				} else if adviceList != nil {
+					sqlCheckAdvice[file.item.FileName] = adviceList
+				}
+			}(file)
+		}
+	}
+	wg.Wait()
+	return sqlCheckAdvice
 }
 
 func (s *Server) sqlAdviceForFile(
@@ -495,7 +698,7 @@ func (s *Server) sqlAdviceForFile(
 	databases, err := s.findProjectDatabases(ctx, fileInfo.repository.ProjectID, fileInfo.migrationInfo.Database, fileInfo.migrationInfo.Environment)
 	if err != nil {
 		log.Debug(
-			"Failed to list databse migration info",
+			"Failed to list database migration info",
 			zap.Int("project", fileInfo.repository.ProjectID),
 			zap.String("database", fileInfo.migrationInfo.Database),
 			zap.String("environment", fileInfo.migrationInfo.Environment),
@@ -1002,7 +1205,16 @@ func sortFilesBySchemaVersion(fileInfoList []fileInfo) []fileInfo {
 	sort.Slice(ret, func(i, j int) bool {
 		mi := ret[i].migrationInfo
 		mj := ret[j].migrationInfo
-		return mi.Database < mj.Database || (mi.Database == mj.Database && mi.Version < mj.Version)
+		if mi.Database < mj.Database {
+			return true
+		}
+		if mi.Database == mj.Database && mi.Version < mj.Version {
+			return true
+		}
+		if mi.Database == mj.Database && mi.Version == mj.Version && mi.Type.GetVersionTypeSuffix() < mj.Type.GetVersionTypeSuffix() {
+			return true
+		}
+		return false
 	})
 	return ret
 }
@@ -1042,6 +1254,8 @@ func (s *Server) createIssueFromMigrationDetailList(ctx context.Context, issueNa
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, errMsg).SetInternal(err)
 	}
+
+	// TODO(p0ny): sheet, for each sheet, update the payload to backtrace the issue.
 
 	// Create a project activity after successfully creating the issue from the push event.
 	activityPayload, err := json.Marshal(
@@ -1222,12 +1436,26 @@ func (s *Server) prepareIssueFromSDLFile(ctx context.Context, repo *api.Reposito
 		return nil, []*api.ActivityCreate{activityCreate}
 	}
 
+	sheet, err := s.store.CreateSheet(ctx, &api.SheetCreate{
+		CreatorID:  api.SystemBotID,
+		ProjectID:  repo.ProjectID,
+		Name:       file,
+		Statement:  sdl,
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebaseArtifact,
+		Type:       api.SheetForSQL,
+	})
+	if err != nil {
+		activityCreate := getIgnoredFileActivityCreate(repo.ProjectID, pushEvent, file, errors.Wrap(err, "Failed to create a sheet"))
+		return nil, []*api.ActivityCreate{activityCreate}
+	}
+
 	var migrationDetailList []*api.MigrationDetail
 	if repo.Project.TenantMode == api.TenantModeTenant {
 		migrationDetailList = append(migrationDetailList,
 			&api.MigrationDetail{
 				MigrationType: db.MigrateSDL,
-				Statement:     sdl,
+				SheetID:       sheet.ID,
 			},
 		)
 		return migrationDetailList, nil
@@ -1244,7 +1472,7 @@ func (s *Server) prepareIssueFromSDLFile(ctx context.Context, repo *api.Reposito
 			&api.MigrationDetail{
 				MigrationType: db.MigrateSDL,
 				DatabaseID:    database.UID,
-				Statement:     sdl,
+				SheetID:       sheet.ID,
 			},
 		)
 	}
@@ -1270,11 +1498,25 @@ func (s *Server) prepareIssueFromFile(ctx context.Context, repo *api.Repository,
 	if repo.Project.TenantMode == api.TenantModeTenant {
 		// A non-YAML file means the whole file content is the SQL statement
 		if !fileInfo.item.IsYAML {
+			sheet, err := s.store.CreateSheet(ctx, &api.SheetCreate{
+				CreatorID:  api.SystemBotID,
+				ProjectID:  repo.ProjectID,
+				Name:       fileInfo.item.FileName,
+				Statement:  content,
+				Visibility: api.ProjectSheet,
+				Source:     api.SheetFromBytebaseArtifact,
+				Type:       api.SheetForSQL,
+			})
+			if err != nil {
+				activityCreate := getIgnoredFileActivityCreate(repo.ProjectID, pushEvent, fileInfo.item.FileName, errors.Wrap(err, "Failed to create a sheet"))
+				return nil, []*api.ActivityCreate{activityCreate}
+			}
+
 			return []*api.MigrationDetail{
 				{
 					MigrationType: fileInfo.migrationInfo.Type,
-					Statement:     content,
-					SchemaVersion: fileInfo.migrationInfo.Version,
+					SheetID:       sheet.ID,
+					SchemaVersion: fmt.Sprintf("%s-%s", fileInfo.migrationInfo.Version, fileInfo.migrationInfo.Type.GetVersionTypeSuffix()),
 				},
 			}, nil
 		}
@@ -1290,6 +1532,20 @@ func (s *Server) prepareIssueFromFile(ctx context.Context, repo *api.Repository,
 					errors.Wrap(err, "Failed to parse file content as YAML"),
 				),
 			}
+		}
+
+		sheet, err := s.store.CreateSheet(ctx, &api.SheetCreate{
+			CreatorID:  api.SystemBotID,
+			ProjectID:  repo.ProjectID,
+			Name:       fileInfo.item.FileName,
+			Statement:  migrationFile.Statement,
+			Visibility: api.ProjectSheet,
+			Source:     api.SheetFromBytebaseArtifact,
+			Type:       api.SheetForSQL,
+		})
+		if err != nil {
+			activityCreate := getIgnoredFileActivityCreate(repo.ProjectID, pushEvent, fileInfo.item.FileName, errors.Wrap(err, "Failed to create a sheet"))
+			return nil, []*api.ActivityCreate{activityCreate}
 		}
 
 		var migrationDetailList []*api.MigrationDetail
@@ -1311,8 +1567,8 @@ func (s *Server) prepareIssueFromFile(ctx context.Context, repo *api.Repository,
 					&api.MigrationDetail{
 						MigrationType: fileInfo.migrationInfo.Type,
 						DatabaseID:    db.UID,
-						Statement:     migrationFile.Statement,
-						SchemaVersion: fileInfo.migrationInfo.Version,
+						SheetID:       sheet.ID,
+						SchemaVersion: fmt.Sprintf("%s-%s", fileInfo.migrationInfo.Version, fileInfo.migrationInfo.Type.GetVersionTypeSuffix()),
 					},
 				)
 			}
@@ -1328,21 +1584,36 @@ func (s *Server) prepareIssueFromFile(ctx context.Context, repo *api.Repository,
 	}
 
 	if fileInfo.item.ItemType == vcs.FileItemTypeAdded {
+		sheet, err := s.store.CreateSheet(ctx, &api.SheetCreate{
+			CreatorID:  api.SystemBotID,
+			ProjectID:  repo.ProjectID,
+			Name:       fileInfo.item.FileName,
+			Statement:  content,
+			Visibility: api.ProjectSheet,
+			Source:     api.SheetFromBytebaseArtifact,
+			Type:       api.SheetForSQL,
+		})
+		if err != nil {
+			activityCreate := getIgnoredFileActivityCreate(repo.ProjectID, pushEvent, fileInfo.item.FileName, errors.Wrap(err, "Failed to create a sheet"))
+			return nil, []*api.ActivityCreate{activityCreate}
+		}
+
 		var migrationDetailList []*api.MigrationDetail
 		for _, database := range databases {
 			migrationDetailList = append(migrationDetailList,
 				&api.MigrationDetail{
 					MigrationType: fileInfo.migrationInfo.Type,
 					DatabaseID:    database.UID,
-					Statement:     content,
-					SchemaVersion: fileInfo.migrationInfo.Version,
+					SheetID:       sheet.ID,
+					SchemaVersion: fmt.Sprintf("%s-%s", fileInfo.migrationInfo.Version, fileInfo.migrationInfo.Type.GetVersionTypeSuffix()),
 				},
 			)
 		}
 		return migrationDetailList, nil
 	}
 
-	if err := s.tryUpdateTasksFromModifiedFile(ctx, databases, fileInfo.item.FileName, fileInfo.migrationInfo.Version, content); err != nil {
+	migrationVersion := fmt.Sprintf("%s-%s", fileInfo.migrationInfo.Version, fileInfo.migrationInfo.Type.GetVersionTypeSuffix())
+	if err := s.tryUpdateTasksFromModifiedFile(ctx, databases, fileInfo.item.FileName, migrationVersion, content); err != nil {
 		return nil, []*api.ActivityCreate{
 			getIgnoredFileActivityCreate(
 				repo.ProjectID,
@@ -1356,6 +1627,7 @@ func (s *Server) prepareIssueFromFile(ctx context.Context, repo *api.Repository,
 }
 
 func (s *Server) tryUpdateTasksFromModifiedFile(ctx context.Context, databases []*store.DatabaseMessage, fileName, schemaVersion, statement string) error {
+	// TODO(p0ny): sheet, create new sheets and update task sheet id.
 	// For modified files, we try to update the existing issue's statement.
 	for _, database := range databases {
 		find := &api.TaskFind{
@@ -1385,11 +1657,25 @@ func (s *Server) tryUpdateTasksFromModifiedFile(ctx context.Context, databases [
 			log.Error("issue not found by pipeline ID", zap.Int("pipeline ID", task.PipelineID), zap.Error(err))
 			return nil
 		}
+
+		sheet, err := s.store.CreateSheet(ctx, &api.SheetCreate{
+			CreatorID:  api.SystemBotID,
+			ProjectID:  issue.Project.UID,
+			Name:       fileName,
+			Statement:  statement,
+			Visibility: api.ProjectSheet,
+			Source:     api.SheetFromBytebaseArtifact,
+			Type:       api.SheetForSQL,
+		})
+		if err != nil {
+			return err
+		}
+
 		// TODO(dragonly): Try to patch the failed migration history record to pending, and the statement to the current modified file content.
 		log.Debug("Patching task for modified file VCS push event", zap.String("fileName", fileName), zap.Int("issueID", issue.UID), zap.Int("taskID", task.ID))
 		taskPatch := api.TaskPatch{
 			ID:        task.ID,
-			Statement: &statement,
+			SheetID:   &sheet.ID,
 			UpdaterID: api.SystemBotID,
 		}
 		if err := s.TaskScheduler.PatchTask(ctx, task, &taskPatch, issue); err != nil {
@@ -1470,7 +1756,7 @@ func convertSQLAdviceToGitLabCIResult(adviceMap map[string][]advisor.Advice) *ap
 
 			testcase := fmt.Sprintf(
 				"<testcase name=\"%s\" classname=\"%s\" file=\"%s#L%d\">\n<failure>\n%s\n</failure>\n</testcase>",
-				fmt.Sprintf("%s#L%d: %s", filename, line, advice.Title),
+				fmt.Sprintf("[%s] %s#L%d: %s", advice.Status, filename, line, advice.Title),
 				filePath,
 				filePath,
 				line,
@@ -1587,4 +1873,150 @@ func filterBitbucketBytebaseCommit(list []bitbucket.WebhookCommit) []bitbucket.W
 		result = append(result, commit)
 	}
 	return result
+}
+
+// extractDBTypeFromJDBCConnectionString will extract the DB type from JDBC connection string. Only support MySQL and Postgres for now.
+// It will return UnknownType if the DB type is not supported, and returns error if cannot parse the JDBC connection string.
+func extractDBTypeFromJDBCConnectionString(jdbcURL string) (db.Type, error) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(jdbcURL), "jdbc:")
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return db.UnknownType, err
+	}
+
+	switch {
+	case strings.HasPrefix(u.Scheme, "mysql"):
+		return db.MySQL, nil
+	case strings.HasPrefix(u.Scheme, "postgresql"):
+		return db.Postgres, nil
+	}
+	return db.UnknownType, nil
+}
+
+// extractMybatisMapperSQL will extract the SQL from mybatis mapper XML.
+func extractMybatisMapperSQL(mapperContent string) (string, []*ast.MybatisSQLLineMapping, error) {
+	mybatisMapperParser := mapperparser.NewParser(mapperContent)
+	mybatisMapperNode, err := mybatisMapperParser.Parse()
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "failed to parse mybatis mapper xml")
+	}
+	var sb strings.Builder
+	lineMapping, err := mybatisMapperNode.RestoreSQLWithLineMapping(mybatisMapperParser.GetRestoreContext(), &sb)
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "failed to restore mybatis mapper xml")
+	}
+	return sb.String(), lineMapping, nil
+}
+
+// mybatisMapperXMLFileDatum is the metadata of mybatis mapper XML file.
+// It maintains the mybatis mapper XML file path, mapper XML file content, and the corresponding mybatis configuration XML content.
+type mybatisMapperXMLFileDatum struct {
+	// mapperPath is the git ls-tree syntax filepath of the mybatis mapper XML file.
+	mapperPath string
+	// mapperContent is the content of the mybatis mapper XML file.
+	mapperContent string
+	// configPath is the git ls-tree syntax filepath of the mybatis configuration XML file,
+	// it is empty if the mybatis configuration XML file is not found.
+	configPath string
+	// configContent is the content of the mybatis configuration XML file,
+	// it is empty if the mybatis configuration XML file is not found.
+	configContent string
+}
+
+// buildMybatisMapperXMLFileData will build the mybatis mapper XML file data.
+//
+//	ctx: the context.
+//	repo: the repository will be list file tree and get file content from.
+//	commitID: the commitID is the snapshot of the file tree and file content.
+//	mapperFiles: the map of the mybatis mapper XML file path and content.
+func (s *Server) buildMybatisMapperXMLFileData(ctx context.Context, repo *api.Repository, commitID string, mapperFiles map[string]string) ([]*mybatisMapperXMLFileDatum, error) {
+	if len(mapperFiles) == 0 {
+		return []*mybatisMapperXMLFileDatum{}, nil
+	}
+
+	var mybatisMapperXMLFileData []*mybatisMapperXMLFileDatum
+	// isMybatisConfigXMLRegex is the regex to match the mybatis configuration XML file, if it can match the file content,
+	// we regard the file as the mybatis configuration XML file.
+	var isMybatisConfigXMLRegex = regexp.MustCompile(`(?i)http(s)?://mybatis.org/dtd/mybatis-3-config.dtd`)
+	// configPathCache is the cache of the mybatis configuration XML file directory,
+	// the key is the mybatis mapper XML file ls-tree syntax directory, and value is the mybatis configuration XML file ls-tree syntax path.
+	configPathCache := make(map[string]string)
+	// configCache is the cache of the mybatis configuration XML file content,
+	// the key is the mybatis configuration XML file ls-tree syntax path, and value is the mybatis configuration XML file content.
+	// each value is configPathCache must be the key of configCache.
+	configCache := make(map[string]string)
+
+	for mapperFilePath, mapperFileContent := range mapperFiles {
+		configPath := mapperFilePath
+		datum := &mybatisMapperXMLFileDatum{
+			mapperPath:    mapperFilePath,
+			mapperContent: mapperFileContent,
+		}
+		for {
+			currentDir := filepath.Dir(configPath)
+			// git ls-tree syntax filepath didn't support '.', so we need to replace it with "" to represent the root directory.
+			if currentDir == "." {
+				currentDir = ""
+			}
+			if configPath, ok := configPathCache[currentDir]; ok {
+				datum.configPath = configPath
+				datum.configContent = configCache[configPath]
+				break
+			}
+
+			filesInDir, err := vcs.Get(repo.VCS.Type, vcs.ProviderConfig{}).FetchRepositoryFileList(
+				ctx,
+				common.OauthContext{
+					ClientID:     repo.VCS.ApplicationID,
+					ClientSecret: repo.VCS.Secret,
+					AccessToken:  repo.AccessToken,
+					RefreshToken: repo.RefreshToken,
+					Refresher:    utils.RefreshToken(ctx, s.store, repo.WebURL),
+				},
+				repo.VCS.InstanceURL,
+				repo.ExternalID,
+				commitID,
+				currentDir,
+			)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to fetch repository file list for repository %q commitID %q directory %q", repo.WebURL, commitID, currentDir)
+			}
+
+			for _, file := range filesInDir {
+				if file.Type != "blob" || !strings.HasSuffix(file.Path, ".xml") {
+					continue
+				}
+				fileContent, err := vcs.Get(repo.VCS.Type, vcs.ProviderConfig{}).ReadFileContent(
+					ctx,
+					common.OauthContext{
+						ClientID:     repo.VCS.ApplicationID,
+						ClientSecret: repo.VCS.Secret,
+						AccessToken:  repo.AccessToken,
+						RefreshToken: repo.RefreshToken,
+						Refresher:    utils.RefreshToken(ctx, s.store, repo.WebURL),
+					},
+					repo.VCS.InstanceURL,
+					repo.ExternalID,
+					file.Path,
+					commitID,
+				)
+				if err != nil {
+					return nil, errors.Wrapf(err, "failed to read file content for repository %q commitID %q file %q", repo.WebURL, commitID, file.Path)
+				}
+				if !isMybatisConfigXMLRegex.MatchString(fileContent) {
+					continue
+				}
+				configPathCache[currentDir] = file.Path
+				configCache[file.Path] = fileContent
+				datum.configPath = file.Path
+				datum.configContent = fileContent
+			}
+			if currentDir == "" {
+				break
+			}
+			configPath = currentDir
+		}
+		mybatisMapperXMLFileData = append(mybatisMapperXMLFileData, datum)
+	}
+	return mybatisMapperXMLFileData, nil
 }

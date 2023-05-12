@@ -33,6 +33,8 @@ const (
 	IssueDatabaseDataUpdate IssueType = "bb.issue.database.data.update"
 	// IssueDatabaseRestorePITR is the issue type for performing a Point-in-time Recovery.
 	IssueDatabaseRestorePITR IssueType = "bb.issue.database.restore.pitr"
+	// IssueGrantRequest is the issue type for requesting grant.
+	IssueGrantRequest IssueType = "bb.issue.grant.request"
 )
 
 // IssueFieldID is the field ID for an issue.
@@ -71,8 +73,10 @@ type Issue struct {
 	// Related fields
 	ProjectID  int
 	Project    *Project `jsonapi:"relation,project"`
-	PipelineID int
+	PipelineID *int
 	Pipeline   *Pipeline `jsonapi:"relation,pipeline"`
+	// The requested grant in GrantRequest format.
+	GrantRequest string `jsonapi:"attr,grantRequest"`
 
 	// Domain specific fields
 	Name                  string       `jsonapi:"attr,name"`
@@ -150,8 +154,6 @@ type MigrationDetail struct {
 	// DatabaseID is the ID of a database.
 	// This should be unset when a project is in tenant mode. The ProjectID is derived from IssueCreate.
 	DatabaseID int `json:"databaseId"`
-	// Statement is the statement to update database schema.
-	Statement string `json:"statement"`
 	// SheetID is the ID of a sheet. Statement and sheet ID is mutually exclusive.
 	SheetID int `json:"sheetId"`
 	// EarliestAllowedTs the earliest execution time of the change at system local Unix timestamp in seconds.
@@ -159,7 +161,7 @@ type MigrationDetail struct {
 	// SchemaVersion is parsed from VCS file name.
 	// It is automatically generated in the UI workflow.
 	SchemaVersion string `json:"schemaVersion"`
-	// If RollbackEnabled, build the rollbackStatement of the task.
+	// If RollbackEnabled, build the RollbackSheetID of the task.
 	RollbackEnabled bool `json:"rollbackEnabled"`
 	// if RollbackDetail is not nil, then this task is for rolling back another task.
 	RollbackDetail *RollbackDetail `json:"rollbackDetail"`

@@ -17,9 +17,10 @@ import (
 	"github.com/bytebase/bytebase/backend/common/log"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/db"
-	"github.com/bytebase/bytebase/backend/plugin/parser"
-	"github.com/bytebase/bytebase/backend/plugin/parser/edit"
-	"github.com/bytebase/bytebase/backend/plugin/parser/transform"
+	parser "github.com/bytebase/bytebase/backend/plugin/parser/sql"
+
+	"github.com/bytebase/bytebase/backend/plugin/parser/sql/edit"
+	"github.com/bytebase/bytebase/backend/plugin/parser/sql/transform"
 	"github.com/bytebase/bytebase/backend/store"
 )
 
@@ -54,27 +55,8 @@ func (s *Server) registerDatabaseRoutes(g *echo.Group) {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch database list").SetInternal(err)
 		}
 
-		var filteredList []*api.Database
-		role := c.Get(getRoleContextKey()).(api.Role)
-		// If the caller is a developer, we will only return databases belonging to the
-		// project where the caller is a member of.
-		if role == api.Developer {
-			principalID := c.Get(getPrincipalIDContextKey()).(int)
-			for _, database := range dbList {
-				policy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{UID: &database.ProjectID})
-				if err != nil {
-					return err
-				}
-				if isProjectOwnerOrDeveloper(principalID, policy) {
-					filteredList = append(filteredList, database)
-				}
-			}
-		} else {
-			filteredList = dbList
-		}
-
 		c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
-		if err := jsonapi.MarshalPayload(c.Response().Writer, filteredList); err != nil {
+		if err := jsonapi.MarshalPayload(c.Response().Writer, dbList); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to marshal database list response").SetInternal(err)
 		}
 		return nil
@@ -532,20 +514,25 @@ func (s *Server) registerDatabaseRoutes(g *echo.Group) {
 			title = api.ReadOnlyDataSourceName
 		}
 		dataSourceMessage := &store.DataSourceMessage{
-			Title:                  title,
-			Type:                   dataSourceCreate.Type,
-			Username:               dataSourceCreate.Username,
-			ObfuscatedPassword:     common.Obfuscate(dataSourceCreate.Password, s.secret),
-			ObfuscatedSslCa:        common.Obfuscate(dataSourceCreate.SslCa, s.secret),
-			ObfuscatedSslCert:      common.Obfuscate(dataSourceCreate.SslCert, s.secret),
-			ObfuscatedSslKey:       common.Obfuscate(dataSourceCreate.SslKey, s.secret),
-			Host:                   dataSourceCreate.Host,
-			Port:                   dataSourceCreate.Port,
-			Database:               dataSourceCreate.Database,
-			SRV:                    dataSourceCreate.Options.SRV,
-			AuthenticationDatabase: dataSourceCreate.Options.AuthenticationDatabase,
-			SID:                    dataSourceCreate.Options.SID,
-			ServiceName:            dataSourceCreate.Options.ServiceName,
+			Title:                   title,
+			Type:                    dataSourceCreate.Type,
+			Username:                dataSourceCreate.Username,
+			ObfuscatedPassword:      common.Obfuscate(dataSourceCreate.Password, s.secret),
+			ObfuscatedSslCa:         common.Obfuscate(dataSourceCreate.SslCa, s.secret),
+			ObfuscatedSslCert:       common.Obfuscate(dataSourceCreate.SslCert, s.secret),
+			ObfuscatedSslKey:        common.Obfuscate(dataSourceCreate.SslKey, s.secret),
+			Host:                    dataSourceCreate.Host,
+			Port:                    dataSourceCreate.Port,
+			Database:                dataSourceCreate.Database,
+			SRV:                     dataSourceCreate.Options.SRV,
+			AuthenticationDatabase:  dataSourceCreate.Options.AuthenticationDatabase,
+			SID:                     dataSourceCreate.Options.SID,
+			ServiceName:             dataSourceCreate.Options.ServiceName,
+			SSHHost:                 dataSourceCreate.Options.SSHHost,
+			SSHPort:                 dataSourceCreate.Options.SSHPort,
+			SSHUser:                 dataSourceCreate.Options.SSHUser,
+			SSHObfuscatedPassword:   common.Obfuscate(dataSourceCreate.Options.SSHPassword, s.secret),
+			SSHObfuscatedPrivateKey: common.Obfuscate(dataSourceCreate.Options.SSHPrivateKey, s.secret),
 		}
 		if err := s.store.AddDataSourceToInstanceV2(ctx, instance.UID, creatorID, instance.EnvironmentID, instance.ResourceID, dataSourceMessage); err != nil {
 			return err
@@ -658,6 +645,17 @@ func (s *Server) registerDatabaseRoutes(g *echo.Group) {
 			updateMessage.AuthenticationDatabase = &dataSourcePatch.Options.AuthenticationDatabase
 			updateMessage.SID = &dataSourcePatch.Options.SID
 			updateMessage.ServiceName = &dataSourcePatch.Options.ServiceName
+			updateMessage.SSHHost = &dataSourcePatch.Options.SSHHost
+			updateMessage.SSHPort = &dataSourcePatch.Options.SSHPort
+			updateMessage.SSHUser = &dataSourcePatch.Options.SSHUser
+			if dataSourcePatch.Options.SSHPassword != "" {
+				obfuscatedSSHPassword := common.Obfuscate(dataSourcePatch.Options.SSHPassword, s.secret)
+				updateMessage.SSHObfuscatedPassword = &obfuscatedSSHPassword
+			}
+			if dataSourcePatch.Options.SSHPrivateKey != "" {
+				obfuscatedSSHPrivateKey := common.Obfuscate(dataSourcePatch.Options.SSHPrivateKey, s.secret)
+				updateMessage.SSHObfuscatedPrivateKey = &obfuscatedSSHPrivateKey
+			}
 		}
 		if err := s.store.UpdateDataSourceV2(ctx, updateMessage); err != nil {
 			return err

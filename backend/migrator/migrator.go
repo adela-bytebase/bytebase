@@ -26,29 +26,6 @@ import (
 	"github.com/bytebase/bytebase/backend/utils"
 )
 
-const (
-	// The schema version consists of major version and minor version.
-	// Backward compatible schema change increases the minor version, while backward non-compatible schema change increase the major version.
-	// majorSchemaVersion and majorSchemaVersion defines the schema version this version of code can handle.
-	// We reserve 4 least significant digits for minor version.
-	// e.g.
-	// 10001 -> Major version 1, minor version 1
-	// 11001 -> Major version 1, minor version 1001
-	// 20001 -> Major version 2, minor version 1
-	//
-	// The migration file follows the name pattern of {{version_number}}##{{description}}.
-	//
-	// Though minor version is backward compatible, we require the schema version must match both the MAJOR and MINOR version,
-	// otherwise, Bytebase will fail to start. We choose this because otherwise failed minor migration changes like adding an
-	// index is hard to detect.
-	//
-	// If the new release requires a higher MAJOR version then the schema file, then the code will abort immediately. We
-	// will require a separate process to upgrade the schema.
-	// If the new release requires a higher MINOR version than the schema file, then it will apply the migration upon
-	// startup.
-	majorSchemaVersion = 1
-)
-
 //go:embed migration
 var migrationFS embed.FS
 
@@ -217,6 +194,7 @@ func hasInstanceChangeTable(ctx context.Context, metadataDriver dbdriver.Driver)
 	return exists, nil
 }
 
+// migrates the old Bytebase schema up to where we create the instance_change_history table.
 func migrateOld(ctx context.Context, metadataDriver dbdriver.Driver, bytebasePgDriver *pg.Driver, databaseName, serverVersion string) error {
 	has, err := hasInstanceChangeTable(ctx, metadataDriver)
 	if err != nil {
@@ -308,6 +286,7 @@ func migrateOld(ctx context.Context, metadataDriver dbdriver.Driver, bytebasePgD
 				return err
 			}
 
+			// Stops the migration after we've reached to the point where we create the instance_change_history table.
 			has, err := hasInstanceChangeTable(ctx, metadataDriver)
 			if err != nil {
 				return err
@@ -542,10 +521,6 @@ const (
 func migrate(ctx context.Context, storeInstance *store.Store, metadataDriver dbdriver.Driver, cutoffSchemaVersion, curVer semver.Version, mode common.ReleaseMode, serverVersion, databaseName string) error {
 	log.Info("Apply database migration if needed...")
 	log.Info(fmt.Sprintf("Current schema version before migration: %s", curVer))
-	major := curVer.Major
-	if major != majorSchemaVersion {
-		return errors.Errorf("current major schema version %d is different from the major schema version %d this release %s expects", major, majorSchemaVersion, serverVersion)
-	}
 
 	var histories []*store.InstanceChangeHistoryMessage
 	// Because dev migrations don't use semantic versioning, we have to look at all migration history to

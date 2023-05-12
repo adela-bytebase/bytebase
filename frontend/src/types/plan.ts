@@ -13,6 +13,7 @@ export type FeatureType =
   | "bb.feature.sso"
   | "bb.feature.2fa"
   | "bb.feature.rbac"
+  | "bb.feature.disallow-signup"
   | "bb.feature.watermark"
   | "bb.feature.audit-log"
   // Branding
@@ -27,6 +28,7 @@ export type FeatureType =
   | "bb.feature.schema-drift"
   | "bb.feature.sql-review"
   | "bb.feature.task-schedule-time"
+  | "bb.feature.encrypted-secrets"
   // VCS Integration
   | "bb.feature.vcs-schema-write-back"
   | "bb.feature.vcs-sheet-sync"
@@ -34,7 +36,9 @@ export type FeatureType =
   // Database management
   | "bb.feature.pitr"
   | "bb.feature.read-replica-connection"
+  | "bb.feature.instance-ssh-connection"
   | "bb.feature.sync-schema-all-versions"
+  | "bb.feature.index-advisor"
   // Policy Control
   | "bb.feature.approval-policy"
   | "bb.feature.backup-policy"

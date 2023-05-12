@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -437,6 +438,9 @@ type SQLReviewCheckContext struct {
 	Catalog   catalog.Catalog
 	Driver    *sql.DB
 	Context   context.Context
+
+	// Oracle specific fields
+	CurrentSchema string
 }
 
 // SQLReviewCheck checks the statements with sql review rules.
@@ -471,12 +475,13 @@ func SQLReviewCheck(statements string, ruleList []*SQLReviewRule, checkContext S
 			checkContext.DbType,
 			advisorType,
 			Context{
-				Charset:   checkContext.Charset,
-				Collation: checkContext.Collation,
-				Rule:      rule,
-				Catalog:   finder,
-				Driver:    checkContext.Driver,
-				Context:   checkContext.Context,
+				Charset:       checkContext.Charset,
+				Collation:     checkContext.Collation,
+				Rule:          rule,
+				Catalog:       finder,
+				Driver:        checkContext.Driver,
+				Context:       checkContext.Context,
+				CurrentSchema: checkContext.CurrentSchema,
 			},
 			statements,
 		)
@@ -491,6 +496,10 @@ func SQLReviewCheck(statements string, ruleList []*SQLReviewRule, checkContext S
 	if len(result) > 0 && result[0].Title == SyntaxErrorTitle {
 		return result[:1], nil
 	}
+	sort.SliceStable(result, func(i, j int) bool {
+		// Error is 2, warning is 1. So the error (value 2) should come first.
+		return result[i].Status.GetPriority() > result[j].Status.GetPriority()
+	})
 	if len(result) == 0 {
 		result = append(result, Advice{
 			Status:  Success,
@@ -759,6 +768,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLWhereRequirement, nil
 		case db.Postgres:
 			return PostgreSQLWhereRequirement, nil
+		case db.Oracle:
+			return OracleWhereRequirement, nil
 		}
 	case SchemaRuleStatementNoLeadingWildcardLike:
 		switch engine {
@@ -766,6 +777,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLNoLeadingWildcardLike, nil
 		case db.Postgres:
 			return PostgreSQLNoLeadingWildcardLike, nil
+		case db.Oracle:
+			return OracleNoLeadingWildcardLike, nil
 		}
 	case SchemaRuleStatementNoSelectAll:
 		switch engine {
@@ -773,6 +786,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLNoSelectAll, nil
 		case db.Postgres:
 			return PostgreSQLNoSelectAll, nil
+		case db.Oracle:
+			return OracleNoSelectAll, nil
 		}
 	case SchemaRuleSchemaBackwardCompatibility:
 		switch engine {
@@ -787,6 +802,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLNamingTableConvention, nil
 		case db.Postgres:
 			return PostgreSQLNamingTableConvention, nil
+		case db.Oracle:
+			return OracleNamingTableConvention, nil
 		}
 	case SchemaRuleIDXNaming:
 		switch engine {
@@ -831,6 +848,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLColumnRequirement, nil
 		case db.Postgres:
 			return PostgreSQLColumnRequirement, nil
+		case db.Oracle:
+			return OracleColumnRequirement, nil
 		}
 	case SchemaRuleColumnNotNull:
 		switch engine {
@@ -838,6 +857,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLColumnNoNull, nil
 		case db.Postgres:
 			return PostgreSQLColumnNoNull, nil
+		case db.Oracle:
+			return OracleColumnNoNull, nil
 		}
 	case SchemaRuleColumnDisallowChangeType:
 		switch engine {
@@ -877,6 +898,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLColumnTypeRestriction, nil
 		case db.Postgres:
 			return PostgreSQLColumnTypeDisallowList, nil
+		case db.Oracle:
+			return OracleColumnTypeDisallowList, nil
 		}
 	case SchemaRuleColumnDisallowSetCharset:
 		switch engine {
@@ -889,6 +912,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLColumnMaximumCharacterLength, nil
 		case db.Postgres:
 			return PostgreSQLColumnMaximumCharacterLength, nil
+		case db.Oracle:
+			return OracleColumnMaximumCharacterLength, nil
 		}
 	case SchemaRuleColumnAutoIncrementInitialValue:
 		switch engine {
@@ -918,6 +943,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLTableRequirePK, nil
 		case db.Postgres:
 			return PostgreSQLTableRequirePK, nil
+		case db.Oracle:
+			return OracleTableRequirePK, nil
 		}
 	case SchemaRuleTableNoFK:
 		switch engine {
@@ -925,6 +952,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLTableNoFK, nil
 		case db.Postgres:
 			return PostgreSQLTableNoFK, nil
+		case db.Oracle:
+			return OracleTableNoFK, nil
 		}
 	case SchemaRuleTableDropNamingConvention:
 		switch engine {
@@ -968,6 +997,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLIndexKeyNumberLimit, nil
 		case db.Postgres:
 			return PostgreSQLIndexKeyNumberLimit, nil
+		case db.Oracle:
+			return OracleIndexKeyNumberLimit, nil
 		}
 	case SchemaRuleIndexTotalNumberLimit:
 		switch engine {
@@ -1031,6 +1062,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLInsertMustSpecifyColumn, nil
 		case db.Postgres:
 			return PostgreSQLInsertMustSpecifyColumn, nil
+		case db.Oracle:
+			return OracleInsertMustSpecifyColumn, nil
 		}
 	case SchemaRuleStatementInsertDisallowOrderByRand:
 		switch engine {

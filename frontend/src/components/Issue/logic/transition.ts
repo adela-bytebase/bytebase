@@ -15,7 +15,12 @@ import {
   StageStatusTransition,
   TaskStatusTransition,
   TASK_STATUS_TRANSITION_LIST,
+  isDatabaseRelatedIssueType,
 } from "@/utils";
+import {
+  allowUserToBeAssignee,
+  useCurrentRollOutPolicyForActiveEnvironment,
+} from "./";
 import { useIssueLogic } from ".";
 
 export const useIssueTransitionLogic = (issue: Ref<Issue>) => {
@@ -23,13 +28,28 @@ export const useIssueTransitionLogic = (issue: Ref<Issue>) => {
     useIssueLogic();
 
   const currentUser = useCurrentUser();
+  const rollOutPolicy = useCurrentRollOutPolicyForActiveEnvironment();
 
   const isAllowedToApplyTaskTransition = computed(() => {
     if (create.value) {
       return false;
     }
+    if (!isDatabaseRelatedIssueType(issue.value.type)) {
+      return false;
+    }
 
-    // Only the assignee can apply task status transitions
+    if (
+      allowUserToBeAssignee(
+        currentUser.value,
+        issue.value.project,
+        rollOutPolicy.value.policy,
+        rollOutPolicy.value.assigneeGroup
+      )
+    ) {
+      return true;
+    }
+
+    // Otherwise, only the assignee can apply task status transitions
     // including roll out, cancel, retry, etc.
     return issue.value.assignee.id === currentUser.value.id;
   });
@@ -129,9 +149,6 @@ export const calcApplicableIssueStatusTransitionList = (
   issue: Issue
 ): IssueStatusTransition[] => {
   const currentUser = useCurrentUser();
-  const currentTask = activeTask(issue.pipeline);
-  const flattenTaskList = allTaskList(issue.pipeline);
-
   const issueEntity = issue as Issue;
   const transitionTypeList: IssueStatusTransitionType[] = [];
 
@@ -152,21 +169,25 @@ export const calcApplicableIssueStatusTransitionList = (
     const transition = ISSUE_STATUS_TRANSITION_LIST.get(type);
     if (!transition) return;
 
-    if (flattenTaskList.some((task) => task.status === "RUNNING")) {
-      // Disallow any issue status transition if some of the tasks are in RUNNING state.
-      return;
-    }
-    if (type === "RESOLVE") {
-      if (transition.type === "RESOLVE" && flattenTaskList.length > 0) {
-        const lastTask = flattenTaskList[flattenTaskList.length - 1];
-        // Don't display the RESOLVE action if the pipeline doesn't reach the
-        // last task
-        if (lastTask.id !== currentTask.id) {
-          return;
-        }
-        // Don't display the RESOLVE action if the last task is not DONE.
-        if (currentTask.status !== "DONE") {
-          return;
+    if (isDatabaseRelatedIssueType(issue.type)) {
+      const currentTask = activeTask(issue.pipeline);
+      const flattenTaskList = allTaskList(issue.pipeline);
+      if (flattenTaskList.some((task) => task.status === "RUNNING")) {
+        // Disallow any issue status transition if some of the tasks are in RUNNING state.
+        return;
+      }
+      if (type === "RESOLVE") {
+        if (transition.type === "RESOLVE" && flattenTaskList.length > 0) {
+          const lastTask = flattenTaskList[flattenTaskList.length - 1];
+          // Don't display the RESOLVE action if the pipeline doesn't reach the
+          // last task
+          if (lastTask.id !== currentTask.id) {
+            return;
+          }
+          // Don't display the RESOLVE action if the last task is not DONE.
+          if (currentTask.status !== "DONE") {
+            return;
+          }
         }
       }
     }

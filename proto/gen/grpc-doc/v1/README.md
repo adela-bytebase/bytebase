@@ -61,6 +61,8 @@
     - [BookmarkService](#bytebase-v1-BookmarkService)
   
 - [v1/database_service.proto](#v1_database_service-proto)
+    - [AdviseIndexRequest](#bytebase-v1-AdviseIndexRequest)
+    - [AdviseIndexResponse](#bytebase-v1-AdviseIndexResponse)
     - [Backup](#bytebase-v1-Backup)
     - [BackupSetting](#bytebase-v1-BackupSetting)
     - [BatchUpdateDatabasesRequest](#bytebase-v1-BatchUpdateDatabasesRequest)
@@ -219,11 +221,13 @@
     - [SQLReviewRule](#bytebase-v1-SQLReviewRule)
     - [SensitiveData](#bytebase-v1-SensitiveData)
     - [SensitiveDataPolicy](#bytebase-v1-SensitiveDataPolicy)
+    - [SlowQueryPolicy](#bytebase-v1-SlowQueryPolicy)
     - [UpdatePolicyRequest](#bytebase-v1-UpdatePolicyRequest)
   
     - [ApprovalGroup](#bytebase-v1-ApprovalGroup)
     - [ApprovalStrategy](#bytebase-v1-ApprovalStrategy)
     - [BackupPlanSchedule](#bytebase-v1-BackupPlanSchedule)
+    - [PolicyResourceType](#bytebase-v1-PolicyResourceType)
     - [PolicyType](#bytebase-v1-PolicyType)
     - [SQLReviewRuleLevel](#bytebase-v1-SQLReviewRuleLevel)
     - [SensitiveDataMaskType](#bytebase-v1-SensitiveDataMaskType)
@@ -1106,6 +1110,39 @@ When paginating, all other parameters provided to `ListBookmarks` must match the
 
 
 
+<a name="bytebase-v1-AdviseIndexRequest"></a>
+
+### AdviseIndexRequest
+AdviseIndexRequest is the request of advising index.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | Format: environments/{environment}/instances/{instance}/databases/{database} |
+| statement | [string](#string) |  | The statement to be advised. |
+
+
+
+
+
+
+<a name="bytebase-v1-AdviseIndexResponse"></a>
+
+### AdviseIndexResponse
+AdviseIndexResponse is the response of advising index.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| current_index | [string](#string) |  | The current index of the statement used. |
+| suggestion | [string](#string) |  | The suggested index of the statement. |
+| create_index_statement | [string](#string) |  | The create index statement of the suggested index. |
+
+
+
+
+
+
 <a name="bytebase-v1-Backup"></a>
 
 ### Backup
@@ -1843,6 +1880,7 @@ The type of the backup.
 | ListSecrets | [ListSecretsRequest](#bytebase-v1-ListSecretsRequest) | [ListSecretsResponse](#bytebase-v1-ListSecretsResponse) |  |
 | UpdateSecret | [UpdateSecretRequest](#bytebase-v1-UpdateSecretRequest) | [Secret](#bytebase-v1-Secret) |  |
 | DeleteSecret | [DeleteSecretRequest](#bytebase-v1-DeleteSecretRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
+| AdviseIndex | [AdviseIndexRequest](#bytebase-v1-AdviseIndexRequest) | [AdviseIndexResponse](#bytebase-v1-AdviseIndexResponse) |  |
 
  
 
@@ -2491,6 +2529,7 @@ OAuth2IdentityProviderConfig is the structure for OAuth2 identity provider confi
 | client_secret | [string](#string) |  |  |
 | scopes | [string](#string) | repeated |  |
 | field_mapping | [FieldMapping](#bytebase-v1-FieldMapping) |  |  |
+| skip_tls_verify | [bool](#bool) |  |  |
 
 
 
@@ -2525,6 +2564,7 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 | client_secret | [string](#string) |  |  |
 | scopes | [string](#string) | repeated |  |
 | field_mapping | [FieldMapping](#bytebase-v1-FieldMapping) |  |  |
+| skip_tls_verify | [bool](#bool) |  |  |
 
 
 
@@ -2857,6 +2897,11 @@ This value should be 4-63 characters, and valid characters are /[a-z][0-9]-/. |
 | authentication_database | [string](#string) |  |  |
 | sid | [string](#string) |  | sid and service_name are used for Oracle. |
 | service_name | [string](#string) |  |  |
+| ssh_host | [string](#string) |  | Connection over SSH. The hostname of the SSH server agent. Required. |
+| ssh_port | [string](#string) |  | The port of the SSH server agent. It&#39;s 22 typically. Required. |
+| ssh_user | [string](#string) |  | The user to login the server. Required. |
+| ssh_password | [string](#string) |  | The password to login the server. If it&#39;s empty string, no password is required. |
+| ssh_private_key | [string](#string) |  | The private key to login the server. If it&#39;s empty string, we will use the system default private key from os.Getenv(&#34;SSH_AUTH_SOCK&#34;). |
 
 
 
@@ -2872,6 +2917,7 @@ This value should be 4-63 characters, and valid characters are /[a-z][0-9]-/. |
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | name | [string](#string) |  | The name of the instance to delete. Format: environments/{environment}/instances/{instance} |
+| force | [bool](#bool) |  | If set to true, any databases and sheets from this project will also be moved to default project, and all open issues will be closed. |
 
 
 
@@ -3346,10 +3392,12 @@ ACTION_SQL_EDITOR_QUERY is the type for SQL editor query. If user runs SQL in Re
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | parent | [string](#string) |  | The parent, which owns this collection of policies. Format: {resource type}/{resource id}/policies/{policy type} |
+| policy_type | [PolicyType](#bytebase-v1-PolicyType) | optional |  |
 | page_size | [int32](#int32) |  | The maximum number of policies to return. The service may return fewer than this value. If unspecified, at most 50 policies will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
 | page_token | [string](#string) |  | A page token, received from a previous `GetPolicies` call. Provide this to retrieve the subsequent page.
 
 When paginating, all other parameters provided to `GetPolicies` must match the call that provided the page token. |
+| show_deleted | [bool](#bool) |  | Show deleted policies if specified. |
 
 
 
@@ -3389,7 +3437,11 @@ When paginating, all other parameters provided to `GetPolicies` must match the c
 | sensitive_data_policy | [SensitiveDataPolicy](#bytebase-v1-SensitiveDataPolicy) |  |  |
 | access_control_policy | [AccessControlPolicy](#bytebase-v1-AccessControlPolicy) |  |  |
 | sql_review_policy | [SQLReviewPolicy](#bytebase-v1-SQLReviewPolicy) |  |  |
+| slow_query_policy | [SlowQueryPolicy](#bytebase-v1-SlowQueryPolicy) |  |  |
 | enforce | [bool](#bool) |  |  |
+| resource_type | [PolicyResourceType](#bytebase-v1-PolicyResourceType) |  | The resource type for the policy. |
+| resource_uid | [string](#string) |  | The system-assigned, unique identifier for the resource. |
+| state | [State](#bytebase-v1-State) |  |  |
 
 
 
@@ -3404,7 +3456,7 @@ When paginating, all other parameters provided to `GetPolicies` must match the c
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| title | [string](#string) |  |  |
+| name | [string](#string) |  |  |
 | rules | [SQLReviewRule](#bytebase-v1-SQLReviewRule) | repeated |  |
 
 
@@ -3458,6 +3510,21 @@ When paginating, all other parameters provided to `GetPolicies` must match the c
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | sensitive_data | [SensitiveData](#bytebase-v1-SensitiveData) | repeated |  |
+
+
+
+
+
+
+<a name="bytebase-v1-SlowQueryPolicy"></a>
+
+### SlowQueryPolicy
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| active | [bool](#bool) |  |  |
 
 
 
@@ -3525,6 +3592,22 @@ The policy&#39;s `name` field is used to identify the instance to update. Format
 
 
 
+<a name="bytebase-v1-PolicyResourceType"></a>
+
+### PolicyResourceType
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| RESOURCE_TYPE_UNSPECIFIED | 0 |  |
+| WORKSPACE | 1 |  |
+| ENVIRONMENT | 2 |  |
+| PROJECT | 3 |  |
+| INSTANCE | 4 |  |
+| DATABASE | 5 |  |
+
+
+
 <a name="bytebase-v1-PolicyType"></a>
 
 ### PolicyType
@@ -3538,6 +3621,7 @@ The policy&#39;s `name` field is used to identify the instance to update. Format
 | SQL_REVIEW | 3 |  |
 | SENSITIVE_DATA | 4 |  |
 | ACCESS_CONTROL | 5 |  |
+| SLOW_QUERY | 6 |  |
 
 
 
@@ -3633,6 +3717,7 @@ TODO(zp): move to activity later.
 | members | [string](#string) | repeated | Specifies the principals requesting access for a Bytebase resource. `members` can have the following values:
 
 * `user:{emailid}`: An email address that represents a specific Bytebase account. For example, `alice@example.com` . |
+| condition | [google.type.Expr](#google-type-Expr) |  | The condition that is associated with this binding. If the condition evaluates to true, then this binding applies to the current request. If the condition evaluates to false, then this binding does not apply to the current request. However, a different role binding might grant the same role to one or more of the principals in this binding. |
 
 
 
@@ -3666,6 +3751,7 @@ This value should be 4-63 characters, and valid characters are /[a-z][0-9]-/. |
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | name | [string](#string) |  | The name of the project to delete. Format: projects/{project} |
+| force | [bool](#bool) |  | If set to true, any databases and sheets from this project will also be moved to default project, and all open issues will be closed. |
 
 
 
@@ -3880,7 +3966,6 @@ When paginating, all other parameters provided to `ListProjects` must match the 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| project | [string](#string) |  | The name of the project to remove the webhook from. Format: projects/{project} |
 | webhook | [Webhook](#bytebase-v1-Webhook) |  | The webhook to remove. Identified by its url. |
 
 
@@ -4038,8 +4123,7 @@ The project&#39;s `name` field is used to identify the project to update. Format
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| project | [string](#string) |  | The name of the project which owns the webhook to be updated. Format: projects/{project} |
-| webhook | [Webhook](#bytebase-v1-Webhook) |  | The webhook to modify. Identified by its url. |
+| webhook | [Webhook](#bytebase-v1-Webhook) |  | The webhook to modify. |
 | update_mask | [google.protobuf.FieldMask](#google-protobuf-FieldMask) |  | The list of fields to update. |
 
 
@@ -4055,6 +4139,7 @@ The project&#39;s `name` field is used to identify the project to update. Format
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | name is the name of the webhook, generated by the server. format: projects/{project}/webhooks/{webhook} |
 | type | [Webhook.Type](#bytebase-v1-Webhook-Type) |  | type is the type of the webhook. |
 | title | [string](#string) |  | title is the title of the webhook. |
 | url | [string](#string) |  | url is the url of the webhook, should be unique within the project. |

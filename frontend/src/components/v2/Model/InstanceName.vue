@@ -4,7 +4,7 @@
     v-bind="bindings"
     :to="link && `/instance/${instance.id}`"
     class="inline-flex items-center gap-x-1"
-    @click.stop=""
+    :class="link && 'normal-link'"
   >
     <InstanceEngineIcon
       v-if="icon && iconPosition === 'prefix'"

@@ -79,7 +79,9 @@
       "dba": "DBA",
       "owner": "Owner",
       "developer": "Developer",
-      "member": "Member"
+      "member": "Member",
+      "exporter": "Exporter",
+      "querier": "Querier"
     },
     "assignee": "Assignee",
     "revert": "Revert",
@@ -242,7 +244,8 @@
     "expand": "Expand",
     "collapse": "Collapse",
     "select": "Select",
-    "optional": "Optional"
+    "optional": "Optional",
+    "reason": "Reason"
   },
   "error-page": {
     "go-back-home": "Go back home"
@@ -336,7 +339,9 @@
       "self": "Apply change to all pending tasks",
       "current-only": "Only apply change to current task"
     },
-    "execution-time": "Execution time"
+    "execution-time": "Execution time",
+    "run-checks": "Run checks",
+    "run-checks-in-current-stage": "Run checks in current stage"
   },
   "banner": {
     "update-license": "Update license",
@@ -475,6 +480,8 @@
         "scopes-description": "A space-separated list of scopes to be carried when accessing the Auth URL",
         "token-url-description": "The API address for obtaining accessToken",
         "user-info-url-description": "The API address for obtaining user information by accessToken",
+        "connection-security": "Connection security",
+        "connection-security-skip-tls-verify": "Skip TLS verify for self-signed certificates",
         "user-information-mapping": "User information mapping",
         "user-information-mapping-description": "Maps the field names from user info API to the Bytebase user.",
         "identifier": "Bytebase user identifier",
@@ -550,7 +557,7 @@
       "not-show-till-next-release": "Don't show this till next version"
     },
     "mail-delivery": {
-      "description": "Enable mail delivery to receive email notification by configuring SMTP server information.",
+      "description": "Configuring SMTP information will enable users to receive database reports via email, such as slow query weekly reports.",
       "field": {
         "smtp-server-host": "SMTP Server Host",
         "smtp-server-port": "SMTP Server Port",
@@ -745,7 +752,20 @@
     },
     "waiting-to-rollout": "Waiting to rollout",
     "waiting-for-review": "Waiting for review",
-    "issue-name": "Issue name"
+    "issue-name": "Issue name",
+    "grant-request": {
+      "select-project": "Select project",
+      "database": "Database",
+      "databases": "Databases",
+      "export-rows": "Export rows",
+      "export-format": "Export format",
+      "expire-days": "Expire days",
+      "expired-at": "Expired at",
+      "all-databases": "All",
+      "manually-select": "Manually select",
+      "customize": "Customize",
+      "data-export-attention": "The data will be exported to a file and downloaded to your local machine. And you can only do the export action once."
+    }
   },
   "alter-schema": {
     "vcs-enabled": "This project has enabled VCS based version control and selecting database below will navigate you to the corresponding Git repository to initiate the change process.",
@@ -774,7 +794,11 @@
     "transfer-in-db-title": "Transfer in database",
     "default-db-hint": "Bytebase periodically syncs the instance schema. Newly synced databases are first placed in the default project.",
     "transfer-in-db-alert": "Are you sure to transfer \"{ dbName }\" into our project?",
-    "unassigned-db-hint": "Bytebase periodically syncs the instance schema. Newly synced databases are first placed in unassigned databases."
+    "unassigned-db-hint": "Bytebase periodically syncs the instance schema. Newly synced databases are first placed in unassigned databases.",
+    "transfer-out-db": "Transfer out DB",
+    "transfer-out-db-title": "Transfer out database",
+    "request-query": "Request query",
+    "export-data": "Export data"
   },
   "create-db": {
     "new-database-name": "New database name",
@@ -1181,7 +1205,9 @@
       "no-difference-tip": "No diff found.",
       "more-version": "more...",
       "character-sets-diff-found": "There are differences between character sets.",
-      "preview-issue": "Preview issue"
+      "preview-issue": "Preview issue",
+      "schema-change": "Schema change",
+      "generated-ddl-statement": "Generated DDL statement"
     },
     "sensitive": "Sensitive",
     "access-denied": "You don't have the permission to access this database.",
@@ -1194,7 +1220,30 @@
     "doesnt-match-tenant-value": "Doesn't match label value",
     "should-follow-database-name-template": "Should follow tenant database name template",
     "all": "All databases",
-    "show-schemaless-databases": "Show schemaless databases. (Alter Schema is not applicable for schemaless databases.)"
+    "show-schemaless-databases": "Show schemaless databases. (Alter Schema is not applicable for schemaless databases.)",
+    "secret": {
+      "self": "Secret",
+      "new": "New secret",
+      "edit": "Edit secret",
+      "name-placeholder": "Input secret name",
+      "validation": {
+        "cannot-be-changed-later": "Cannot be changed later",
+        "duplicated-name": "Duplicated secret name",
+        "name-is-required": "Secret name is required",
+        "name-pattern-mismatch": "Secret name should contain only uppercase letters, digit, or _ (underscore)",
+        "name-cannot-prefix-with-bytebase": "Secret name cannot prefix with 'BYTEBASE_'",
+        "name-cannot-start-with-number": "Secret name cannot start with number"
+      },
+      "description-placeholder": "Input description",
+      "value": "Value",
+      "value-placeholder": "Input value (write only)",
+      "delete-tips": "Delete secret",
+      "description": "You can use secret in the change script to hide sensitive information, please refer to {guide}"
+    },
+    "transfer": {
+      "source-project": "Source project",
+      "target-project": "Target project"
+    }
   },
   "repository": {
     "branch-observe-file-change": "The branch where Bytebase observes the file change.",
@@ -1512,8 +1561,8 @@
       "at-least-one-stage": "At least 1 stage",
       "stage-name-required": "Stage name is required",
       "at-least-one-selector": "At least 1 selector in each stage",
-      "env-in-selector-required": "\"Environment in\" is required in each stage",
-      "env-selector-must-has-one-value": "\"Environment in\" must has exactly one value",
+      "env-in-selector-required": "\"Environment ID\" is required in each stage",
+      "env-selector-must-has-one-value": "\"Environment ID\" must has exactly one value",
       "key-required": "Key is required",
       "values-required": "Values are required"
     },
@@ -1560,7 +1609,22 @@
       "client-key": "Client Key",
       "client-cert": "Client Certificate"
     },
+    "ssh-type": {
+      "tunnel": "@:{'data-source.ssh.tunnel'}",
+      "tunnel-and-private-key": "@:{'data-source.ssh.tunnel'} + @:{'data-source.ssh.private-key'}",
+      "none": "None"
+    },
+    "ssh": {
+      "host": "Server",
+      "port": "Port",
+      "user": "User",
+      "password": "Password",
+      "ssh-key": "SSH Key",
+      "tunnel": "Tunnel",
+      "private-key": "Private Key"
+    },
     "ssl-connection": "SSL Connection",
+    "ssh-connection": "SSH Connection",
     "read-replica-host": "Read-replica Host",
     "read-replica-port": "Read-replica Port",
     "delete-read-only-data-source": "Delete read-only data source",
@@ -1892,6 +1956,14 @@
         "title": "Read replica connection",
         "desc": "Connect to a read replica for the read-only data source."
       },
+      "bb-feature-instance-ssh-connection": {
+        "title": "Instance SSH connection",
+        "desc": "Connect to a instance over SSH."
+      },
+      "bb-feature-index-advisor": {
+        "title": "Index advisor",
+        "desc": "Index advisor can help you to find the missing indexes in slow queries."
+      },
       "bb-feature-sso": {
         "title": "Single Sign-On (SSO)",
         "desc": "Enables users to securely authenticate with multiple applications and websites via a single set of credentials."
@@ -1902,11 +1974,19 @@
       },
       "bb-feature-plugin-openai": {
         "title": "AI Augmentation",
-        "desc": "AI augmented SQL Editor features powered by OpenAI."
+        "desc": "AI augmented SQL Editor and index advisor features powered by OpenAI."
       },
       "bb-feature-shared-sql-script": {
         "title": "Shared SQL script",
         "desc": "Share your SQL scripts with project teammates or make them public to all."
+      },
+      "bb-feature-encrypted-secrets": {
+        "title": "Encrypted Secrets",
+        "desc": "Store your secrets of database and use them in your issue SQL scripts."
+      },
+      "bb-feature-disallow-signup": {
+        "title": "Disable self-service signup",
+        "desc": "Once disabled, users cannot self-service signup and can only be invited by the workspace owner."
       }
     }
   },
@@ -2364,6 +2444,12 @@
     "filter": {
       "from-date": "From date",
       "to-date": "To date"
+    },
+    "advise-index": {
+      "current-index": "Current Index",
+      "suggestion": "Suggestion",
+      "create-index": "Create Index",
+      "setup-openai-key-to-enable": "Setup OpenAI key to enable index advisor"
     }
   },
   "principal": {
@@ -2394,6 +2480,12 @@
     },
     "developer": {
       "description": "System defined project developer role"
+    },
+    "exporter": {
+      "description": "System defined project exporter role"
+    },
+    "querier": {
+      "description": "System defined project querier role"
     }
   }
 }

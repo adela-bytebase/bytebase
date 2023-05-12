@@ -52,16 +52,9 @@ func (exec *SchemaUpdateSDLExecutor) RunOnce(ctx context.Context, task *store.Ta
 		return true, nil, errors.Wrap(err, "invalid database schema update payload")
 	}
 
-	statement := payload.Statement
-	if payload.SheetID > 0 {
-		sheet, err := exec.store.GetSheet(ctx, &api.SheetFind{ID: &payload.SheetID, LoadFull: true}, api.SystemBotID)
-		if err != nil {
-			return true, nil, err
-		}
-		if sheet == nil {
-			return true, nil, errors.Errorf("sheet ID %v not found", payload.SheetID)
-		}
-		statement = sheet.Statement
+	statement, err := exec.store.GetSheetStatementByID(ctx, payload.SheetID)
+	if err != nil {
+		return true, nil, err
 	}
 
 	instance, err := exec.store.GetInstanceV2(ctx, &store.FindInstanceMessage{UID: &task.InstanceID})

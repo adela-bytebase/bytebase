@@ -106,6 +106,7 @@
           </dl>
         </div>
         <div
+          v-if="allowToChangeDatabase"
           class="flex flex-row justify-end items-center flex-wrap shrink gap-x-2 gap-y-2"
           data-label="bb-database-detail-action-buttons-container"
         >
@@ -180,6 +181,9 @@
       </template>
       <template v-if="selectedTabItem?.hash === 'slow-query'">
         <DatabaseSlowQueryPanel :database="database" />
+      </template>
+      <template v-if="selectedTabItem?.hash === 'settings'">
+        <DatabaseSettingsPanel :database="database" />
       </template>
     </div>
 
@@ -310,6 +314,7 @@ import DatabaseBackupPanel from "@/components/DatabaseBackupPanel.vue";
 import DatabaseMigrationHistoryPanel from "@/components/DatabaseMigrationHistoryPanel.vue";
 import DatabaseOverviewPanel from "@/components/DatabaseOverviewPanel.vue";
 import DatabaseSlowQueryPanel from "@/components/DatabaseSlowQueryPanel.vue";
+import { DatabaseSettingsPanel } from "@/components/DatabaseDetail";
 import InstanceEngineIcon from "@/components/InstanceEngineIcon.vue";
 import { DatabaseLabelProps } from "@/components/DatabaseLabels";
 import { SelectDatabaseLabel } from "@/components/TransferDatabaseForm";
@@ -342,11 +347,14 @@ import { SQLEditorButton } from "@/components/DatabaseDetail";
 import {
   pushNotification,
   useCurrentUser,
+  useCurrentUserIamPolicy,
   useDatabaseStore,
   useDBSchemaStore,
-  usePolicyByDatabaseAndType,
   useSQLStore,
 } from "@/store";
+import { usePolicyByParentAndType } from "@/store/modules/v1/policy";
+import { getDatabasePathByLegacyDatabase } from "@/store/modules/v1/common";
+import { PolicyType } from "@/types/proto/v1/org_policy_service";
 
 type DatabaseTabItem = {
   name: string;
@@ -378,11 +386,16 @@ const sqlStore = useSQLStore();
 const ghostDialog = ref<InstanceType<typeof GhostDialog>>();
 
 const databaseTabItemList = computed((): DatabaseTabItem[] => {
+  if (!allowToChangeDatabase.value) {
+    return [{ name: t("common.overview"), hash: "overview" }];
+  }
+
   return [
     { name: t("common.overview"), hash: "overview" },
     { name: t("change-history.self"), hash: "change-history" },
     { name: t("common.backup-and-restore"), hash: "backup-and-restore" },
     { name: startCase(t("slow-query.slow-queries")), hash: "slow-query" },
+    { name: t("common.settings"), hash: "settings" },
   ];
 });
 
@@ -397,19 +410,26 @@ const state = reactive<LocalState>({
 });
 
 const currentUser = useCurrentUser();
+const currentUserIamPolicy = useCurrentUserIamPolicy();
 
 const database = computed((): Database => {
   return databaseStore.getDatabaseById(idFromSlug(props.databaseSlug));
+});
+
+const allowToChangeDatabase = computed(() => {
+  return currentUserIamPolicy.allowToChangeDatabaseOfProject(
+    `projects/${database.value.project.resourceId}`
+  );
 });
 
 const hasSchemaDiagramFeature = computed((): boolean => {
   return instanceHasAlterSchema(database.value.instance);
 });
 
-const accessControlPolicy = usePolicyByDatabaseAndType(
+const accessControlPolicy = usePolicyByParentAndType(
   computed(() => ({
-    databaseId: database.value.id,
-    type: "bb.policy.access-control",
+    parentPath: getDatabasePathByLegacyDatabase(database.value),
+    policyType: PolicyType.ACCESS_CONTROL,
   }))
 );
 const allowQuery = computed(() => {

@@ -24,6 +24,12 @@ export type ConnectionInfo = {
   // sid and serviceName are used for Oracle database. Required one of them.
   sid: string;
   serviceName: string;
+  // Connection over SSH.
+  sshHost: string;
+  sshPort: string;
+  sshUser: string;
+  sshPassword: string;
+  sshPrivateKey: string;
 };
 
 export type QueryInfo = {
@@ -31,6 +37,8 @@ export type QueryInfo = {
   databaseName?: string;
   statement: string;
   limit?: number;
+  // exportFomat includes QUERY, CSV, JSON.
+  exportFormat?: string;
 };
 
 // TODO(Jim): not used yet

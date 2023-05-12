@@ -32,6 +32,7 @@ const (
 	reviewPrefix                 = "reviews/"
 	rolePrefix                   = "roles/"
 	secretNamePrefix             = "secrets/"
+	webhookIDPrefix              = "webhooks/"
 
 	deploymentConfigSuffix = "/deploymentConfig"
 	backupSettingSuffix    = "/backupSetting"
@@ -54,12 +55,28 @@ var (
 	undeletePatch     = false
 )
 
+func isNumber(v string) (int, bool) {
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err == nil {
+		return int(n), true
+	}
+	return 0, false
+}
+
 func getProjectID(name string) (string, error) {
 	tokens, err := getNameParentTokens(name, projectNamePrefix)
 	if err != nil {
 		return "", err
 	}
 	return tokens[0], nil
+}
+
+func getProjectIDWebhookID(name string) (string, string, error) {
+	tokens, err := getNameParentTokens(name, projectNamePrefix, webhookIDPrefix)
+	if err != nil {
+		return "", "", err
+	}
+	return tokens[0], tokens[1], nil
 }
 
 func trimSuffixAndGetProjectID(name string, suffix string) (string, error) {

@@ -17,7 +17,6 @@ import { Project, ProjectMember } from "./project";
 import { ProjectWebhook } from "./projectWebhook";
 import { Repository } from "./repository";
 import { VCS } from "./vcs";
-import { DeploymentConfig } from "./deployment";
 import { Policy, DefaultApprovalPolicy } from "./policy";
 import { Sheet } from "./sheet";
 import { SQLReviewPolicy } from "./sqlReview";
@@ -83,7 +82,8 @@ export type EnvironmentQuickActionType =
   | "quickaction.bb.environment.reorder";
 export type ProjectQuickActionType =
   | "quickaction.bb.project.create"
-  | "quickaction.bb.project.database.transfer";
+  | "quickaction.bb.project.database.transfer"
+  | "quickaction.bb.project.database.transfer-out";
 export type InstanceQuickActionType = "quickaction.bb.instance.create";
 export type UserQuickActionType = "quickaction.bb.user.manage";
 export type DatabaseQuickActionType =
@@ -93,13 +93,17 @@ export type DatabaseQuickActionType =
   | "quickaction.bb.database.data.update"
   | "quickaction.bb.database.troubleshoot"
   | "quickaction.bb.database.schema.sync";
+export type IssueQuickActionType =
+  | "quickaction.bb.issue.grant.request.querier"
+  | "quickaction.bb.issue.grant.request.exporter";
 
 export type QuickActionType =
   | EnvironmentQuickActionType
   | ProjectQuickActionType
   | InstanceQuickActionType
   | UserQuickActionType
-  | DatabaseQuickActionType;
+  | DatabaseQuickActionType
+  | IssueQuickActionType;
 
 export type ResourceType =
   | "PRINCIPAL"
@@ -152,7 +156,6 @@ interface ResourceMaker {
   (type: "VCS"): VCS;
   (type: "REPOSITORY"): Repository;
   (type: "ANOMALY"): Anomaly;
-  (type: "DEPLOYMENT_CONFIG"): DeploymentConfig;
   (type: "SHEET"): Sheet;
   (type: "SQL_REVIEW"): SQLReviewPolicy;
   (type: "AUDIT_LOG"): AuditLog;
@@ -264,6 +267,11 @@ const makeUnknown = (type: ResourceType) => {
       authenticationDatabase: "",
       sid: "",
       serviceName: "",
+      sshHost: "",
+      sshPort: "",
+      sshUser: "",
+      sshPassword: "",
+      sshPrivateKey: "",
     },
     // UI-only fields
     updateSsl: false,
@@ -382,6 +390,7 @@ const makeUnknown = (type: ResourceType) => {
     id: UNKNOWN_ID,
     name: "",
     type: "GITLAB",
+    uiType: "GITLAB_SELF_HOST",
     instanceUrl: "",
     apiUrl: "",
     applicationId: "",
@@ -421,13 +430,6 @@ const makeUnknown = (type: ResourceType) => {
       environmentId: UNKNOWN_ID,
       expectedSchedule: "DAILY",
       actualSchedule: "UNSET",
-    },
-  };
-
-  const UNKNOWN_DEPLOYMENT_CONFIG: DeploymentConfig = {
-    id: UNKNOWN_ID,
-    schedule: {
-      deployments: [],
     },
   };
 
@@ -507,8 +509,6 @@ const makeUnknown = (type: ResourceType) => {
       return UNKNOWN_REPOSITORY;
     case "ANOMALY":
       return UNKNOWN_ANOMALY;
-    case "DEPLOYMENT_CONFIG":
-      return UNKNOWN_DEPLOYMENT_CONFIG;
     case "SHEET":
       return UNKNOWN_SHEET;
     case "SQL_REVIEW":
@@ -618,11 +618,19 @@ const makeEmpty = (type: ResourceType) => {
     host: "",
     port: "",
     database: "",
-    options: { srv: false, authenticationDatabase: "" },
+    options: {
+      srv: false,
+      authenticationDatabase: "",
+      sid: "",
+      serviceName: "",
+      sshHost: "",
+      sshPort: "",
+      sshUser: "",
+      sshPassword: "",
+      sshPrivateKey: "",
+    },
     // UI-only fields
     updateSsl: false,
-    sid: "",
-    serviceName: "",
   };
 
   const EMPTY_BACKUP_SETTING: BackupSetting = {
@@ -738,6 +746,7 @@ const makeEmpty = (type: ResourceType) => {
     id: EMPTY_ID,
     name: "",
     type: "GITLAB",
+    uiType: "GITLAB_SELF_HOST",
     instanceUrl: "",
     apiUrl: "",
     applicationId: "",
@@ -777,13 +786,6 @@ const makeEmpty = (type: ResourceType) => {
       environmentId: EMPTY_ID,
       expectedSchedule: "DAILY",
       actualSchedule: "UNSET",
-    },
-  };
-
-  const EMPTY_DEPLOYMENT_CONFIG: DeploymentConfig = {
-    id: EMPTY_ID,
-    schedule: {
-      deployments: [],
     },
   };
 
@@ -872,8 +874,6 @@ const makeEmpty = (type: ResourceType) => {
       return EMPTY_REPOSITORY;
     case "ANOMALY":
       return EMPTY_ANOMALY;
-    case "DEPLOYMENT_CONFIG":
-      return EMPTY_DEPLOYMENT_CONFIG;
     case "SHEET":
       return EMPTY_SHEET;
     case "SQL_REVIEW":

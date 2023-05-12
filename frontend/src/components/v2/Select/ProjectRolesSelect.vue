@@ -13,7 +13,7 @@
 import { computed } from "vue";
 import { type SelectOption, NSelect } from "naive-ui";
 
-import { useRoleStore } from "@/store";
+import { featureToRef, useRoleStore } from "@/store";
 import { ProjectRoleType } from "@/types";
 import { displayRoleTitle } from "@/utils";
 
@@ -25,8 +25,16 @@ defineEmits<{
   (event: "update:role-list", list: ProjectRoleType[]): void;
 }>();
 
+const hasCustomRoleFeature = featureToRef("bb.feature.custom-role");
+
 const roleOptions = computed(() => {
-  return useRoleStore().roleList.map<SelectOption>((role) => {
+  let roleList = useRoleStore().roleList;
+  if (hasCustomRoleFeature.value) {
+    roleList = useRoleStore().roleList.filter((role) => {
+      return role.name !== "roles/EXPORTER" && role.name !== "roles/QUERIER";
+    });
+  }
+  return roleList.map<SelectOption>((role) => {
     return {
       label: displayRoleTitle(role.name),
       value: role.name,
