@@ -16,10 +16,11 @@ import { Principal } from "./principal";
 import { Project, ProjectMember } from "./project";
 import { Repository } from "./repository";
 import { VCS } from "./vcs";
-import { Policy, DefaultApprovalPolicy } from "./policy";
 import { Sheet } from "./sheet";
 import { SQLReviewPolicy } from "./sqlReview";
 import { AuditLog, AuditActivityType, AuditActivityLevel } from "./auditLog";
+import { BackupPlanSchedule } from "@/types/proto/v1/org_policy_service";
+import { EnvironmentTier } from "@/types/proto/v1/environment_service";
 
 // System bot id
 export const SYSTEM_BOT_ID = 1;
@@ -143,7 +144,6 @@ interface ResourceMaker {
   (type: "BACKUP_SETTING"): BackupSetting;
   (type: "ISSUE"): Issue;
   (type: "PIPELINE"): Pipeline;
-  (type: "POLICY"): Policy;
   (type: "STAGE"): Stage;
   (type: "TASK_PROGRESS"): TaskProgress;
   (type: "TASK"): Task;
@@ -182,7 +182,7 @@ const makeUnknown = (type: ResourceType) => {
     rowStatus: "NORMAL",
     name: "<<Unknown environment>>",
     order: 0,
-    tier: "UNPROTECTED",
+    tier: EnvironmentTier.UNPROTECTED,
   };
 
   const UNKNOWN_PROJECT: Project = {
@@ -279,20 +279,6 @@ const makeUnknown = (type: ResourceType) => {
     id: UNKNOWN_ID,
     name: "<<Unknown pipeline>>",
     stageList: [],
-  };
-
-  const UNKNOWN_POLICY: Policy = {
-    id: UNKNOWN_ID,
-    rowStatus: "NORMAL",
-    resourceType: "",
-    resourceId: UNKNOWN_ID,
-    environment: UNKNOWN_ENVIRONMENT,
-    type: "bb.policy.pipeline-approval",
-    inheritFromParent: false,
-    payload: {
-      value: DefaultApprovalPolicy,
-      assigneeGroupList: [],
-    },
   };
 
   const UNKNOWN_ISSUE: Issue = {
@@ -416,8 +402,8 @@ const makeUnknown = (type: ResourceType) => {
     severity: "MEDIUM",
     payload: {
       environmentId: UNKNOWN_ID,
-      expectedSchedule: "DAILY",
-      actualSchedule: "UNSET",
+      expectedSchedule: BackupPlanSchedule.DAILY,
+      actualSchedule: BackupPlanSchedule.UNSET,
     },
   };
 
@@ -444,14 +430,6 @@ const makeUnknown = (type: ResourceType) => {
     size: 0,
   };
 
-  const UNKNOWN_SQL_REVIEW_POLICY: SQLReviewPolicy = {
-    id: UNKNOWN_ID,
-    rowStatus: "NORMAL",
-    environment: UNKNOWN_ENVIRONMENT,
-    name: "",
-    ruleList: [],
-  };
-
   switch (type) {
     case "PRINCIPAL":
       return UNKNOWN_PRINCIPAL;
@@ -475,8 +453,6 @@ const makeUnknown = (type: ResourceType) => {
       return UNKNOWN_ISSUE;
     case "PIPELINE":
       return UNKNOWN_PIPELINE;
-    case "POLICY":
-      return UNKNOWN_POLICY;
     case "STAGE":
       return UNKNOWN_STAGE;
     case "TASK_PROGRESS":
@@ -497,8 +473,6 @@ const makeUnknown = (type: ResourceType) => {
       return UNKNOWN_ANOMALY;
     case "SHEET":
       return UNKNOWN_SHEET;
-    case "SQL_REVIEW":
-      return UNKNOWN_SQL_REVIEW_POLICY;
   }
 };
 export const unknown = makeUnknown as ResourceMaker;
@@ -527,7 +501,7 @@ const makeEmpty = (type: ResourceType) => {
     rowStatus: "NORMAL",
     name: "",
     order: 0,
-    tier: "UNPROTECTED",
+    tier: EnvironmentTier.UNPROTECTED,
   };
 
   const EMPTY_PROJECT: Project = {
@@ -624,20 +598,6 @@ const makeEmpty = (type: ResourceType) => {
     id: EMPTY_ID,
     name: "",
     stageList: [],
-  };
-
-  const EMPTY_POLICY: Policy = {
-    id: EMPTY_ID,
-    rowStatus: "NORMAL",
-    resourceType: "",
-    resourceId: EMPTY_ID,
-    environment: EMPTY_ENVIRONMENT,
-    type: "bb.policy.pipeline-approval",
-    inheritFromParent: false,
-    payload: {
-      value: DefaultApprovalPolicy,
-      assigneeGroupList: [],
-    },
   };
 
   const EMPTY_ISSUE: Issue = {
@@ -761,8 +721,8 @@ const makeEmpty = (type: ResourceType) => {
     severity: "MEDIUM",
     payload: {
       environmentId: EMPTY_ID,
-      expectedSchedule: "DAILY",
-      actualSchedule: "UNSET",
+      expectedSchedule: BackupPlanSchedule.DAILY,
+      actualSchedule: BackupPlanSchedule.UNSET,
     },
   };
 
@@ -787,14 +747,6 @@ const makeEmpty = (type: ResourceType) => {
     pinned: false,
     payload: {},
     size: 0,
-  };
-
-  const EMPTY_SQL_REVIEW_POLICY: SQLReviewPolicy = {
-    id: EMPTY_ID,
-    rowStatus: "NORMAL",
-    environment: EMPTY_ENVIRONMENT,
-    name: "",
-    ruleList: [],
   };
 
   const EMPTY_AUDIT_LOG: AuditLog = {
@@ -829,8 +781,6 @@ const makeEmpty = (type: ResourceType) => {
       return EMPTY_ISSUE;
     case "PIPELINE":
       return EMPTY_PIPELINE;
-    case "POLICY":
-      return EMPTY_POLICY;
     case "STAGE":
       return EMPTY_STAGE;
     case "TASK_PROGRESS":
@@ -851,8 +801,6 @@ const makeEmpty = (type: ResourceType) => {
       return EMPTY_ANOMALY;
     case "SHEET":
       return EMPTY_SHEET;
-    case "SQL_REVIEW":
-      return EMPTY_SQL_REVIEW_POLICY;
     case "AUDIT_LOG":
       return EMPTY_AUDIT_LOG;
   }

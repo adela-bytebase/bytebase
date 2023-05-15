@@ -40,8 +40,9 @@ import (
 )
 
 const (
-	filterKeyProject   = "project"
-	filterKeyStartTime = "start_time"
+	filterKeyEnvironment = "environment"
+	filterKeyProject     = "project"
+	filterKeyStartTime   = "start_time"
 
 	// Support order by count, latest_log_time, average_query_time, maximum_query_time,
 	// average_rows_sent, maximum_rows_sent, average_rows_examined, maximum_rows_examined for now.
@@ -118,6 +119,48 @@ func (s *DatabaseService) ListDatabases(ctx context.Context, request *v1pb.ListD
 	}
 	response := &v1pb.ListDatabasesResponse{}
 	for _, database := range databases {
+		response.Databases = append(response.Databases, convertToDatabase(database))
+	}
+	return response, nil
+}
+
+// SearchDatabases searches all databases.
+func (s *DatabaseService) SearchDatabases(ctx context.Context, request *v1pb.SearchDatabasesRequest) (*v1pb.SearchDatabasesResponse, error) {
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	role := ctx.Value(common.RoleContextKey).(api.Role)
+
+	instanceID, err := getInstanceID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	find := &store.FindDatabaseMessage{}
+	if instanceID != "-" {
+		find.InstanceID = &instanceID
+	}
+	if request.Filter != "" {
+		projectFilter, err := getFilter(request.Filter, "project")
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, err.Error())
+		}
+		projectID, err := getProjectID(projectFilter)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid project %q in the filter", projectFilter)
+		}
+		find.ProjectID = &projectID
+	}
+	databases, err := s.store.ListDatabases(ctx, find)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	response := &v1pb.SearchDatabasesResponse{}
+	for _, database := range databases {
+		policy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{ProjectID: &database.ProjectID})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, err.Error())
+		}
+		if !isOwnerOrDBA(role) && !isProjectMember(policy, principalID) {
+			continue
+		}
 		response.Databases = append(response.Databases, convertToDatabase(database))
 	}
 	return response, nil
@@ -492,7 +535,7 @@ func (s *DatabaseService) ListSecrets(ctx context.Context, request *v1pb.ListSec
 		return nil, status.Errorf(codes.NotFound, "database %q not found", databaseName)
 	}
 	return &v1pb.ListSecretsResponse{
-		Secrets: stripeAndConvertToServiceSecrets(database.Secrets, database.EnvironmentID, database.InstanceID, database.DatabaseName),
+		Secrets: stripeAndConvertToServiceSecrets(database.Secrets, database.InstanceID, database.DatabaseName),
 	}, nil
 }
 
@@ -580,7 +623,6 @@ func (s *DatabaseService) UpdateSecret(ctx context.Context, request *v1pb.Update
 	updateDatabaseMessage.Secrets = &storepb.Secrets{
 		Items: secretItems,
 	}
-	updateDatabaseMessage.EnvironmentID = database.EnvironmentID
 	updateDatabaseMessage.InstanceID = database.InstanceID
 	updateDatabaseMessage.DatabaseName = database.DatabaseName
 	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
@@ -592,7 +634,7 @@ func (s *DatabaseService) UpdateSecret(ctx context.Context, request *v1pb.Update
 	// Get the secret from the updated database.
 	for _, secret := range updatedDatabase.Secrets.Items {
 		if secret.Name == updateSecretName {
-			return stripeAndConvertToServiceSecret(secret, updatedDatabase.EnvironmentID, updatedDatabase.InstanceID, updatedDatabase.DatabaseName), nil
+			return stripeAndConvertToServiceSecret(secret, updatedDatabase.InstanceID, updatedDatabase.DatabaseName), nil
 		}
 	}
 	return &v1pb.Secret{}, nil
@@ -649,7 +691,6 @@ func (s *DatabaseService) DeleteSecret(ctx context.Context, request *v1pb.Delete
 	updateDatabaseMessage.Secrets = &storepb.Secrets{
 		Items: secretItems,
 	}
-	updateDatabaseMessage.EnvironmentID = database.EnvironmentID
 	updateDatabaseMessage.InstanceID = database.InstanceID
 	updateDatabaseMessage.DatabaseName = database.DatabaseName
 	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
@@ -687,6 +728,13 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 	var startLogDate, endLogDate *time.Time
 	for _, expr := range filters {
 		switch expr.key {
+		case filterKeyEnvironment:
+			reg := regexp.MustCompile(`^environments/(.+)`)
+			match := reg.FindStringSubmatch(expr.value)
+			if len(match) != 2 {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid environment filter %q", expr.value)
+			}
+			findDatabase.EnvironmentID = &match[1]
 		case filterKeyProject:
 			reg := regexp.MustCompile(`^projects/(.+)`)
 			match := reg.FindStringSubmatch(expr.value)
@@ -806,7 +854,7 @@ func (s *DatabaseService) ListSlowQueries(ctx context.Context, request *v1pb.Lis
 		}
 
 		for _, log := range logs {
-			result.SlowQueryLogs = append(result.SlowQueryLogs, convertToSlowQueryLog(database.EnvironmentID, database.InstanceID, database.DatabaseName, database.ProjectID, log))
+			result.SlowQueryLogs = append(result.SlowQueryLogs, convertToSlowQueryLog(database.InstanceID, database.DatabaseName, database.ProjectID, log))
 			if value, exists := instanceMap[database.InstanceID]; exists {
 				value.totalQueryTime += log.Statistics.AverageQueryTime.AsDuration() * time.Duration(log.Statistics.Count)
 				value.totalCount += log.Statistics.Count
@@ -948,9 +996,9 @@ func validSlowQueryOrderByKey(keys []orderByKey) error {
 	return nil
 }
 
-func convertToSlowQueryLog(environmentID string, instanceID string, databaseName string, projectID string, log *v1pb.SlowQueryLog) *v1pb.SlowQueryLog {
+func convertToSlowQueryLog(instanceID string, databaseName string, projectID string, log *v1pb.SlowQueryLog) *v1pb.SlowQueryLog {
 	return &v1pb.SlowQueryLog{
-		Resource:   fmt.Sprintf("%s%s/%s%s/%s%s", environmentNamePrefix, environmentID, instanceNamePrefix, instanceID, databaseIDPrefix, databaseName),
+		Resource:   fmt.Sprintf("%s%s/%s%s", instanceNamePrefix, instanceID, databaseIDPrefix, databaseName),
 		Project:    fmt.Sprintf("%s%s", projectNamePrefix, projectID),
 		Statistics: log.Statistics,
 	}
@@ -1260,20 +1308,20 @@ func isProjectOwnerOrDeveloper(principalID int, projectPolicy *store.IAMPolicyMe
 	return false
 }
 
-func stripeAndConvertToServiceSecrets(secrets *storepb.Secrets, environmentID, instanceID, databaseName string) []*v1pb.Secret {
+func stripeAndConvertToServiceSecrets(secrets *storepb.Secrets, instanceID, databaseName string) []*v1pb.Secret {
 	var serviceSecrets []*v1pb.Secret
 	if secrets == nil || len(secrets.Items) == 0 {
 		return serviceSecrets
 	}
 	for _, secret := range secrets.Items {
-		serviceSecrets = append(serviceSecrets, stripeAndConvertToServiceSecret(secret, environmentID, instanceID, databaseName))
+		serviceSecrets = append(serviceSecrets, stripeAndConvertToServiceSecret(secret, instanceID, databaseName))
 	}
 	return serviceSecrets
 }
 
-func stripeAndConvertToServiceSecret(secretEntry *storepb.SecretItem, environmentID, instanceID, databaseName string) *v1pb.Secret {
+func stripeAndConvertToServiceSecret(secretEntry *storepb.SecretItem, instanceID, databaseName string) *v1pb.Secret {
 	return &v1pb.Secret{
-		Name:        fmt.Sprintf("%s%s/%s%s/%s%s/%s%s", environmentNamePrefix, environmentID, instanceNamePrefix, instanceID, databaseIDPrefix, databaseName, secretNamePrefix, secretEntry.Name),
+		Name:        fmt.Sprintf("%s%s/%s%s/%s%s", instanceNamePrefix, instanceID, databaseIDPrefix, databaseName, secretNamePrefix, secretEntry.Name),
 		Value:       "", /* stripped */
 		Description: secretEntry.Description,
 	}
@@ -1369,9 +1417,8 @@ func (s *DatabaseService) mysqlAdviseIndex(ctx context.Context, request *v1pb.Ad
 	for _, db := range dbList {
 		if db != "" && db != database.DatabaseName {
 			findDatabase := &store.FindDatabaseMessage{
-				EnvironmentID: &database.EnvironmentID,
-				InstanceID:    &database.InstanceID,
-				DatabaseName:  &db,
+				InstanceID:   &database.InstanceID,
+				DatabaseName: &db,
 			}
 			database, err := s.store.GetDatabaseV2(ctx, findDatabase)
 			if err != nil {
