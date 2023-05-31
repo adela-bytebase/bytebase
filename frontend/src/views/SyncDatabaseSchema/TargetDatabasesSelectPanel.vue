@@ -21,7 +21,7 @@
         class="overflow-y-auto"
         arrow-placement="left"
         :default-expanded-names="
-          databaseListGroupByEnvironment.map((group) => group.environment.id)
+          databaseListGroupByEnvironment.map((group) => group.environment.uid)
         "
       >
         <NCollapseItem
@@ -29,8 +29,8 @@
             environment,
             databaseList: databaseListInEnvironment,
           } in databaseListGroupByEnvironment"
-          :key="environment.id"
-          :name="environment.id"
+          :key="environment.uid"
+          :name="environment.uid"
         >
           <template #header>
             <label class="flex items-center gap-x-2" @click.stop="">
@@ -52,11 +52,7 @@
                   )
                 "
               />
-              <div>{{ environment.name }}</div>
-              <ProductionEnvironmentIcon
-                class="w-4 h-4 -ml-1"
-                :environment="environment"
-              />
+              <EnvironmentV1Name :environment="environment" :link="false" />
             </label>
           </template>
 
@@ -76,13 +72,13 @@
 
           <div class="relative bg-white rounded-md -space-y-px px-2">
             <template
-              v-for="(database, dbIndex) in databaseListInEnvironment"
-              :key="dbIndex"
+              v-for="database in databaseListInEnvironment"
+              :key="database.uid"
             >
               <label
                 class="border-control-border relative border p-3 flex flex-col gap-y-2 md:flex-row md:pl-4 md:pr-6"
                 :class="
-                  database.syncStatus == 'OK'
+                  database.syncState === State.ACTIVE
                     ? 'cursor-pointer'
                     : 'cursor-not-allowed'
                 "
@@ -91,22 +87,22 @@
                   <input
                     type="checkbox"
                     class="h-4 w-4 text-accent rounded disabled:cursor-not-allowed border-control-border focus:ring-accent"
-                    :checked="isDatabaseSelected(database.id)"
-                    @input="(e: any) => toggleDatabaseSelected(database.id, e.target.checked)"
+                    :checked="isDatabaseSelected(database.uid)"
+                    @input="(e: any) => toggleDatabaseSelected(database.uid, e.target.checked)"
                   />
                   <span
                     class="font-medium ml-2 text-main"
-                    :class="database.syncStatus !== 'OK' && 'opacity-40'"
-                    >{{ database.name }}</span
+                    :class="database.syncState !== State.ACTIVE && 'opacity-40'"
+                    >{{ database.databaseName }}</span
                   >
                 </div>
                 <div
                   class="flex items-center gap-x-1 textinfolabel ml-6 pl-0 md:ml-0 md:pl-0 md:justify-end"
                 >
-                  <InstanceEngineIcon :instance="database.instance" />
-                  <span class="flex-1 whitespace-pre-wrap">
-                    {{ instanceName(database.instance) }}
-                  </span>
+                  <InstanceV1Name
+                    :instance="database.instanceEntity"
+                    :link="false"
+                  />
                 </div>
               </label>
             </template>
@@ -127,6 +123,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, reactive, PropType } from "vue";
 import {
   NCollapse,
   NCollapseItem,
@@ -134,69 +131,72 @@ import {
   NDrawer,
   NDrawerContent,
 } from "naive-ui";
-import { computed, reactive, PropType } from "vue";
-import { useDatabaseStore, useEnvironmentStore } from "@/store";
 import {
-  Database,
-  DatabaseId,
-  Environment,
-  EnvironmentId,
-  ProjectId,
-} from "@/types";
+  useDatabaseV1Store,
+  useEnvironmentV1Store,
+  useProjectV1Store,
+} from "@/store";
+import { ComposedDatabase } from "@/types";
+import { Environment } from "@/types/proto/v1/environment_service";
+import { EnvironmentV1Name, InstanceV1Name } from "@/components/v2";
+import { State } from "@/types/proto/v1/common";
 
 type LocalState = {
   searchText: string;
-  selectedDatabaseList: Database[];
+  selectedDatabaseList: ComposedDatabase[];
 };
 
 const props = defineProps({
   projectId: {
-    type: Number as PropType<ProjectId>,
+    type: String,
     required: true,
   },
   environmentId: {
-    type: Number as PropType<EnvironmentId>,
+    type: String,
     required: true,
   },
   databaseId: {
-    type: Number as PropType<DatabaseId>,
+    type: String as PropType<string>,
     required: true,
   },
   selectedDatabaseIdList: {
-    type: Array as PropType<DatabaseId[]>,
+    type: Array as PropType<string[]>,
     required: true,
   },
 });
 
 const emit = defineEmits<{
   (event: "close"): void;
-  (event: "update", databaseIdList: DatabaseId[]): void;
+  (event: "update", databaseIdList: string[]): void;
 }>();
 
-const environmentStore = useEnvironmentStore();
-const databaseStore = useDatabaseStore();
+const environmentV1Store = useEnvironmentV1Store();
+const databaseStore = useDatabaseV1Store();
 const state = reactive<LocalState>({
   searchText: "",
   selectedDatabaseList: props.selectedDatabaseIdList.map((id) => {
-    return databaseStore.getDatabaseById(id);
+    return databaseStore.getDatabaseByUID(id);
   }),
 });
 
 const sourceDatabase = computed(() => {
-  return databaseStore.getDatabaseById(props.databaseId);
+  return databaseStore.getDatabaseByUID(props.databaseId);
 });
 
 const databaseListGroupByEnvironment = computed(() => {
+  const project = useProjectV1Store().getProjectByUID(props.projectId);
   const databaseList =
-    databaseStore.databaseListByProjectId
-      .get(props.projectId)
-      ?.filter((db) => db.name.includes(state.searchText))
+    databaseStore
+      .databaseListByProject(project.name)
+      .filter((db) => db.databaseName.includes(state.searchText))
       .filter(
-        (db) => db.instance.engine === sourceDatabase.value.instance.engine
+        (db) =>
+          db.instanceEntity.engine ===
+          sourceDatabase.value.instanceEntity.engine
       ) || [];
-  const listByEnv = environmentStore.environmentList.map((environment) => {
+  const listByEnv = environmentV1Store.environmentList.map((environment) => {
     const list = databaseList.filter(
-      (db) => db.instance.environment.id === environment.id
+      (db) => db.instanceEntity.environment === environment.name
     );
     return {
       environment,
@@ -207,19 +207,19 @@ const databaseListGroupByEnvironment = computed(() => {
   return listByEnv.filter((group) => group.databaseList.length > 0);
 });
 
-const isDatabaseSelected = (databaseId: DatabaseId) => {
-  const idList = state.selectedDatabaseList.map((db) => db.id);
+const isDatabaseSelected = (databaseId: string) => {
+  const idList = state.selectedDatabaseList.map((db) => db.uid);
   return idList.includes(databaseId);
 };
 
-const toggleDatabaseSelected = (databaseId: DatabaseId, selected: boolean) => {
+const toggleDatabaseSelected = (databaseId: string, selected: boolean) => {
   const index = state.selectedDatabaseList.findIndex(
-    (db) => db.id === databaseId
+    (db) => db.uid === databaseId
   );
   if (selected) {
     if (index < 0) {
       state.selectedDatabaseList.push(
-        databaseStore.getDatabaseById(databaseId)
+        databaseStore.getDatabaseByUID(databaseId)
       );
     }
   } else {
@@ -231,25 +231,25 @@ const toggleDatabaseSelected = (databaseId: DatabaseId, selected: boolean) => {
 
 const toggleAllDatabasesSelectionForEnvironment = (
   environment: Environment,
-  databaseList: Database[],
+  databaseList: ComposedDatabase[],
   on: boolean
 ) => {
   databaseList
-    .filter((db) => db.instance.environment.id === environment.id)
-    .forEach((db) => toggleDatabaseSelected(db.id, on));
+    .filter((db) => db.instanceEntity.environment === environment.name)
+    .forEach((db) => toggleDatabaseSelected(db.uid, on));
 };
 
 const getAllSelectionStateForEnvironment = (
   environment: Environment,
-  databaseList: Database[]
+  databaseList: ComposedDatabase[]
 ): { checked: boolean; indeterminate: boolean } => {
   const set = new Set(
     state.selectedDatabaseList
-      .filter((db) => db.instance.environment.id === environment.id)
-      .map((db) => db.id)
+      .filter((db) => db.instanceEntity.environment === environment.name)
+      .map((db) => db.uid)
   );
-  const checked = databaseList.every((db) => set.has(db.id));
-  const indeterminate = !checked && databaseList.some((db) => set.has(db.id));
+  const checked = databaseList.every((db) => set.has(db.uid));
+  const indeterminate = !checked && databaseList.some((db) => set.has(db.uid));
 
   return {
     checked,
@@ -259,14 +259,14 @@ const getAllSelectionStateForEnvironment = (
 
 const getSelectionStateSummaryForEnvironment = (
   environment: Environment,
-  databaseList: Database[]
+  databaseList: ComposedDatabase[]
 ) => {
   const set = new Set(
     state.selectedDatabaseList
-      .filter((db) => db.instance.environment.id === environment.id)
-      .map((db) => db.id)
+      .filter((db) => db.instanceEntity.environment === environment.name)
+      .map((db) => db.uid)
   );
-  const selected = databaseList.filter((db) => set.has(db.id)).length;
+  const selected = databaseList.filter((db) => set.has(db.uid)).length;
   const total = databaseList.length;
 
   return { selected, total };
@@ -274,8 +274,8 @@ const getSelectionStateSummaryForEnvironment = (
 
 const handleConfirm = async () => {
   const databaseIdList = state.selectedDatabaseList
-    .filter((db) => db.name.includes(state.searchText))
-    .map((db) => db.id);
+    .filter((db) => db.databaseName.includes(state.searchText))
+    .map((db) => db.uid);
   emit("update", databaseIdList);
 };
 </script>

@@ -1,22 +1,24 @@
 <template>
-  <div class="w-full">
-    <div class="w-full flex flex-row justify-start items-start gap-8">
+  <div
+    class="select-target-database-view h-full overflow-y-hidden flex flex-col gap-y-4"
+  >
+    <div class="w-full flex flex-row gap-8">
       <span>{{ $t("database.sync-schema.source-schema") }}</span>
       <div class="space-y-2">
         <div>
           <span>{{ $t("common.project") }} - </span>
           <a
             class="normal-link inline-flex items-center"
-            :href="`/project/${projectSlug(project)}`"
-            >{{ project.name }}</a
+            :href="`/project/${projectV1Slug(project)}`"
+            >{{ project.title }}</a
           >
         </div>
         <div>
           <span>{{ $t("common.environment") }} - </span>
           <a
             class="normal-link inline-flex items-center"
-            :href="`/environment#${environment.id}`"
-            >{{ environment.name }}</a
+            :href="`/environment#${environment.uid}`"
+            >{{ environment.title }}</a
           >
         </div>
       </div>
@@ -25,15 +27,15 @@
           <span>{{ $t("common.database") }} - </span>
           <a
             class="normal-link inline-flex items-center"
-            :href="`/db/${databaseSlug(sourceDatabase)}`"
-            >{{ sourceDatabase.name }}</a
+            :href="`/db/${databaseV1Slug(sourceDatabase)}`"
+            >{{ sourceDatabase.databaseName }}</a
           >
         </div>
         <div v-if="!isEqual(sourceSchema.migrationHistory.id, UNKNOWN_ID)">
           <span>{{ $t("database.sync-schema.schema-version.self") }} - </span>
           <a
             class="normal-link inline-flex items-center"
-            :href="`/db/${databaseSlug(
+            :href="`/db/${databaseV1Slug(
               sourceDatabase
             )}/history/${migrationHistorySlug(
               sourceSchema.migrationHistory.id,
@@ -46,7 +48,7 @@
     </div>
 
     <div
-      class="relative border rounded-lg w-full h-144 flex flex-row overflow-hidden mt-4"
+      class="relative border rounded-lg w-full flex flex-row flex-1 overflow-hidden"
     >
       <div class="w-1/4 min-w-[256px] max-w-xs h-full border-r">
         <div
@@ -100,24 +102,24 @@
           >
             <div
               v-for="database of shownDatabaseList"
-              :key="database.id"
+              :key="database.uid"
               class="w-full group flex flex-row justify-start items-center px-2 py-1 leading-8 cursor-pointer text-sm text-ellipsis whitespace-nowrap rounded hover:bg-gray-50"
               :class="
-                database.id === state.selectedDatabaseId ? '!bg-gray-100' : ''
+                database.uid === state.selectedDatabaseId ? '!bg-gray-100' : ''
               "
-              @click="() => (state.selectedDatabaseId = database.id)"
+              @click="() => (state.selectedDatabaseId = database.uid)"
             >
-              <InstanceEngineIcon
+              <InstanceV1EngineIcon
                 class="shrink-0"
-                :instance="database.instance"
+                :instance="database.instanceEntity"
               />
               <NEllipsis :tooltip="false">
                 <span class="mx-0.5 text-gray-400"
-                  >({{ database.instance.environment.name }})</span
+                  >({{ database.instanceEntity.environmentEntity.title }})</span
                 >
-                <span>{{ database.name }}</span>
+                <span>{{ database.databaseName }}</span>
                 <span class="ml-0.5 text-gray-400"
-                  >({{ database.instance.name }})</span
+                  >({{ database.instanceEntity.title }})</span
                 >
               </NEllipsis>
               <div class="grow"></div>
@@ -147,36 +149,30 @@
           </div>
         </div>
       </div>
-      <div class="w-3/4 grow h-full">
-        <main ref="diffViewerRef" class="p-2 w-full h-full overflow-y-auto">
-          <div
-            v-show="selectedDatabase"
-            class="w-full h-auto flex flex-col justify-start items-start"
-          >
-            <DiffViewPanel
-              :statement="
-                state.selectedDatabaseId
-                  ? databaseDiffCache[state.selectedDatabaseId].edited
-                  : ''
-              "
-              :source-database="sourceDatabase"
-              :target-database-schema="targetDatabaseSchema"
-              :source-database-schema="sourceDatabaseSchema"
-              :should-show-diff="shouldShowDiff"
-              :preview-schema-change-message="previewSchemaChangeMessage"
-              @statement-change="onStatementChange"
-              @copy-statement="onCopyStatement"
-            />
-          </div>
-          <div
-            v-show="!selectedDatabase"
-            class="w-full h-full flex flex-col justify-center items-center"
-          >
-            {{
-              $t("database.sync-schema.message.select-a-target-database-first")
-            }}
-          </div>
-        </main>
+      <div class="flex-1 h-full overflow-hidden p-2">
+        <DiffViewPanel
+          v-show="selectedDatabase"
+          :statement="
+            state.selectedDatabaseId
+              ? databaseDiffCache[state.selectedDatabaseId].edited
+              : ''
+          "
+          :source-database="sourceDatabase"
+          :target-database-schema="targetDatabaseSchema"
+          :source-database-schema="sourceDatabaseSchema"
+          :should-show-diff="shouldShowDiff"
+          :preview-schema-change-message="previewSchemaChangeMessage"
+          @statement-change="onStatementChange"
+          @copy-statement="onCopyStatement"
+        />
+        <div
+          v-show="!selectedDatabase"
+          class="w-full h-full flex flex-col justify-center items-center"
+        >
+          {{
+            $t("database.sync-schema.message.select-a-target-database-first")
+          }}
+        </div>
         <div
           v-show="state.isLoading"
           class="absolute inset-0 z-10 bg-white bg-opacity-40 backdrop-blur-sm w-full h-full flex flex-col justify-center items-center"
@@ -204,45 +200,46 @@ import { toClipboard } from "@soerenmartius/vue3-clipboard";
 import axios from "axios";
 import { head, isEqual } from "lodash-es";
 import { NEllipsis } from "naive-ui";
-import { PropType, computed, onMounted, reactive, ref, watch } from "vue";
+import {
+  PropType,
+  computed,
+  onMounted,
+  reactive,
+  ref,
+  toRef,
+  watch,
+} from "vue";
 import { useI18n } from "vue-i18n";
 import {
   pushNotification,
-  useDatabaseStore,
-  useEnvironmentStore,
-  useProjectStore,
+  useDatabaseV1Store,
+  useEnvironmentV1Store,
+  useProjectV1ByUID,
 } from "@/store";
-import {
-  Database,
-  DatabaseId,
-  EngineType,
-  EnvironmentId,
-  MigrationHistory,
-  ProjectId,
-  UNKNOWN_ID,
-} from "@/types";
-import { migrationHistorySlug } from "@/utils";
+import { ComposedDatabase, MigrationHistory, UNKNOWN_ID } from "@/types";
+import { databaseV1Slug, migrationHistorySlug, projectV1Slug } from "@/utils";
 import TargetDatabasesSelectPanel from "./TargetDatabasesSelectPanel.vue";
-import InstanceEngineIcon from "@/components/InstanceEngineIcon.vue";
 import DiffViewPanel from "./DiffViewPanel.vue";
+import { Engine, engineToJSON } from "@/types/proto/v1/common";
+import { InstanceV1EngineIcon } from "@/components/v2";
 
 interface SourceSchema {
-  environmentId: EnvironmentId;
-  databaseId: DatabaseId;
+  environmentId: string;
+  databaseId: string;
   migrationHistory: MigrationHistory;
 }
 
 interface LocalState {
   isLoading: boolean;
   showDatabaseWithDiff: boolean;
-  selectedDatabaseId: DatabaseId | undefined;
-  selectedDatabaseIdList: DatabaseId[];
+  selectedDatabaseId: string | undefined;
+  selectedDatabaseIdList: string[];
   showSelectDatabasePanel: boolean;
 }
 
 const props = defineProps({
   projectId: {
-    type: Number as PropType<ProjectId>,
+    type: String,
     required: true,
   },
   sourceSchema: {
@@ -252,9 +249,8 @@ const props = defineProps({
 });
 
 const { t } = useI18n();
-const projectStore = useProjectStore();
-const environmentStore = useEnvironmentStore();
-const databaseStore = useDatabaseStore();
+const environmentV1Store = useEnvironmentV1Store();
+const databaseStore = useDatabaseV1Store();
 const diffViewerRef = ref<HTMLDivElement>();
 const state = reactive<LocalState>({
   isLoading: true,
@@ -263,10 +259,10 @@ const state = reactive<LocalState>({
   selectedDatabaseId: undefined,
   selectedDatabaseIdList: [],
 });
-const databaseSchemaCache = reactive<Record<DatabaseId, string>>({});
+const databaseSchemaCache = reactive<Record<string, string>>({});
 const databaseDiffCache = reactive<
   Record<
-    DatabaseId,
+    string,
     {
       raw: string;
       edited: string;
@@ -274,21 +270,21 @@ const databaseDiffCache = reactive<
   >
 >({});
 
-const project = computed(() => {
-  return projectStore.getProjectById(props.projectId);
-});
+const { project } = useProjectV1ByUID(toRef(props, "projectId"));
 const environment = computed(() => {
-  return environmentStore.getEnvironmentById(props.sourceSchema.environmentId);
+  return environmentV1Store.getEnvironmentByUID(
+    props.sourceSchema.environmentId
+  );
 });
 const sourceDatabase = computed(() => {
-  return databaseStore.getDatabaseById(props.sourceSchema.databaseId);
+  return databaseStore.getDatabaseByUID(props.sourceSchema.databaseId);
 });
 const sourceDatabaseSchema = computed(() => {
   return props.sourceSchema.migrationHistory.schema || "";
 });
 const targetDatabaseList = computed(() => {
   return state.selectedDatabaseIdList.map((id) => {
-    return databaseStore.getDatabaseById(id);
+    return databaseStore.getDatabaseByUID(id);
   });
 });
 const targetDatabaseSchema = computed(() => {
@@ -298,7 +294,7 @@ const targetDatabaseSchema = computed(() => {
 });
 const selectedDatabase = computed(() => {
   return state.selectedDatabaseId
-    ? databaseStore.getDatabaseById(state.selectedDatabaseId)
+    ? databaseStore.getDatabaseByUID(state.selectedDatabaseId)
     : undefined;
 });
 const shouldShowDiff = computed(() => {
@@ -313,20 +309,23 @@ const previewSchemaChangeMessage = computed(() => {
   }
 
   const database = targetDatabaseList.value.find(
-    (database) => database.id === state.selectedDatabaseId
-  ) as Database;
+    (database) => database.uid === state.selectedDatabaseId
+  );
+  if (!database) {
+    return "";
+  }
   return t("database.sync-schema.schema-change-preview", {
-    database: `${database.name} (${database.instance.environment.name} - ${database.instance.name})`,
+    database: `${database.databaseName} (${database.instanceEntity.environmentEntity.title} - ${database.instanceEntity.title})`,
   });
 });
 const databaseListWithDiff = computed(() => {
   return targetDatabaseList.value.filter(
-    (db) => databaseDiffCache[db.id]?.raw !== ""
+    (db) => databaseDiffCache[db.uid]?.raw !== ""
   );
 });
 const databaseListWithoutDiff = computed(() => {
   return targetDatabaseList.value.filter(
-    (db) => databaseDiffCache[db.id]?.raw === ""
+    (db) => databaseDiffCache[db.uid]?.raw === ""
   );
 });
 const shownDatabaseList = computed(() => {
@@ -341,23 +340,23 @@ onMounted(() => {
   state.isLoading = false;
 });
 
-const handleSelectedDatabaseIdListChanged = (databaseIdList: DatabaseId[]) => {
+const handleSelectedDatabaseIdListChanged = (databaseIdList: string[]) => {
   state.selectedDatabaseIdList = databaseIdList;
   state.showSelectDatabasePanel = false;
 };
 
-const handleUnselectDatabase = (database: Database) => {
+const handleUnselectDatabase = (database: ComposedDatabase) => {
   state.selectedDatabaseIdList = state.selectedDatabaseIdList.filter(
-    (id) => id !== database.id
+    (id) => id !== database.uid
   );
-  if (state.selectedDatabaseId === database.id) {
+  if (state.selectedDatabaseId === database.uid) {
     state.selectedDatabaseId = undefined;
   }
 };
 
 const onCopyStatement = () => {
   const editStatement = state.selectedDatabaseId
-    ? databaseSchemaCache[state.selectedDatabaseId]
+    ? databaseDiffCache[state.selectedDatabaseId].edited
     : "";
 
   toClipboard(editStatement).then(() => {
@@ -393,15 +392,18 @@ watch(
       if (databaseSchemaCache[id]) {
         continue;
       }
-      const schema = await databaseStore.fetchDatabaseSchemaById(id);
-      databaseSchemaCache[id] = schema;
+      const db = databaseStore.getDatabaseByUID(id);
+      const schema = await databaseStore.fetchDatabaseSchema(
+        `${db.name}/schema`
+      );
+      databaseSchemaCache[id] = schema.schema;
       if (databaseDiffCache[id]) {
         continue;
       } else {
         const schemaDiff = await getSchemaDiff(
-          sourceDatabase.value.instance.engine,
+          sourceDatabase.value.instanceEntity.engine,
           /* the current schema of the database to be updated */
-          schema,
+          schema.schema,
           /* the schema to be updated to */
           sourceDatabaseSchema.value
         );
@@ -423,18 +425,18 @@ watch(
     }
 
     if (state.selectedDatabaseId === undefined) {
-      state.selectedDatabaseId = head(databaseListWithDiff.value)?.id;
+      state.selectedDatabaseId = head(databaseListWithDiff.value)?.uid;
     }
   }
 );
 
 const getSchemaDiff = async (
-  engineType: EngineType,
+  engine: Engine,
   sourceSchema: string,
   targetSchema: string
 ) => {
   const { data } = await axios.post("/v1/sql/schema/diff", {
-    engineType,
+    engineType: engineToJSON(engine), // TODO: use stronger types
     sourceSchema,
     targetSchema,
   });

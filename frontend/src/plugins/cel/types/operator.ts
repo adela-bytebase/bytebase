@@ -74,6 +74,10 @@ export const OperatorList: Record<Factor, Operator[]> = {
     ...CollectionOperatorList,
     ...StringOperatorList,
   ]),
+
+  // Database group related fields.
+  "resource.database_name": uniq(["_==_", "startsWith"]),
+  "resource.table_name": uniq(["_==_", "startsWith"]),
 };
 
 export const getOperatorListByFactor = (factor: Factor) => {

@@ -10,7 +10,6 @@ import { CommandId, CommandRegisterId, PrincipalId } from "./id";
 import { Inbox } from "./inbox";
 import { Instance } from "./instance";
 import { Issue } from "./issue";
-import { Member } from "./member";
 import { Pipeline, Stage, Task, TaskProgress } from "./pipeline";
 import { Principal } from "./principal";
 import { Project, ProjectMember } from "./project";
@@ -20,10 +19,11 @@ import { Sheet } from "./sheet";
 import { SQLReviewPolicy } from "./sqlReview";
 import { AuditLog, AuditActivityType, AuditActivityLevel } from "./auditLog";
 import { BackupPlanSchedule } from "@/types/proto/v1/org_policy_service";
-import { EnvironmentTier } from "@/types/proto/v1/environment_service";
 
 // System bot id
 export const SYSTEM_BOT_ID = 1;
+// System bot email
+export const SYSTEM_BOT_EMAIL = "support@bytebase.com";
 
 // The project to hold those databases synced from the instance but haven't been assigned an application
 // project yet. We can't use UNKNOWN_ID because of referential integrity.
@@ -68,6 +68,11 @@ export type RouterSlug = {
   sheetSlug?: string;
   sqlReviewPolicySlug?: string;
   ssoName?: string;
+
+  // Resource names.
+  projectName?: string;
+  databaseGroupName?: string;
+  schemaGroupName?: string;
 };
 
 // Quick Action Type
@@ -107,7 +112,6 @@ export type QuickActionType =
 
 export type ResourceType =
   | "PRINCIPAL"
-  | "MEMBER"
   | "ENVIRONMENT"
   | "PROJECT"
   | "PROJECT_MEMBER"
@@ -134,7 +138,6 @@ export type ResourceType =
 
 interface ResourceMaker {
   (type: "PRINCIPAL"): Principal;
-  (type: "MEMBER"): Member;
   (type: "ENVIRONMENT"): Environment;
   (type: "PROJECT"): Project;
   (type: "PROJECT_MEMBER"): ProjectMember;
@@ -168,21 +171,13 @@ const makeUnknown = (type: ResourceType) => {
     role: "DEVELOPER",
   } as Principal;
 
-  const UNKNOWN_MEMBER: Member = {
-    id: UNKNOWN_ID,
-    rowStatus: "NORMAL",
-    status: "ACTIVE",
-    role: "DEVELOPER",
-    principal: UNKNOWN_PRINCIPAL,
-  };
-
   const UNKNOWN_ENVIRONMENT: Environment = {
     id: UNKNOWN_ID,
     resourceId: "",
     rowStatus: "NORMAL",
     name: "<<Unknown environment>>",
     order: 0,
-    tier: EnvironmentTier.UNPROTECTED,
+    tier: "UNPROTECTED",
   };
 
   const UNKNOWN_PROJECT: Project = {
@@ -433,8 +428,6 @@ const makeUnknown = (type: ResourceType) => {
   switch (type) {
     case "PRINCIPAL":
       return UNKNOWN_PRINCIPAL;
-    case "MEMBER":
-      return UNKNOWN_MEMBER;
     case "ENVIRONMENT":
       return UNKNOWN_ENVIRONMENT;
     case "PROJECT":
@@ -487,21 +480,13 @@ const makeEmpty = (type: ResourceType) => {
     role: "DEVELOPER",
   } as Principal;
 
-  const EMPTY_MEMBER: Member = {
-    id: EMPTY_ID,
-    rowStatus: "NORMAL",
-    status: "ACTIVE",
-    role: "DEVELOPER",
-    principal: EMPTY_PRINCIPAL,
-  };
-
   const EMPTY_ENVIRONMENT: Environment = {
     id: EMPTY_ID,
     resourceId: "",
     rowStatus: "NORMAL",
     name: "",
     order: 0,
-    tier: EnvironmentTier.UNPROTECTED,
+    tier: "UNPROTECTED",
   };
 
   const EMPTY_PROJECT: Project = {
@@ -761,8 +746,6 @@ const makeEmpty = (type: ResourceType) => {
   switch (type) {
     case "PRINCIPAL":
       return EMPTY_PRINCIPAL;
-    case "MEMBER":
-      return EMPTY_MEMBER;
     case "ENVIRONMENT":
       return EMPTY_ENVIRONMENT;
     case "PROJECT":

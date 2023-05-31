@@ -16,6 +16,7 @@ import (
 	"github.com/bytebase/bytebase/backend/common/log"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/plugin/db/util"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
 var (
@@ -47,11 +48,7 @@ func newDriver(db.DriverConfig) db.Driver {
 
 // Open opens a ClickHouse driver.
 func (driver *Driver) Open(_ context.Context, dbType db.Type, config db.ConnectionConfig, connCtx db.ConnectionContext) (db.Driver, error) {
-	port := config.Port
-	if port == "" {
-		port = "9000"
-	}
-	addr := fmt.Sprintf("%s:%s", config.Host, port)
+	addr := fmt.Sprintf("%s:%s", config.Host, config.Port)
 	// Set SSL configuration.
 	tlsConfig, err := config.TLSConfig.GetSslConfig()
 	if err != nil {
@@ -160,4 +157,9 @@ func (driver *Driver) Execute(ctx context.Context, statement string, _ bool) (in
 // QueryConn querys a SQL statement in a given connection.
 func (driver *Driver) QueryConn(ctx context.Context, conn *sql.Conn, statement string, queryContext *db.QueryContext) ([]any, error) {
 	return util.Query(ctx, driver.dbType, conn, statement, queryContext)
+}
+
+// QueryConn2 queries a SQL statement in a given connection.
+func (*Driver) QueryConn2(_ context.Context, _ *sql.Conn, _ string, _ *db.QueryContext) ([]*v1pb.QueryResult, error) {
+	return nil, errors.New("not implemented")
 }

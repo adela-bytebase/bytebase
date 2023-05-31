@@ -3,7 +3,7 @@
     <div class="px-5 py-2 flex justify-between items-center">
       <EnvironmentTabFilter
         :include-all="true"
-        :environment="selectedEnvironment?.id ?? UNKNOWN_ID"
+        :environment="selectedEnvironment?.uid ?? String(UNKNOWN_ID)"
         @update:environment="changeEnvironmentId"
       />
 
@@ -33,8 +33,10 @@
           <InstanceSelect
             :instance="state.instanceFilter"
             :include-all="true"
-            :environment="selectedEnvironment?.id"
-            @update:instance="state.instanceFilter = $event ?? UNKNOWN_ID"
+            :environment="selectedEnvironment?.uid"
+            @update:instance="
+              state.instanceFilter = $event ?? String(UNKNOWN_ID)
+            "
           />
           <SearchBox
             :value="state.searchText"
@@ -46,7 +48,11 @@
       </div>
     </div>
 
-    <DatabaseTable pagination-class="mb-4" :database-list="filteredList" />
+    <DatabaseV1Table
+      pagination-class="mb-4"
+      :database-list="filteredV1List"
+      :show-placeholder="true"
+    />
 
     <div
       v-if="state.loading"
@@ -61,67 +67,70 @@
 import { computed, watchEffect, onMounted, reactive } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { NInputGroup, NTooltip } from "naive-ui";
-import { cloneDeep } from "lodash-es";
 
 import {
   EnvironmentTabFilter,
   InstanceSelect,
   SearchBox,
 } from "@/components/v2";
-import DatabaseTable from "../components/DatabaseTable.vue";
+import { DatabaseV1Table } from "../components/v2";
 import {
-  type Database,
-  type EnvironmentId,
+  type Database as LegacyDatabase,
   UNKNOWN_ID,
   DEFAULT_PROJECT_ID,
-  InstanceId,
+  UNKNOWN_USER_NAME,
+  ComposedDatabase,
 } from "../types";
 import {
-  filterDatabaseByKeyword,
-  hasWorkspacePermission,
-  sortDatabaseList,
+  filterDatabaseV1ByKeyword,
+  hasWorkspacePermissionV1,
+  sortDatabaseListByEnvironmentV1,
+  sortDatabaseV1List,
 } from "../utils";
 import {
-  useCurrentUser,
+  useCurrentUserV1,
   useDatabaseStore,
-  useEnvironmentStore,
-  useProjectV1ListByCurrentUser,
+  useDatabaseV1Store,
+  useEnvironmentV1Store,
   useUIStateStore,
 } from "@/store";
 
 interface LocalState {
-  instanceFilter: InstanceId;
+  instanceFilter: string;
   searchText: string;
-  databaseList: Database[];
+  databaseList: LegacyDatabase[];
+  databaseV1List: ComposedDatabase[];
   loading: boolean;
 }
 
 const uiStateStore = useUIStateStore();
-const environmentStore = useEnvironmentStore();
+const environmentV1Store = useEnvironmentV1Store();
 const router = useRouter();
 const route = useRoute();
 
 const state = reactive<LocalState>({
-  instanceFilter: UNKNOWN_ID,
+  instanceFilter: String(UNKNOWN_ID),
   searchText: "",
   databaseList: [],
+  databaseV1List: [],
   loading: false,
 });
 
-const currentUser = useCurrentUser();
-const { projectList } = useProjectV1ListByCurrentUser();
+const currentUserV1 = useCurrentUserV1();
+const databaseStore = useDatabaseStore();
+const databaseV1Store = useDatabaseV1Store();
 
 const selectedEnvironment = computed(() => {
   const { environment } = route.query;
   return environment
-    ? environmentStore.getEnvironmentById(parseInt(environment as string, 10))
+    ? environmentV1Store.getEnvironmentByUID(environment as string)
     : undefined;
 });
 
 const canVisitUnassignedDatabases = computed(() => {
-  return hasWorkspacePermission(
+  return hasWorkspacePermissionV1(
     "bb.permission.workspace.manage-database",
-    currentUser.value.role
+    currentUserV1.value.userRole
   );
 });
 
@@ -134,31 +143,32 @@ onMounted(() => {
   }
 });
 
-const prepareDatabaseList = () => {
+const prepareDatabaseList = async () => {
   // It will also be called when user logout
-  if (currentUser.value.id != UNKNOWN_ID) {
-    const projectIdList = projectList.value.map((project) => project.uid);
+  if (currentUserV1.value.name !== UNKNOWN_USER_NAME) {
     state.loading = true;
-    useDatabaseStore()
-      .fetchDatabaseList()
-      .then((list) => {
-        state.databaseList = sortDatabaseList(
-          cloneDeep(list).filter((db) =>
-            projectIdList.includes(String(db.projectId))
-          ),
-          environmentStore.getEnvironmentList()
-        );
-      })
-      .finally(() => {
-        state.loading = false;
-      });
+    const databaseV1List = await databaseV1Store.searchDatabaseList({
+      parent: "instances/-",
+    });
+    state.databaseV1List = sortDatabaseV1List(databaseV1List);
+
+    // For legacy support
+    await databaseStore.fetchDatabaseList();
+    const databaseList = databaseStore.getDatabaseListByUser(
+      currentUserV1.value
+    );
+    state.databaseList = sortDatabaseListByEnvironmentV1(
+      databaseList,
+      environmentV1Store.getEnvironmentList()
+    );
+    state.loading = false;
   }
 };
 
 watchEffect(prepareDatabaseList);
 
-const changeEnvironmentId = (environment: EnvironmentId | undefined) => {
-  if (environment && environment !== UNKNOWN_ID) {
+const changeEnvironmentId = (environment: string | undefined) => {
+  if (environment && environment !== String(UNKNOWN_ID)) {
     router.replace({
       name: "workspace.database",
       query: { environment },
@@ -172,24 +182,30 @@ const changeSearchText = (searchText: string) => {
   state.searchText = searchText;
 };
 
-const filteredList = computed(() => {
-  const { databaseList, searchText } = state;
-  let list = [...databaseList];
+const filteredV1List = computed(() => {
+  let list = [...state.databaseV1List];
   const environment = selectedEnvironment.value;
-  if (environment && environment.id !== UNKNOWN_ID) {
-    list = list.filter((db) => db.instance.environment.id === environment.id);
+  if (environment && environment.name !== `environments/${UNKNOWN_ID}`) {
+    list = list.filter(
+      (db) => db.instanceEntity.environment === environment.name
+    );
   }
-  if (state.instanceFilter !== UNKNOWN_ID) {
-    list = list.filter((db) => db.instance.id === state.instanceFilter);
+  if (state.instanceFilter !== String(UNKNOWN_ID)) {
+    list = list.filter(
+      (db) => db.instanceEntity.uid === String(state.instanceFilter)
+    );
   }
-  list = list.filter((db) =>
-    filterDatabaseByKeyword(db, searchText, [
-      "name",
-      "environment",
-      "instance",
-      "project",
-    ])
-  );
+  const keyword = state.searchText.trim().toLowerCase();
+  if (keyword) {
+    list = list.filter((db) =>
+      filterDatabaseV1ByKeyword(db, keyword, [
+        "name",
+        "environment",
+        "instance",
+        "project",
+      ])
+    );
+  }
   return list;
 });
 </script>

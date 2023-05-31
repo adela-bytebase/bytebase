@@ -3,7 +3,7 @@
     class="w-full mx-auto flex flex-col justify-start items-start space-y-4 my-8 gap-4"
   >
     <div v-if="create" class="w-full flex flex-row justify-start items-center">
-      <span class="flex w-40 items-center">
+      <span class="flex w-40 items-center textlabel !leading-6">
         {{ $t("common.project") }}
         <RequiredStar />
       </span>
@@ -14,8 +14,8 @@
         @select-project-id="handleProjectSelect"
       />
     </div>
-    <div class="w-full flex flex-row justify-start items-start">
-      <span class="flex w-40 items-center shrink-0">
+    <div class="w-full flex flex-row justify-start items-center">
+      <span class="flex w-40 items-center shrink-0 textlabel !leading-6">
         {{ $t("common.database") }}
         <RequiredStar />
       </span>
@@ -25,23 +25,25 @@
           name="environment"
           :select-default="false"
           :selected-id="state.environmentId"
-          @select-environment-id="(id) => (state.environmentId = id)"
+          @select-environment-id="handleEnvironmentSelect"
         />
         <DatabaseSelect
           class="!w-128"
-          :selected-id="(state.databaseId as DatabaseId)"
+          :selected-id="state.databaseId ?? String(UNKNOWN_ID)"
           :mode="'ALL'"
           :environment-id="state.environmentId"
           :project-id="state.projectId"
           :sync-status="'OK'"
           :customize-item="true"
-          @select-database-id="(id) => (state.databaseId = id)"
+          @select-database-id="handleDatabaseSelect"
         >
           <template #customizeItem="{ database }">
             <div class="flex items-center">
-              <InstanceEngineIcon :instance="database.instance" />
-              <span class="mx-2">{{ database.name }}</span>
-              <span class="text-gray-400">({{ database.instance.name }})</span>
+              <InstanceV1EngineIcon :instance="database.instanceEntity" />
+              <span class="mx-2">{{ database.databaseName }}</span>
+              <span class="text-gray-400">
+                ({{ instanceV1Name(database.instanceEntity) }})
+              </span>
             </div>
           </template>
         </DatabaseSelect>
@@ -50,15 +52,16 @@
         v-else-if="selectedDatabase"
         class="flex flex-row justify-start items-center"
       >
-        <InstanceEngineIcon
+        <InstanceV1EngineIcon
+          :instance="selectedDatabase.instanceEntity"
+          :link="false"
           class="mr-1"
-          :instance="selectedDatabase.instance"
         />
-        {{ selectedDatabase.name }}
+        {{ selectedDatabase.databaseName }}
       </div>
     </div>
     <div class="w-full flex flex-row justify-start items-center">
-      <span class="flex w-40 items-center">
+      <span class="flex w-40 items-center textlabel !leading-6">
         {{ $t("issue.grant-request.export-rows") }}
         <RequiredStar />
       </span>
@@ -72,7 +75,7 @@
       />
     </div>
     <div class="w-full flex flex-row justify-start items-start">
-      <span class="flex w-40 items-center">
+      <span class="flex w-40 items-center textlabel !leading-6">
         {{ $t("issue.grant-request.export-format") }}
         <RequiredStar />
       </span>
@@ -91,19 +94,18 @@
       </div>
     </div>
     <div class="w-full flex flex-row justify-start items-start">
-      <span class="flex w-40 items-center shrink-0">SQL<RequiredStar /></span>
+      <span class="flex w-40 items-center shrink-0 textlabel !leading-6 mt-4"
+        >SQL<RequiredStar
+      /></span>
       <div class="whitespace-pre-wrap w-full overflow-hidden border">
         <MonacoEditor
-          ref="editorRef"
-          class="w-full h-[360px]"
-          data-label="bb-issue-sql-editor"
+          class="w-full h-[360px] py-2"
           :value="state.statement"
           :auto-focus="false"
           :language="'sql'"
           :dialect="dialect"
           :readonly="!create"
           @change="handleStatementChange"
-          @ready="handleMonacoEditorReady"
         />
       </div>
     </div>
@@ -112,90 +114,117 @@
 
 <script lang="ts" setup>
 import { head } from "lodash-es";
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, watch } from "vue";
 import { useIssueLogic } from "../logic";
 import {
-  Database,
-  DatabaseId,
-  EnvironmentId,
   GrantRequestContext,
   GrantRequestPayload,
   Issue,
   IssueCreate,
-  ProjectId,
+  PresetRoleType,
   SQLDialect,
   UNKNOWN_ID,
-  dialectOfEngine,
+  dialectOfEngineV1,
 } from "@/types";
-import { getProjectMemberList } from "@/utils";
-import { useDBSchemaStore, useDatabaseStore } from "@/store";
+import { extractUserUID, instanceV1Name, memberListInProjectV1 } from "@/utils";
+import { useDatabaseV1Store, useProjectV1Store } from "@/store";
 import MonacoEditor from "@/components/MonacoEditor";
-import { TableMetadata } from "@/types/proto/store/database";
-import { useInstanceV1Store } from "@/store/modules/v1/instance";
-import { instanceNamePrefix } from "@/store/modules/v1/common";
 import RequiredStar from "@/components/RequiredStar.vue";
+import { DatabaseResource } from "./SelectDatabaseResourceForm/common";
+import { convertFromCEL } from "@/utils/issue/cel";
+import { InstanceV1EngineIcon } from "@/components/v2";
+import DatabaseSelect from "@/components/DatabaseSelect.vue";
+import { Engine } from "@/types/proto/v1/common";
 
 interface LocalState {
   // For creating
-  projectId?: ProjectId;
-  environmentId?: EnvironmentId;
-  databaseId?: DatabaseId;
+  projectId?: string;
+  environmentId?: string;
+  databaseId?: string;
+  selectedDatabaseResourceList: DatabaseResource[];
   maxRowCount: number;
   exportFormat: "CSV" | "JSON";
   statement: string;
 }
 
 const { create, issue } = useIssueLogic();
-const instanceV1Store = useInstanceV1Store();
-const databaseStore = useDatabaseStore();
-const dbSchemaStore = useDBSchemaStore();
+const databaseStore = useDatabaseV1Store();
 const state = reactive<LocalState>({
+  selectedDatabaseResourceList: [],
   maxRowCount: 1000,
   exportFormat: "CSV",
   statement: "",
 });
-const editorRef = ref<InstanceType<typeof MonacoEditor>>();
 
 const projectId = computed(() => {
   return create.value ? state.projectId : (issue.value as Issue).project.id;
 });
 
 const selectedDatabase = computed(() => {
-  if (!state.databaseId || state.databaseId === UNKNOWN_ID) {
+  if (!state.databaseId || state.databaseId === String(UNKNOWN_ID)) {
     return undefined;
   }
-  return databaseStore.getDatabaseById(state.databaseId as DatabaseId);
+  return databaseStore.getDatabaseByUID(state.databaseId);
 });
 
 const dialect = computed((): SQLDialect => {
   const db = selectedDatabase.value;
-  return dialectOfEngine(db?.instance.engine || "MYSQL");
+  return dialectOfEngineV1(db?.instanceEntity.engine ?? Engine.MYSQL);
 });
 
 onMounted(() => {
   if (create.value) {
-    const projectId = (issue.value as IssueCreate).projectId;
-    if (projectId && projectId !== UNKNOWN_ID) {
+    const projectId = String((issue.value as IssueCreate).projectId);
+    if (projectId && projectId !== String(UNKNOWN_ID)) {
       handleProjectSelect(projectId);
     }
   }
 });
 
-const handleProjectSelect = async (projectId: ProjectId) => {
+const handleProjectSelect = async (projectId: string) => {
   if (!create.value) {
     return;
   }
 
+  const issueCreate = issue.value as IssueCreate;
   state.projectId = projectId;
-  (issue.value as IssueCreate).projectId = projectId;
+  issueCreate.projectId = parseInt(projectId, 10);
   // update issue assignee
-  const projectOwner = head(
-    (await getProjectMemberList(projectId)).filter(
-      (member) => !member.roleList.includes("OWNER")
-    )
+  const project = await useProjectV1Store().getOrFetchProjectByUID(projectId);
+  const memberList = memberListInProjectV1(project, project.iamPolicy);
+  const ownerList = memberList.filter((member) =>
+    member.roleList.includes(PresetRoleType.OWNER)
   );
+  const projectOwner = head(ownerList);
   if (projectOwner) {
-    (issue.value as IssueCreate).assigneeId = projectOwner.principal.id;
+    const userUID = extractUserUID(projectOwner.user.name);
+    issueCreate.assigneeId = Number(userUID);
+  }
+};
+
+const handleEnvironmentSelect = (environmentId: string) => {
+  state.environmentId = environmentId;
+  const database = databaseStore.getDatabaseByUID(
+    state.databaseId || String(UNKNOWN_ID)
+  );
+  // Unselect database if it doesn't belong to the newly selected environment.
+  if (
+    database &&
+    database.uid !== String(UNKNOWN_ID) &&
+    database.instanceEntity.environmentEntity.uid !== state.environmentId
+  ) {
+    state.databaseId = undefined;
+  }
+};
+
+const handleDatabaseSelect = (databaseId: string) => {
+  state.databaseId = databaseId;
+  const database = databaseStore.getDatabaseByUID(
+    state.databaseId || String(UNKNOWN_ID)
+  );
+  if (database && database.uid !== String(UNKNOWN_ID)) {
+    state.environmentId = database.instanceEntity.environmentEntity.uid;
+    handleProjectSelect(database.projectEntity.uid);
   }
 };
 
@@ -206,6 +235,7 @@ const handleStatementChange = (value: string) => {
 watch(
   () => [
     state.databaseId,
+    state.selectedDatabaseResourceList,
     state.maxRowCount,
     state.exportFormat,
     state.statement,
@@ -215,57 +245,23 @@ watch(
       const context = (issue.value as IssueCreate)
         .createContext as GrantRequestContext;
       if (state.databaseId) {
-        context.databases = [state.databaseId as string];
+        context.databaseResources = [
+          {
+            databaseId: Number(state.databaseId),
+          },
+        ];
+      } else {
+        context.databaseResources = [];
       }
       context.maxRowCount = state.maxRowCount;
       context.exportFormat = state.exportFormat;
       context.statement = state.statement;
     }
+  },
+  {
+    immediate: true,
   }
 );
-
-// Handle and update monaco editor auto completion context.
-const useDatabaseAndTableList = () => {
-  const databaseList = computed(() => {
-    if (selectedDatabase.value) return [selectedDatabase.value];
-    return [];
-  });
-
-  watch(
-    databaseList,
-    (list) => {
-      list.forEach((db) => {
-        if (db.id && db.id !== UNKNOWN_ID) {
-          dbSchemaStore.getOrFetchTableListByDatabaseId(db.id);
-        }
-      });
-    },
-    { immediate: true }
-  );
-
-  const tableList = computed(() => {
-    return databaseList.value
-      .map((item) => dbSchemaStore.getTableListByDatabaseId(item.id))
-      .flat();
-  });
-
-  return { databaseList, tableList };
-};
-
-const { databaseList } = useDatabaseAndTableList();
-
-const handleUpdateEditorAutoCompletionContext = async () => {
-  const databaseMap: Map<Database, TableMetadata[]> = new Map();
-  for (const database of databaseList.value) {
-    const tableList = dbSchemaStore.getTableListByDatabaseId(database.id);
-    databaseMap.set(database, tableList);
-  }
-  editorRef.value?.setEditorAutoCompletionContext(databaseMap);
-};
-
-const handleMonacoEditorReady = () => {
-  handleUpdateEditorAutoCompletionContext();
-};
 
 watch(
   create,
@@ -273,40 +269,30 @@ watch(
     if (!create.value) {
       const payload = ((issue.value as Issue).payload as any)
         .grantRequest as GrantRequestPayload;
-      if (payload.role !== "roles/EXPORTER") {
+      if (payload.role !== PresetRoleType.EXPORTER) {
         throw "Only support EXPORTER role";
       }
-      const expressionList = payload.condition.expression.split(" && ");
-      for (const expression of expressionList) {
-        const fields = expression.split(" ");
-        if (fields[0] === "request.statement") {
-          state.statement = atob(JSON.parse(fields[2]));
-        } else if (fields[0] === "resource.database") {
-          const databaseIdList = [];
-          for (const url of JSON.parse(fields[2])) {
-            const value = url.split("/");
-            const instanceName = value[1] || "";
-            const databaseName = value[3] || "";
-            const instance = await instanceV1Store.getOrFetchInstanceByName(
-              instanceNamePrefix + instanceName
-            );
-            const databaseList =
-              await databaseStore.getOrFetchDatabaseListByInstanceId(
-                instance.uid
-              );
-            const database = databaseList.find(
-              (db) => db.name === databaseName
-            );
-            if (database) {
-              databaseIdList.push(database.id);
-            }
-          }
-          state.databaseId = head(databaseIdList);
-        } else if (fields[0] === "request.row_limit") {
-          state.maxRowCount = Number(fields[2]);
-        } else if (fields[0] === "request.export_format") {
-          state.exportFormat = JSON.parse(fields[2]) as "CSV" | "JSON";
+
+      const conditionExpression = await convertFromCEL(
+        payload.condition.expression
+      );
+      if (
+        conditionExpression.databaseResources !== undefined &&
+        conditionExpression.databaseResources.length > 0
+      ) {
+        const resource = head(conditionExpression.databaseResources);
+        if (resource) {
+          state.databaseId = String(resource.databaseId);
         }
+      }
+      if (conditionExpression.statement !== undefined) {
+        state.statement = conditionExpression.statement;
+      }
+      if (conditionExpression.rowLimit !== undefined) {
+        state.maxRowCount = conditionExpression.rowLimit;
+      }
+      if (conditionExpression.exportFormat !== undefined) {
+        state.exportFormat = conditionExpression.exportFormat as "CSV" | "JSON";
       }
     }
   },

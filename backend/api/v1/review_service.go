@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/pkg/errors"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/bytebase/bytebase/backend/component/activity"
 	"github.com/bytebase/bytebase/backend/component/state"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
+	"github.com/bytebase/bytebase/backend/runner/taskcheck"
 	"github.com/bytebase/bytebase/backend/runner/taskrun"
 	"github.com/bytebase/bytebase/backend/store"
 	"github.com/bytebase/bytebase/backend/utils"
@@ -28,10 +30,11 @@ import (
 // ReviewService implements the review service.
 type ReviewService struct {
 	v1pb.UnimplementedReviewServiceServer
-	store           *store.Store
-	activityManager *activity.Manager
-	taskScheduler   *taskrun.Scheduler
-	stateCfg        *state.State
+	store              *store.Store
+	activityManager    *activity.Manager
+	taskScheduler      *taskrun.Scheduler
+	taskCheckScheduler *taskcheck.Scheduler
+	stateCfg           *state.State
 }
 
 // NewReviewService creates a new ReviewService.
@@ -168,16 +171,28 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 			updated = true
 			break
 		}
+		role := api.Role(strings.TrimPrefix(payload.GrantRequest.Role, "roles/"))
 		if !updated {
-			role := api.Role(strings.TrimPrefix(payload.GrantRequest.Role, "roles/"))
+			condition := payload.GrantRequest.Condition
+			condition.Description = fmt.Sprintf("#%d", issue.UID)
 			policy.Bindings = append(policy.Bindings, &store.PolicyBinding{
 				Role:      role,
 				Members:   []*store.UserMessage{newUser},
-				Condition: payload.GrantRequest.Condition,
+				Condition: condition,
 			})
 		}
 		if _, err := s.store.SetProjectIAMPolicy(ctx, policy, api.SystemBotID, issue.Project.UID); err != nil {
 			return nil, err
+		}
+		// Post project IAM policy update activity.
+		if _, err := s.activityManager.CreateActivity(ctx, &api.ActivityCreate{
+			CreatorID:   api.SystemBotID,
+			ContainerID: issue.Project.UID,
+			Type:        api.ActivityProjectMemberCreate,
+			Level:       api.ActivityInfo,
+			Comment:     fmt.Sprintf("Granted %s to %s (%s).", newUser.Name, newUser.Email, role),
+		}, &activity.Metadata{}); err != nil {
+			log.Warn("Failed to create project activity", zap.Error(err))
 		}
 	}
 
@@ -297,6 +312,12 @@ func (s *ReviewService) UpdateReview(ctx context.Context, request *v1pb.UpdateRe
 			}
 			payloadStr := string(payloadBytes)
 			patch.Payload = &payloadStr
+
+			if issue.PipelineUID != nil {
+				if err := s.taskCheckScheduler.SchedulePipelineTaskCheckReport(ctx, *issue.PipelineUID); err != nil {
+					return nil, status.Errorf(codes.Internal, "failed to schedule pipeline task check report, error: %v", err)
+				}
+			}
 		}
 	}
 
@@ -362,13 +383,40 @@ func canUserApproveStep(step *storepb.ApprovalStep, user *store.UserMessage, pol
 	return false, nil
 }
 
-func convertToReview(ctx context.Context, store *store.Store, issue *store.IssueMessage) (*v1pb.Review, error) {
+func convertToReview(ctx context.Context, s *store.Store, issue *store.IssueMessage) (*v1pb.Review, error) {
 	issuePayload := &storepb.IssuePayload{}
 	if err := protojson.Unmarshal([]byte(issue.Payload), issuePayload); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal issue payload")
 	}
 
-	review := &v1pb.Review{}
+	review := &v1pb.Review{
+		Name:              fmt.Sprintf("%s%s/%s%d", projectNamePrefix, issue.Project.ResourceID, reviewPrefix, issue.UID),
+		Uid:               fmt.Sprintf("%d", issue.UID),
+		Title:             issue.Title,
+		Description:       issue.Description,
+		Status:            convertToReviewStatus(issue.Status),
+		Assignee:          fmt.Sprintf("%s%s", userNamePrefix, issue.Assignee.Email),
+		AssigneeAttention: issue.NeedAttention,
+		Creator:           fmt.Sprintf("%s%s", userNamePrefix, issue.Creator.Email),
+		CreateTime:        timestamppb.New(issue.CreatedTime),
+		UpdateTime:        timestamppb.New(issue.UpdatedTime),
+	}
+
+	for _, subscriber := range issue.Subscribers {
+		review.Subscribers = append(review.Subscribers, fmt.Sprintf("%s%s", userNamePrefix, subscriber.Email))
+	}
+
+	switch issue.Status {
+	case api.IssueOpen:
+		review.Status = v1pb.ReviewStatus_OPEN
+	case api.IssueDone:
+		review.Status = v1pb.ReviewStatus_DONE
+	case api.IssueCanceled:
+		review.Status = v1pb.ReviewStatus_CANCELED
+	default:
+		review.Status = v1pb.ReviewStatus_REVIEW_STATUS_UNSPECIFIED
+	}
+
 	if issuePayload.Approval != nil {
 		review.ApprovalFindingDone = issuePayload.Approval.ApprovalFindingDone
 		review.ApprovalFindingError = issuePayload.Approval.ApprovalFindingError
@@ -377,17 +425,29 @@ func convertToReview(ctx context.Context, store *store.Store, issue *store.Issue
 		}
 		for _, approver := range issuePayload.Approval.Approvers {
 			convertedApprover := &v1pb.Review_Approver{Status: v1pb.Review_Approver_Status(approver.Status)}
-			user, err := store.GetUserByID(ctx, int(approver.PrincipalId))
+			user, err := s.GetUserByID(ctx, int(approver.PrincipalId))
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to find user by id %v", approver.PrincipalId)
 			}
-			convertedApprover.Principal = fmt.Sprintf("user:%s", user.Email)
-
+			convertedApprover.Principal = fmt.Sprintf("users/%s", user.Email)
 			review.Approvers = append(review.Approvers, convertedApprover)
 		}
 	}
 
 	return review, nil
+}
+
+func convertToReviewStatus(status api.IssueStatus) v1pb.ReviewStatus {
+	switch status {
+	case api.IssueOpen:
+		return v1pb.ReviewStatus_OPEN
+	case api.IssueDone:
+		return v1pb.ReviewStatus_DONE
+	case api.IssueCanceled:
+		return v1pb.ReviewStatus_CANCELED
+	default:
+		return v1pb.ReviewStatus_REVIEW_STATUS_UNSPECIFIED
+	}
 }
 
 func convertToApprovalTemplate(template *storepb.ApprovalTemplate) *v1pb.ApprovalTemplate {

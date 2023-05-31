@@ -5,25 +5,25 @@ import {
   defaultSlowQueryFilterParams,
 } from "@/components/SlowQuery";
 import {
-  useDatabaseStore,
-  useEnvironmentStore,
-  useInstanceStore,
-  useProjectStore,
+  useDatabaseV1Store,
+  useEnvironmentV1Store,
+  useInstanceV1Store,
+  useProjectV1Store,
 } from "@/store";
 
 export const wrapQueryFromFilterParams = (params: SlowQueryFilterParams) => {
   const query: Record<string, any> = {};
-  if (params.project && params.project.id !== UNKNOWN_ID) {
-    query.project = params.project.id;
+  if (params.project && params.project.uid !== String(UNKNOWN_ID)) {
+    query.project = params.project.uid;
   }
-  if (params.environment && params.environment.id !== UNKNOWN_ID) {
-    query.environment = params.environment.id;
+  if (params.environment && params.environment.uid !== String(UNKNOWN_ID)) {
+    query.environment = params.environment.uid;
   }
-  if (params.instance && params.instance.id !== UNKNOWN_ID) {
-    query.instance = params.instance.id;
+  if (params.instance && params.instance.uid !== String(UNKNOWN_ID)) {
+    query.instance = params.instance.uid;
   }
-  if (params.database && params.database.id !== UNKNOWN_ID) {
-    query.database = params.database.id;
+  if (params.database && params.database.uid !== String(UNKNOWN_ID)) {
+    query.database = params.database.uid;
   }
   if (params.fromTime) {
     if (params.fromTime !== defaultSlowQueryFilterParams().fromTime) {
@@ -47,30 +47,30 @@ export const extractSlowQueryLogFilterFromQuery = async (
 ) => {
   const params: SlowQueryFilterParams = defaultSlowQueryFilterParams();
   if (query.environment) {
-    const id = parseInt(query.environment as string, 10) ?? UNKNOWN_ID;
-    const environment = useEnvironmentStore().getEnvironmentById(id);
-    if (environment && environment.id !== UNKNOWN_ID) {
+    const id = (query.environment as string) ?? String(UNKNOWN_ID);
+    const environment = useEnvironmentV1Store().getEnvironmentByUID(id);
+    if (environment && environment.uid !== String(UNKNOWN_ID)) {
       params.environment = environment;
     }
   }
   if (query.project) {
-    const id = parseInt(query.project as string, 10) ?? UNKNOWN_ID;
-    const project = await useProjectStore().getOrFetchProjectById(id);
-    if (project && project.id !== UNKNOWN_ID) {
+    const id = (query.project as string) ?? String(UNKNOWN_ID);
+    const project = await useProjectV1Store().getOrFetchProjectByUID(id);
+    if (project && project.uid !== String(UNKNOWN_ID)) {
       params.project = project;
     }
   }
   if (query.instance) {
-    const id = parseInt(query.instance as string, 10) ?? UNKNOWN_ID;
-    const instance = await useInstanceStore().getOrFetchInstanceById(id);
-    if (instance && instance.id !== UNKNOWN_ID) {
+    const uid = (query.instance as string) ?? UNKNOWN_ID;
+    const instance = await useInstanceV1Store().getOrFetchInstanceByUID(uid);
+    if (instance && instance.uid !== String(UNKNOWN_ID)) {
       params.instance = instance;
     }
   }
   if (query.database) {
-    const id = parseInt(query.database as string, 10) ?? UNKNOWN_ID;
-    const database = await useDatabaseStore().getOrFetchDatabaseById(id);
-    if (database && database.id !== UNKNOWN_ID) {
+    const uid = (query.database as string) ?? UNKNOWN_ID;
+    const database = await useDatabaseV1Store().getOrFetchDatabaseByUID(uid);
+    if (database && database.uid !== String(UNKNOWN_ID)) {
       params.database = database;
     }
   }

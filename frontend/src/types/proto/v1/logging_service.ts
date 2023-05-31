@@ -54,7 +54,7 @@ export interface ListLogsResponse {
 export interface LogEntry {
   /**
    * The creator of the log entry.
-   * Format: user:{emailid}
+   * Format: users/{emailid}
    */
   creator: string;
   /** The timestamp when the backup resource was created initally. */
@@ -66,7 +66,7 @@ export interface LogEntry {
   /**
    * The name of the resource associated with this log entry. For example, the resource user associated with log entry type of "ACTION_MEMBER_CREATE".
    * Format:
-   * For ACTION_MEMBER_*: user:emailid
+   * For ACTION_MEMBER_*: users/{email}
    * For ACTION_ISSUE_*: issues/{issue}
    * For ACTION_PIPELINE_*: pipelines/{pipeline}
    * For ACTION_PROJECT_*: projects/{project}
@@ -733,8 +733,8 @@ function toTimestamp(date: Date): Timestamp {
 }
 
 function fromTimestamp(t: Timestamp): Date {
-  let millis = t.seconds * 1_000;
-  millis += t.nanos / 1_000_000;
+  let millis = (t.seconds || 0) * 1_000;
+  millis += (t.nanos || 0) / 1_000_000;
   return new Date(millis);
 }
 

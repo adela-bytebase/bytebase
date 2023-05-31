@@ -86,7 +86,7 @@
             type="button"
             class="btn-primary inline-flex justify-center ml-auto"
             target="_blank"
-            href="https://airtable.com/shrS2Ot5BfGExwemj"
+            href="https://www.bytebase.com/contact-us"
           >
             {{ $t("subscription.contact-us") }}
           </a>
@@ -132,11 +132,11 @@ import PricingTable from "../components/PricingTable/";
 import { PlanType } from "@/types/proto/v1/subscription_service";
 import {
   pushNotification,
-  useCurrentUser,
-  useSubscriptionStore,
+  useCurrentUserV1,
+  useSubscriptionV1Store,
 } from "@/store";
 import { storeToRefs } from "pinia";
-import { hasWorkspacePermission } from "@/utils";
+import { hasWorkspacePermissionV1 } from "@/utils";
 
 interface LocalState {
   loading: boolean;
@@ -144,9 +144,9 @@ interface LocalState {
   showTrialModal: boolean;
 }
 
-const subscriptionStore = useSubscriptionStore();
+const subscriptionStore = useSubscriptionV1Store();
 const { t } = useI18n();
-const currentUser = useCurrentUser();
+const currentUserV1 = useCurrentUserV1();
 
 const state = reactive<LocalState>({
   loading: false,
@@ -211,9 +211,9 @@ const openTrialModal = () => {
 };
 
 const canManageSubscription = computed((): boolean => {
-  return hasWorkspacePermission(
+  return hasWorkspacePermissionV1(
     "bb.permission.workspace.manage-subscription",
-    currentUser.value.role
+    currentUserV1.value.userRole
   );
 });
 </script>

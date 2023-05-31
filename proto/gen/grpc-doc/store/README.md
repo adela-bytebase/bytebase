@@ -27,6 +27,9 @@
     - [ApprovalStep.Type](#bytebase-store-ApprovalStep-Type)
     - [IssuePayloadApproval.Approver.Status](#bytebase-store-IssuePayloadApproval-Approver-Status)
   
+- [store/common.proto](#store_common-proto)
+    - [PageToken](#bytebase-store-PageToken)
+  
 - [store/data_source.proto](#store_data_source-proto)
     - [DataSourceOptions](#bytebase-store-DataSourceOptions)
   
@@ -57,6 +60,18 @@
 - [store/issue.proto](#store_issue-proto)
     - [GrantRequest](#bytebase-store-GrantRequest)
     - [IssuePayload](#bytebase-store-IssuePayload)
+  
+- [store/plan.proto](#store_plan-proto)
+    - [PlanConfig](#bytebase-store-PlanConfig)
+    - [PlanConfig.ChangeDatabaseConfig](#bytebase-store-PlanConfig-ChangeDatabaseConfig)
+    - [PlanConfig.ChangeDatabaseConfig.RollbackDetail](#bytebase-store-PlanConfig-ChangeDatabaseConfig-RollbackDetail)
+    - [PlanConfig.CreateDatabaseConfig](#bytebase-store-PlanConfig-CreateDatabaseConfig)
+    - [PlanConfig.CreateDatabaseConfig.LabelsEntry](#bytebase-store-PlanConfig-CreateDatabaseConfig-LabelsEntry)
+    - [PlanConfig.RestoreDatabaseConfig](#bytebase-store-PlanConfig-RestoreDatabaseConfig)
+    - [PlanConfig.Spec](#bytebase-store-PlanConfig-Spec)
+    - [PlanConfig.Step](#bytebase-store-PlanConfig-Step)
+  
+    - [PlanConfig.ChangeDatabaseConfig.Type](#bytebase-store-PlanConfig-ChangeDatabaseConfig-Type)
   
 - [store/setting.proto](#store_setting-proto)
     - [AgentPluginSetting](#bytebase-store-AgentPluginSetting)
@@ -397,6 +412,38 @@ ANY means approving any node will proceed.
 | PENDING | 1 |  |
 | APPROVED | 2 |  |
 
+
+ 
+
+ 
+
+ 
+
+
+
+<a name="store_common-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## store/common.proto
+
+
+
+<a name="bytebase-store-PageToken"></a>
+
+### PageToken
+Used internally for obfuscating the page token.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| limit | [int32](#int32) |  |  |
+| offset | [int32](#int32) |  |  |
+
+
+
+
+
+ 
 
  
 
@@ -883,6 +930,183 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 
 
 
+<a name="store_plan-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## store/plan.proto
+
+
+
+<a name="bytebase-store-PlanConfig"></a>
+
+### PlanConfig
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| steps | [PlanConfig.Step](#bytebase-store-PlanConfig-Step) | repeated |  |
+
+
+
+
+
+
+<a name="bytebase-store-PlanConfig-ChangeDatabaseConfig"></a>
+
+### PlanConfig.ChangeDatabaseConfig
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| target | [string](#string) |  | The resource name of the target. Format: instances/{instance-id}/databases/{database-name}. Format: projects/{project}/deploymentConfig. |
+| sheet | [string](#string) |  | The resource name of the sheet. Format: projects/{project}/sheets/{sheet} |
+| type | [PlanConfig.ChangeDatabaseConfig.Type](#bytebase-store-PlanConfig-ChangeDatabaseConfig-Type) |  |  |
+| schema_version | [string](#string) |  | schema_version is parsed from VCS file name. It is automatically generated in the UI workflow. |
+| rollback_enabled | [bool](#bool) |  | If RollbackEnabled, build the RollbackSheetID of the task. |
+| rollback_detail | [PlanConfig.ChangeDatabaseConfig.RollbackDetail](#bytebase-store-PlanConfig-ChangeDatabaseConfig-RollbackDetail) | optional |  |
+
+
+
+
+
+
+<a name="bytebase-store-PlanConfig-ChangeDatabaseConfig-RollbackDetail"></a>
+
+### PlanConfig.ChangeDatabaseConfig.RollbackDetail
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| rollback_from_task | [string](#string) |  | rollback_from_task is the task from which the rollback SQL statement is generated for this task. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} |
+| rollback_from_review | [string](#string) |  | rollback_from_review is the review containing the original task from which the rollback SQL statement is generated for this task. Format: projects/{project}/reviews/{review} |
+
+
+
+
+
+
+<a name="bytebase-store-PlanConfig-CreateDatabaseConfig"></a>
+
+### PlanConfig.CreateDatabaseConfig
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| target | [string](#string) |  | The resource name of the instance on which the database is created. Format: instances/{instance} |
+| database | [string](#string) |  | The name of the database to create. |
+| table | [string](#string) |  | table is the name of the table, if it is not empty, Bytebase should create a table after creating the database. For example, in MongoDB, it only creates the database when we first store data in that database. |
+| character_set | [string](#string) |  | character_set is the character set of the database. |
+| collation | [string](#string) |  | collation is the collation of the database. |
+| cluster | [string](#string) |  | cluster is the cluster of the database. This is only applicable to ClickHouse for &#34;ON CLUSTER &lt;&lt;cluster&gt;&gt;&#34;. |
+| owner | [string](#string) |  | owner is the owner of the database. This is only applicable to Postgres for &#34;WITH OWNER &lt;&lt;owner&gt;&gt;&#34;.
+
+backup is the resource name of the backup. Format: instances/{instance}/databases/{database}/backups/{backup-name} |
+| backup | [string](#string) |  |  |
+| labels | [PlanConfig.CreateDatabaseConfig.LabelsEntry](#bytebase-store-PlanConfig-CreateDatabaseConfig-LabelsEntry) | repeated | labels of the database. |
+
+
+
+
+
+
+<a name="bytebase-store-PlanConfig-CreateDatabaseConfig-LabelsEntry"></a>
+
+### PlanConfig.CreateDatabaseConfig.LabelsEntry
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| key | [string](#string) |  |  |
+| value | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-PlanConfig-RestoreDatabaseConfig"></a>
+
+### PlanConfig.RestoreDatabaseConfig
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| target | [string](#string) |  | The resource name of the target to restore. Format: instances/{instance}/databases/{database} |
+| create_database_config | [PlanConfig.CreateDatabaseConfig](#bytebase-store-PlanConfig-CreateDatabaseConfig) | optional | create_database_config is present if the user wants to restore to a new database. |
+| backup | [string](#string) |  | Restore from a backup. Format: instances/{instance}/databases/{database}/backups/{backup-name} |
+| point_in_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | After the PITR operations, the database will be recovered to the state at this time. |
+
+
+
+
+
+
+<a name="bytebase-store-PlanConfig-Spec"></a>
+
+### PlanConfig.Spec
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| earliest_allowed_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | earliest_allowed_time the earliest execution time of the change. |
+| id | [string](#string) |  | A UUID4 string that uniquely identifies the Spec. |
+| create_database_config | [PlanConfig.CreateDatabaseConfig](#bytebase-store-PlanConfig-CreateDatabaseConfig) |  |  |
+| change_database_config | [PlanConfig.ChangeDatabaseConfig](#bytebase-store-PlanConfig-ChangeDatabaseConfig) |  |  |
+| restore_database_config | [PlanConfig.RestoreDatabaseConfig](#bytebase-store-PlanConfig-RestoreDatabaseConfig) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-PlanConfig-Step"></a>
+
+### PlanConfig.Step
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| specs | [PlanConfig.Spec](#bytebase-store-PlanConfig-Spec) | repeated |  |
+
+
+
+
+
+ 
+
+
+<a name="bytebase-store-PlanConfig-ChangeDatabaseConfig-Type"></a>
+
+### PlanConfig.ChangeDatabaseConfig.Type
+Type is the database change type.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TYPE_UNSPECIFIED | 0 |  |
+| BASELINE | 1 | Used for establishing schema baseline, this is used when 1. Onboard the database into Bytebase since Bytebase needs to know the current database schema. 2. Had schema drift and need to re-establish the baseline. |
+| MIGRATE | 2 | Used for DDL changes including CREATE DATABASE. |
+| MIGRATE_SDL | 3 | Used for schema changes via state-based schema migration including CREATE DATABASE. |
+| MIGRATE_GHOST | 4 | Used for DDL changes using gh-ost. |
+| BRANCH | 5 | Used when restoring from a backup (the restored database branched from the original backup). |
+| DATA | 6 | Used for DML change. |
+
+
+ 
+
+ 
+
+ 
+
+
+
 <a name="store_setting-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
@@ -975,6 +1199,7 @@ The external URL is used for: 1. Constructing the correct callback URL when conf
 | disallow_signup | [bool](#bool) |  | Disallow self-service signup, users can only be invited by the owner. |
 | require_2fa | [bool](#bool) |  | Require 2FA for all users. |
 | outbound_ip_list | [string](#string) | repeated | outbound_ip_list is the outbound IP for Bytebase instance in SaaS mode. |
+| gitops_webhook_url | [string](#string) |  | The webhook URL for the GitOps workflow. |
 
 
 

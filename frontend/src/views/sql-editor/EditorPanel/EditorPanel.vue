@@ -32,8 +32,8 @@ import { computed, ref } from "vue";
 import type { Connection, ExecuteConfig, ExecuteOption } from "@/types";
 import {
   useCurrentTab,
-  useInstanceStore,
-  useSheetStore,
+  useInstanceV1Store,
+  useSheetV1Store,
   useTabStore,
 } from "@/store";
 import SQLEditor from "./SQLEditor.vue";
@@ -47,18 +47,19 @@ import {
 import SheetForIssueTipsBar from "./SheetForIssueTipsBar.vue";
 import { useExecuteSQL } from "@/composables/useExecuteSQL";
 import { AIChatToSQL } from "@/plugins/ai";
-import { getSheetIssueBacktracePayload } from "@/utils";
+import { formatEngineV1, getSheetIssueBacktracePayloadV1 } from "@/utils";
 
 const tabStore = useTabStore();
-const sheetStore = useSheetStore();
+const sheetV1Store = useSheetV1Store();
 const saveSheetModal = ref<InstanceType<typeof SaveSheetModal>>();
 const tab = useCurrentTab();
 
 const sheetBacktracePayload = computed(() => {
-  const sheetId = tabStore.currentTab.sheetId;
-  if (!sheetId) return undefined;
-  const sheet = sheetStore.getSheetById(sheetId);
-  return getSheetIssueBacktracePayload(sheet);
+  const sheetName = tabStore.currentTab.sheetName;
+  if (!sheetName) return undefined;
+  const sheet = sheetV1Store.getSheetByName(sheetName);
+  if (!sheet) return undefined;
+  return getSheetIssueBacktracePayloadV1(sheet);
 });
 
 const { execute } = useExecuteSQL();
@@ -82,12 +83,12 @@ const handleApplyStatement = async (
 ) => {
   tab.value.statement = statement;
   if (run) {
-    const instanceStore = useInstanceStore();
-    const instance = await instanceStore.getOrFetchInstanceById(
+    const instanceStore = useInstanceV1Store();
+    const instance = await instanceStore.getOrFetchInstanceByUID(
       conn.instanceId
     );
     handleExecute(statement, {
-      databaseType: instanceStore.formatEngine(instance),
+      databaseType: formatEngineV1(instance),
     });
   }
 };

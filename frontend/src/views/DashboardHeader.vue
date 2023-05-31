@@ -209,13 +209,14 @@ import BytebaseLogo from "../components/BytebaseLogo.vue";
 import ProfileBrandingLogo from "../components/ProfileBrandingLogo.vue";
 import ProfileDropdown from "../components/ProfileDropdown.vue";
 import { UNKNOWN_ID } from "../types";
-import { hasWorkspacePermission, isDev } from "../utils";
+import { hasWorkspacePermissionV1, isDev } from "../utils";
 import { useLanguage } from "../composables/useLanguage";
 import {
   useCurrentUser,
-  useDebugStore,
-  useSubscriptionStore,
+  useActuatorV1Store,
+  useSubscriptionV1Store,
   useInboxStore,
+  useCurrentUserV1,
 } from "@/store";
 import { storeToRefs } from "pinia";
 import { PlanType } from "@/types/proto/v1/subscription_service";
@@ -234,9 +235,9 @@ export default defineComponent({
   },
   setup() {
     const { t, availableLocales } = useI18n();
-    const debugStore = useDebugStore();
+    const actuatorV1Store = useActuatorV1Store();
     const inboxStore = useInboxStore();
-    const subscriptionStore = useSubscriptionStore();
+    const subscriptionStore = useSubscriptionV1Store();
     const router = useRouter();
     const route = useRoute();
     const { setLocale, toggleLocales, locale } = useLanguage();
@@ -247,6 +248,7 @@ export default defineComponent({
     });
 
     const currentUser = useCurrentUser();
+    const currentUserV1 = useCurrentUserV1();
 
     const { currentPlan } = storeToRefs(subscriptionStore);
 
@@ -261,16 +263,16 @@ export default defineComponent({
     };
 
     const shouldShowIssueEntry = computed((): boolean => {
-      return hasWorkspacePermission(
+      return hasWorkspacePermissionV1(
         "bb.permission.workspace.manage-issue",
-        currentUser.value.role
+        currentUserV1.value.userRole
       );
     });
 
     const shouldShowInstanceEntry = computed(() => {
-      return hasWorkspacePermission(
+      return hasWorkspacePermissionV1(
         "bb.permission.workspace.manage-instance",
-        currentUser.value.role
+        currentUserV1.value.userRole
       );
     });
 
@@ -359,11 +361,11 @@ export default defineComponent({
       );
     };
 
-    const { isDebug } = storeToRefs(debugStore);
+    const { isDebug } = storeToRefs(actuatorV1Store);
 
     const toggleDebug = () => {
-      debugStore.patchDebug({
-        isDebug: !isDebug.value,
+      actuatorV1Store.patchDebug({
+        debug: !isDebug.value,
       });
     };
 
@@ -408,7 +410,6 @@ export default defineComponent({
       getRouteLinkClass,
       shouldShowInstanceEntry,
       shouldShowIssueEntry,
-      currentUser,
       currentPlan,
       PlanType,
       isDevFeatures,

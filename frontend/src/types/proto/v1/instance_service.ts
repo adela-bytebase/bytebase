@@ -95,6 +95,8 @@ export interface CreateInstanceRequest {
    * are /[a-z][0-9]-/.
    */
   instanceId: string;
+  /** Validate only also tests the data source connection. */
+  validateOnly: boolean;
 }
 
 export interface UpdateInstanceRequest {
@@ -137,7 +139,9 @@ export interface AddDataSourceRequest {
    * Identified by type.
    * Only READ_ONLY data source can be added.
    */
-  dataSources?: DataSource;
+  dataSource?: DataSource;
+  /** Validate only also tests the data source connection. */
+  validateOnly: boolean;
 }
 
 export interface RemoveDataSourceRequest {
@@ -150,7 +154,7 @@ export interface RemoveDataSourceRequest {
    * Identified by type.
    * Only READ_ONLY data source can be removed.
    */
-  dataSources?: DataSource;
+  dataSource?: DataSource;
 }
 
 export interface UpdateDataSourceRequest {
@@ -160,9 +164,11 @@ export interface UpdateDataSourceRequest {
    */
   instance: string;
   /** Identified by type. */
-  dataSources?: DataSource;
+  dataSource?: DataSource;
   /** The list of fields to update. */
   updateMask?: string[];
+  /** Validate only also tests the data source connection. */
+  validateOnly: boolean;
 }
 
 export interface SyncSlowQueriesRequest {
@@ -184,6 +190,7 @@ export interface Instance {
   state: State;
   title: string;
   engine: Engine;
+  engineVersion: string;
   externalLink: string;
   dataSources: DataSource[];
   /**
@@ -448,7 +455,7 @@ export const ListInstancesResponse = {
 };
 
 function createBaseCreateInstanceRequest(): CreateInstanceRequest {
-  return { instance: undefined, instanceId: "" };
+  return { instance: undefined, instanceId: "", validateOnly: false };
 }
 
 export const CreateInstanceRequest = {
@@ -458,6 +465,9 @@ export const CreateInstanceRequest = {
     }
     if (message.instanceId !== "") {
       writer.uint32(18).string(message.instanceId);
+    }
+    if (message.validateOnly === true) {
+      writer.uint32(24).bool(message.validateOnly);
     }
     return writer;
   },
@@ -483,6 +493,13 @@ export const CreateInstanceRequest = {
 
           message.instanceId = reader.string();
           continue;
+        case 3:
+          if (tag !== 24) {
+            break;
+          }
+
+          message.validateOnly = reader.bool();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -496,6 +513,7 @@ export const CreateInstanceRequest = {
     return {
       instance: isSet(object.instance) ? Instance.fromJSON(object.instance) : undefined,
       instanceId: isSet(object.instanceId) ? String(object.instanceId) : "",
+      validateOnly: isSet(object.validateOnly) ? Boolean(object.validateOnly) : false,
     };
   },
 
@@ -503,6 +521,7 @@ export const CreateInstanceRequest = {
     const obj: any = {};
     message.instance !== undefined && (obj.instance = message.instance ? Instance.toJSON(message.instance) : undefined);
     message.instanceId !== undefined && (obj.instanceId = message.instanceId);
+    message.validateOnly !== undefined && (obj.validateOnly = message.validateOnly);
     return obj;
   },
 
@@ -516,6 +535,7 @@ export const CreateInstanceRequest = {
       ? Instance.fromPartial(object.instance)
       : undefined;
     message.instanceId = object.instanceId ?? "";
+    message.validateOnly = object.validateOnly ?? false;
     return message;
   },
 };
@@ -721,7 +741,7 @@ export const UndeleteInstanceRequest = {
 };
 
 function createBaseAddDataSourceRequest(): AddDataSourceRequest {
-  return { instance: "", dataSources: undefined };
+  return { instance: "", dataSource: undefined, validateOnly: false };
 }
 
 export const AddDataSourceRequest = {
@@ -729,8 +749,11 @@ export const AddDataSourceRequest = {
     if (message.instance !== "") {
       writer.uint32(10).string(message.instance);
     }
-    if (message.dataSources !== undefined) {
-      DataSource.encode(message.dataSources, writer.uint32(18).fork()).ldelim();
+    if (message.dataSource !== undefined) {
+      DataSource.encode(message.dataSource, writer.uint32(18).fork()).ldelim();
+    }
+    if (message.validateOnly === true) {
+      writer.uint32(24).bool(message.validateOnly);
     }
     return writer;
   },
@@ -754,7 +777,14 @@ export const AddDataSourceRequest = {
             break;
           }
 
-          message.dataSources = DataSource.decode(reader, reader.uint32());
+          message.dataSource = DataSource.decode(reader, reader.uint32());
+          continue;
+        case 3:
+          if (tag !== 24) {
+            break;
+          }
+
+          message.validateOnly = reader.bool();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -768,15 +798,17 @@ export const AddDataSourceRequest = {
   fromJSON(object: any): AddDataSourceRequest {
     return {
       instance: isSet(object.instance) ? String(object.instance) : "",
-      dataSources: isSet(object.dataSources) ? DataSource.fromJSON(object.dataSources) : undefined,
+      dataSource: isSet(object.dataSource) ? DataSource.fromJSON(object.dataSource) : undefined,
+      validateOnly: isSet(object.validateOnly) ? Boolean(object.validateOnly) : false,
     };
   },
 
   toJSON(message: AddDataSourceRequest): unknown {
     const obj: any = {};
     message.instance !== undefined && (obj.instance = message.instance);
-    message.dataSources !== undefined &&
-      (obj.dataSources = message.dataSources ? DataSource.toJSON(message.dataSources) : undefined);
+    message.dataSource !== undefined &&
+      (obj.dataSource = message.dataSource ? DataSource.toJSON(message.dataSource) : undefined);
+    message.validateOnly !== undefined && (obj.validateOnly = message.validateOnly);
     return obj;
   },
 
@@ -787,15 +819,16 @@ export const AddDataSourceRequest = {
   fromPartial(object: DeepPartial<AddDataSourceRequest>): AddDataSourceRequest {
     const message = createBaseAddDataSourceRequest();
     message.instance = object.instance ?? "";
-    message.dataSources = (object.dataSources !== undefined && object.dataSources !== null)
-      ? DataSource.fromPartial(object.dataSources)
+    message.dataSource = (object.dataSource !== undefined && object.dataSource !== null)
+      ? DataSource.fromPartial(object.dataSource)
       : undefined;
+    message.validateOnly = object.validateOnly ?? false;
     return message;
   },
 };
 
 function createBaseRemoveDataSourceRequest(): RemoveDataSourceRequest {
-  return { instance: "", dataSources: undefined };
+  return { instance: "", dataSource: undefined };
 }
 
 export const RemoveDataSourceRequest = {
@@ -803,8 +836,8 @@ export const RemoveDataSourceRequest = {
     if (message.instance !== "") {
       writer.uint32(10).string(message.instance);
     }
-    if (message.dataSources !== undefined) {
-      DataSource.encode(message.dataSources, writer.uint32(18).fork()).ldelim();
+    if (message.dataSource !== undefined) {
+      DataSource.encode(message.dataSource, writer.uint32(18).fork()).ldelim();
     }
     return writer;
   },
@@ -828,7 +861,7 @@ export const RemoveDataSourceRequest = {
             break;
           }
 
-          message.dataSources = DataSource.decode(reader, reader.uint32());
+          message.dataSource = DataSource.decode(reader, reader.uint32());
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -842,15 +875,15 @@ export const RemoveDataSourceRequest = {
   fromJSON(object: any): RemoveDataSourceRequest {
     return {
       instance: isSet(object.instance) ? String(object.instance) : "",
-      dataSources: isSet(object.dataSources) ? DataSource.fromJSON(object.dataSources) : undefined,
+      dataSource: isSet(object.dataSource) ? DataSource.fromJSON(object.dataSource) : undefined,
     };
   },
 
   toJSON(message: RemoveDataSourceRequest): unknown {
     const obj: any = {};
     message.instance !== undefined && (obj.instance = message.instance);
-    message.dataSources !== undefined &&
-      (obj.dataSources = message.dataSources ? DataSource.toJSON(message.dataSources) : undefined);
+    message.dataSource !== undefined &&
+      (obj.dataSource = message.dataSource ? DataSource.toJSON(message.dataSource) : undefined);
     return obj;
   },
 
@@ -861,15 +894,15 @@ export const RemoveDataSourceRequest = {
   fromPartial(object: DeepPartial<RemoveDataSourceRequest>): RemoveDataSourceRequest {
     const message = createBaseRemoveDataSourceRequest();
     message.instance = object.instance ?? "";
-    message.dataSources = (object.dataSources !== undefined && object.dataSources !== null)
-      ? DataSource.fromPartial(object.dataSources)
+    message.dataSource = (object.dataSource !== undefined && object.dataSource !== null)
+      ? DataSource.fromPartial(object.dataSource)
       : undefined;
     return message;
   },
 };
 
 function createBaseUpdateDataSourceRequest(): UpdateDataSourceRequest {
-  return { instance: "", dataSources: undefined, updateMask: undefined };
+  return { instance: "", dataSource: undefined, updateMask: undefined, validateOnly: false };
 }
 
 export const UpdateDataSourceRequest = {
@@ -877,11 +910,14 @@ export const UpdateDataSourceRequest = {
     if (message.instance !== "") {
       writer.uint32(10).string(message.instance);
     }
-    if (message.dataSources !== undefined) {
-      DataSource.encode(message.dataSources, writer.uint32(18).fork()).ldelim();
+    if (message.dataSource !== undefined) {
+      DataSource.encode(message.dataSource, writer.uint32(18).fork()).ldelim();
     }
     if (message.updateMask !== undefined) {
       FieldMask.encode(FieldMask.wrap(message.updateMask), writer.uint32(26).fork()).ldelim();
+    }
+    if (message.validateOnly === true) {
+      writer.uint32(32).bool(message.validateOnly);
     }
     return writer;
   },
@@ -905,7 +941,7 @@ export const UpdateDataSourceRequest = {
             break;
           }
 
-          message.dataSources = DataSource.decode(reader, reader.uint32());
+          message.dataSource = DataSource.decode(reader, reader.uint32());
           continue;
         case 3:
           if (tag !== 26) {
@@ -913,6 +949,13 @@ export const UpdateDataSourceRequest = {
           }
 
           message.updateMask = FieldMask.unwrap(FieldMask.decode(reader, reader.uint32()));
+          continue;
+        case 4:
+          if (tag !== 32) {
+            break;
+          }
+
+          message.validateOnly = reader.bool();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -926,17 +969,19 @@ export const UpdateDataSourceRequest = {
   fromJSON(object: any): UpdateDataSourceRequest {
     return {
       instance: isSet(object.instance) ? String(object.instance) : "",
-      dataSources: isSet(object.dataSources) ? DataSource.fromJSON(object.dataSources) : undefined,
+      dataSource: isSet(object.dataSource) ? DataSource.fromJSON(object.dataSource) : undefined,
       updateMask: isSet(object.updateMask) ? FieldMask.unwrap(FieldMask.fromJSON(object.updateMask)) : undefined,
+      validateOnly: isSet(object.validateOnly) ? Boolean(object.validateOnly) : false,
     };
   },
 
   toJSON(message: UpdateDataSourceRequest): unknown {
     const obj: any = {};
     message.instance !== undefined && (obj.instance = message.instance);
-    message.dataSources !== undefined &&
-      (obj.dataSources = message.dataSources ? DataSource.toJSON(message.dataSources) : undefined);
+    message.dataSource !== undefined &&
+      (obj.dataSource = message.dataSource ? DataSource.toJSON(message.dataSource) : undefined);
     message.updateMask !== undefined && (obj.updateMask = FieldMask.toJSON(FieldMask.wrap(message.updateMask)));
+    message.validateOnly !== undefined && (obj.validateOnly = message.validateOnly);
     return obj;
   },
 
@@ -947,10 +992,11 @@ export const UpdateDataSourceRequest = {
   fromPartial(object: DeepPartial<UpdateDataSourceRequest>): UpdateDataSourceRequest {
     const message = createBaseUpdateDataSourceRequest();
     message.instance = object.instance ?? "";
-    message.dataSources = (object.dataSources !== undefined && object.dataSources !== null)
-      ? DataSource.fromPartial(object.dataSources)
+    message.dataSource = (object.dataSource !== undefined && object.dataSource !== null)
+      ? DataSource.fromPartial(object.dataSource)
       : undefined;
     message.updateMask = object.updateMask ?? undefined;
+    message.validateOnly = object.validateOnly ?? false;
     return message;
   },
 };
@@ -1012,7 +1058,17 @@ export const SyncSlowQueriesRequest = {
 };
 
 function createBaseInstance(): Instance {
-  return { name: "", uid: "", state: 0, title: "", engine: 0, externalLink: "", dataSources: [], environment: "" };
+  return {
+    name: "",
+    uid: "",
+    state: 0,
+    title: "",
+    engine: 0,
+    engineVersion: "",
+    externalLink: "",
+    dataSources: [],
+    environment: "",
+  };
 }
 
 export const Instance = {
@@ -1032,14 +1088,17 @@ export const Instance = {
     if (message.engine !== 0) {
       writer.uint32(40).int32(message.engine);
     }
+    if (message.engineVersion !== "") {
+      writer.uint32(50).string(message.engineVersion);
+    }
     if (message.externalLink !== "") {
-      writer.uint32(50).string(message.externalLink);
+      writer.uint32(58).string(message.externalLink);
     }
     for (const v of message.dataSources) {
-      DataSource.encode(v!, writer.uint32(58).fork()).ldelim();
+      DataSource.encode(v!, writer.uint32(66).fork()).ldelim();
     }
     if (message.environment !== "") {
-      writer.uint32(66).string(message.environment);
+      writer.uint32(74).string(message.environment);
     }
     return writer;
   },
@@ -1091,17 +1150,24 @@ export const Instance = {
             break;
           }
 
-          message.externalLink = reader.string();
+          message.engineVersion = reader.string();
           continue;
         case 7:
           if (tag !== 58) {
             break;
           }
 
-          message.dataSources.push(DataSource.decode(reader, reader.uint32()));
+          message.externalLink = reader.string();
           continue;
         case 8:
           if (tag !== 66) {
+            break;
+          }
+
+          message.dataSources.push(DataSource.decode(reader, reader.uint32()));
+          continue;
+        case 9:
+          if (tag !== 74) {
             break;
           }
 
@@ -1123,6 +1189,7 @@ export const Instance = {
       state: isSet(object.state) ? stateFromJSON(object.state) : 0,
       title: isSet(object.title) ? String(object.title) : "",
       engine: isSet(object.engine) ? engineFromJSON(object.engine) : 0,
+      engineVersion: isSet(object.engineVersion) ? String(object.engineVersion) : "",
       externalLink: isSet(object.externalLink) ? String(object.externalLink) : "",
       dataSources: Array.isArray(object?.dataSources) ? object.dataSources.map((e: any) => DataSource.fromJSON(e)) : [],
       environment: isSet(object.environment) ? String(object.environment) : "",
@@ -1136,6 +1203,7 @@ export const Instance = {
     message.state !== undefined && (obj.state = stateToJSON(message.state));
     message.title !== undefined && (obj.title = message.title);
     message.engine !== undefined && (obj.engine = engineToJSON(message.engine));
+    message.engineVersion !== undefined && (obj.engineVersion = message.engineVersion);
     message.externalLink !== undefined && (obj.externalLink = message.externalLink);
     if (message.dataSources) {
       obj.dataSources = message.dataSources.map((e) => e ? DataSource.toJSON(e) : undefined);
@@ -1157,6 +1225,7 @@ export const Instance = {
     message.state = object.state ?? 0;
     message.title = object.title ?? "";
     message.engine = object.engine ?? 0;
+    message.engineVersion = object.engineVersion ?? "";
     message.externalLink = object.externalLink ?? "";
     message.dataSources = object.dataSources?.map((e) => DataSource.fromPartial(e)) || [];
     message.environment = object.environment ?? "";

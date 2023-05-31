@@ -54,7 +54,6 @@
     "bookmarks": "Marcadores",
     "quick-action": "Acción rápida",
     "archive": "Archivo",
-    "quickstart": "Inicio rápido",
     "logout": "Cerrar sesión",
     "close": "Cerrar",
     "latest": "Último",
@@ -245,7 +244,13 @@
     "collapse": "Colapsar",
     "select": "Seleccionar",
     "optional": "Opcional",
-    "reason": "Razón"
+    "reason": "Razón",
+    "date": {
+      "days": "{days} días",
+      "months": "{months} meses",
+      "years": "{years} años"
+    },
+    "expiration": "Expiración"
   },
   "error-page": {
     "go-back-home": "Volver al inicio"
@@ -639,6 +644,7 @@
     "n-similar-activities": "({count} actividad similar) | ({count} actividades similares)"
   },
   "issue": {
+    "my-issues": "Mis Incidencias",
     "waiting-approval": "Esperando Aprobación",
     "waiting-rollout": "Esperando Implementación",
     "opened-by-at": "abierta por {creator} a las {time}",
@@ -685,6 +691,7 @@
       "progress": "Progreso",
       "updated": "Actualizado",
       "approver": "Aprobador",
+      "creator": "Creador",
       "assignee": "Asignado"
     },
     "stage-select": {
@@ -945,6 +952,8 @@
     "production-environment": "Entorno de producción"
   },
   "quick-start": {
+    "self": "Inicio rápido",
+    "guide": "haga clic en el paso para probarlo",
     "view-an-issue": "Ver una incidencia",
     "visit-project": "@:common.visit @:common.projects",
     "visit-instance": "@:common.visit @:common.instances",
@@ -1235,7 +1244,11 @@
     },
     "transfer": {
       "source-project": "Proyecto fuente",
-      "target-project": "proyecto de destino"
+      "target-project": "proyecto de destino",
+      "errors": {
+        "select-target-project": "Seleccionar proyecto de destino",
+        "select-at-least-one-database": "Seleccione al menos una base de datos"
+      }
     }
   },
   "repository": {
@@ -1257,7 +1270,7 @@
     "sql-review-ci-enable": "Habilitar la revisión de SQL CI",
     "sql-review-ci-enable-gitlab": "Habilitar la revisión de SQL CI a través de GitLab CI",
     "sql-review-ci-enable-github": "Habilitar la revisión de SQL CI a través de la acción de GitHub",
-    "sql-review-ci-description": "Bytebase creará un {pr} para configurar la revisión de SQL CI en su repositorio. Después de la configuración, en cada {pr}, la política de revisión de SQL se verificará en archivos cambiados que coincidan con el \"{pathTemplate}\".",
+    "sql-review-ci-description": "Bytebase creará un {pr} para configurar la revisión de SQL CI en su repositorio. En cada {pr}, la política de revisión de SQL basada en el entorno verificará los archivos modificados que coincidan con el \"{pathTemplate}\".",
     "sql-review-ci-setup": "Configurar revisión de SQL CI",
     "sql-review-ci-setup-failed": "Error al configurar la revisión de SQL CI",
     "sql-review-ci-setup-pr": "Revisar el {pr}",
@@ -1431,6 +1444,7 @@
       "select-schema-change-type-sdl": "Migración basada en declaración de estado. Por ejemplo, CREATE TABLE",
       "schema-path-template-sdl-description": "El archivo de esquema describe el esquema completo de la base de datos.",
       "members": {
+        "edit": "Editar miembro - {member}",
         "view-by-principals": "Ver por principales",
         "view-by-roles": "Ver por roles",
         "cannot-remove-last-owner": "No se puede eliminar el último propietario de un proyecto",
@@ -1828,6 +1842,7 @@
     "trial-for-plan": "Puedes iniciar una prueba gratuita de {plan} por {days} días - no se requiere tarjeta de crédito",
     "trial-for-days": "Puedes iniciar una prueba gratuita por {days} días - no se requiere tarjeta de crédito",
     "upgrade-trial": "Puedes actualizar tu prueba gratuita a este plan",
+    "upgrade-now": "Actualizar ahora",
     "update": {
       "success": {
         "title": "Licencia actualizada con éxito",
@@ -1837,6 +1852,12 @@
         "title": "Error al actualizar la licencia",
         "description": "Por favor, comprueba si tu licencia es válida."
       }
+    },
+    "plan-features": "{plan} función",
+    "overuse-warning": "{neededPlan} puede estar restringido en {currentPlan}, actualice ahora para asegurar un uso adecuado.",
+    "overuse-modal": {
+      "description": "Está utilizando una función que actualmente no está incluida en {plan}. Actualice ahora para evitar interrupciones.",
+      "instance-count-exceeds": "El número de instancias {count} excedió el límite {limit}"
     },
     "features": {
       "bb-feature-task-schedule-time": {
@@ -1986,7 +2007,8 @@
       "confirm-to-duplicate-sheet": "¿Confirmar para duplicar esta hoja?"
     },
     "linked-issue": "Incidencia vinculada",
-    "from-sheet-warning": "La hoja proviene de la incidencia {issue}. Es de solo lectura y solo se muestra una parte de ella."
+    "from-issue-warning": "La hoja proviene de la incidencia {issue} en modo de solo lectura. {oversize}",
+    "content-oversize-warning": "Mostrar solo parte de la hoja debido al tamaño excesivo."
   },
   "engine": {
     "mysql": "MySQL",
@@ -2468,6 +2490,13 @@
     },
     "querier": {
       "description": "Rol de querier del proyecto definido por el sistema"
+    },
+    "select-role": "Seleccionar rol"
+  },
+  "database-group": {
+    "factor": {
+      "resource_database_name": "nombre de la base de datos",
+      "resource_table_name": "nombre de la tabla"
     }
   }
 }

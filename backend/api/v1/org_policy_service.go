@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -13,10 +14,10 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/bytebase/bytebase/backend/common"
+	"github.com/bytebase/bytebase/backend/common/log"
 	enterpriseAPI "github.com/bytebase/bytebase/backend/enterprise/api"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/advisor"
-	advisordb "github.com/bytebase/bytebase/backend/plugin/advisor/db"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/store"
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
@@ -82,7 +83,12 @@ func (s *OrgPolicyService) ListPolicies(ctx context.Context, request *v1pb.ListP
 	for _, policy := range policies {
 		parentPath, err := s.getPolicyParentPath(ctx, policy)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, err.Error())
+			st := status.Convert(err)
+			if st.Code() == codes.NotFound {
+				log.Debug("failed to found resource for policy", zap.Error(err), zap.String("resource_type", string(policy.ResourceType)), zap.Int("resource_id", policy.ResourceUID))
+				continue
+			}
+			return nil, err
 		}
 		p, err := convertToPolicy(parentPath, policy)
 		if err != nil {
@@ -146,12 +152,6 @@ func (s *OrgPolicyService) UpdatePolicy(ctx context.Context, request *v1pb.Updat
 			patch.Payload = &payloadStr
 		case "enforce":
 			patch.Enforce = &request.Policy.Enforce
-		case "state":
-			if request.Policy.State == v1pb.State_DELETED {
-				patch.Delete = &deletePatch
-			} else if request.Policy.State == v1pb.State_ACTIVE {
-				patch.Delete = &undeletePatch
-			}
 		}
 	}
 
@@ -539,7 +539,6 @@ func convertToPolicy(parentPath string, policyMessage *store.PolicyMessage) (*v1
 		Enforce:           policyMessage.Enforce,
 		ResourceType:      resourceType,
 		ResourceUid:       fmt.Sprintf("%d", policyMessage.ResourceUID),
-		State:             convertDeletedToState(policyMessage.Deleted),
 	}
 
 	pType := v1pb.PolicyType_POLICY_TYPE_UNSPECIFIED
@@ -652,7 +651,7 @@ func convertToSQLReviewPolicyPayload(policy *v1pb.SQLReviewPolicy) (*advisor.SQL
 			Payload: rule.Payload,
 			Type:    advisor.SQLReviewRuleType(rule.Type),
 			Comment: rule.Comment,
-			Engine:  advisordb.Type(convertEngine(rule.Engine)),
+			// DONOT assign the engine, we will use FlattenSQLReviewRulesWithEngine to map available engine with the rule.
 		})
 	}
 

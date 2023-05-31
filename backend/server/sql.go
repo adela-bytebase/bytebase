@@ -35,137 +35,6 @@ import (
 )
 
 func (s *Server) registerSQLRoutes(g *echo.Group) {
-	g.POST("/sql/ping", func(c echo.Context) error {
-		ctx := c.Request().Context()
-		connectionInfo := &api.ConnectionInfo{}
-		if err := jsonapi.UnmarshalPayload(c.Request().Body, connectionInfo); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "Malformed sql ping request").SetInternal(err)
-		}
-		if err := s.disallowBytebaseStore(connectionInfo.Engine, connectionInfo.Host, connectionInfo.Port); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error()).SetInternal(err)
-		}
-
-		password := connectionInfo.Password
-		// Instance detail page has a Test Connection button, if user doesn't input new password and doesn't specify
-		// to use empty password, we want the connection to use the existing password to test the connection, however,
-		// we do not transfer the password back to client, thus the client will pass the instanceID to let server
-		// retrieve the password.
-		if password == "" && !connectionInfo.UseEmptyPassword && connectionInfo.InstanceID != nil {
-			instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{UID: connectionInfo.InstanceID})
-			if err != nil {
-				return err
-			}
-			if instance == nil {
-				return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("instance %d not found", *connectionInfo.InstanceID))
-			}
-			for _, ds := range instance.DataSources {
-				if ds.Type == api.Admin {
-					password, err = common.Unobfuscate(ds.ObfuscatedPassword, s.secret)
-					if err != nil {
-						return err
-					}
-					break
-				}
-			}
-		}
-
-		var sshConfig db.SSHConfig
-		if connectionInfo.SSHHost != "" {
-			sshConfig.Host = connectionInfo.SSHHost
-			sshConfig.Port = connectionInfo.SSHPort
-			sshConfig.User = connectionInfo.SSHUser
-			sshConfig.Password = connectionInfo.SSHPassword
-			sshConfig.PrivateKey = connectionInfo.SSHPrivateKey
-		}
-
-		var tlsConfig db.TLSConfig
-		supportTLS := connectionInfo.Engine == db.ClickHouse || connectionInfo.Engine == db.MySQL || connectionInfo.Engine == db.TiDB || connectionInfo.Engine == db.MariaDB || connectionInfo.Engine == db.OceanBase
-		if supportTLS {
-			if connectionInfo.SslCa == nil && connectionInfo.SslCert == nil && connectionInfo.SslKey == nil && connectionInfo.InstanceID != nil {
-				// Frontend will not pass ssl related field if user don't modify ssl suite, we need get ssl suite from database for this case.
-				instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{UID: connectionInfo.InstanceID})
-				if err != nil {
-					return err
-				}
-				if instance == nil {
-					return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("instance %d not found", *connectionInfo.InstanceID))
-				}
-				for _, ds := range instance.DataSources {
-					if ds.ObfuscatedSslCa != "" || ds.ObfuscatedSslCert != "" || ds.ObfuscatedSslKey != "" {
-						sslCa, err := common.Unobfuscate(ds.ObfuscatedSslCa, s.secret)
-						if err != nil {
-							return err
-						}
-						sslKey, err := common.Unobfuscate(ds.ObfuscatedSslKey, s.secret)
-						if err != nil {
-							return err
-						}
-						sslCert, err := common.Unobfuscate(ds.ObfuscatedSslCert, s.secret)
-						if err != nil {
-							return err
-						}
-						tlsConfig = db.TLSConfig{
-							SslCA:   sslCa,
-							SslKey:  sslKey,
-							SslCert: sslCert,
-						}
-						break
-					}
-				}
-			} else if connectionInfo.SslCa != nil && connectionInfo.SslCert != nil && connectionInfo.SslKey != nil {
-				// Users may add instance and click test connection button now, we need get ssl suite from request for this case.
-				tlsConfig = db.TLSConfig{
-					SslCA:   *connectionInfo.SslCa,
-					SslCert: *connectionInfo.SslCert,
-					SslKey:  *connectionInfo.SslKey,
-				}
-			} else {
-				// Unexpected case
-				return echo.NewHTTPError(http.StatusBadRequest, "TLS/SSL suite must all be set or not be set")
-			}
-		}
-
-		db, err := db.Open(
-			ctx,
-			connectionInfo.Engine,
-			db.DriverConfig{},
-			db.ConnectionConfig{
-				Username:               connectionInfo.Username,
-				Password:               password,
-				Host:                   connectionInfo.Host,
-				Port:                   connectionInfo.Port,
-				Database:               connectionInfo.Database,
-				TLSConfig:              tlsConfig,
-				SRV:                    connectionInfo.SRV,
-				AuthenticationDatabase: connectionInfo.AuthenticationDatabase,
-				SID:                    connectionInfo.SID,
-				ServiceName:            connectionInfo.ServiceName,
-				SSHConfig:              sshConfig,
-			},
-			db.ConnectionContext{},
-		)
-
-		resultSet := &api.SQLResultSet{}
-		if err != nil {
-			hostPort := connectionInfo.Host
-			if connectionInfo.Port != "" {
-				hostPort += ":" + connectionInfo.Port
-			}
-			resultSet.Error = errors.Wrapf(err, "failed to connect %q for user %q", hostPort, connectionInfo.Username).Error()
-		} else {
-			defer db.Close(ctx)
-			if err := db.Ping(ctx); err != nil {
-				resultSet.Error = err.Error()
-			}
-		}
-
-		c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
-		if err := jsonapi.MarshalPayload(c.Response().Writer, resultSet); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to marshal sql result set response").SetInternal(err)
-		}
-		return nil
-	})
-
 	g.POST("/sql/sync-schema", func(c echo.Context) error {
 		ctx := c.Request().Context()
 		sync := &api.SQLSyncSchema{}
@@ -219,6 +88,10 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 		ctx := c.Request().Context()
 		principalID := c.Get(getPrincipalIDContextKey()).(int)
 		role := c.Get(getRoleContextKey()).(api.Role)
+		user, err := s.store.GetUserByID(ctx, principalID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Principal not found").SetInternal(err)
+		}
 
 		exec := &api.SQLExecute{}
 		if err := jsonapi.UnmarshalPayload(c.Request().Body, exec); err != nil {
@@ -241,6 +114,25 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 		}
 		if instance == nil {
 			return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("Instance ID not found: %d", exec.InstanceID))
+		}
+
+		switch instance.Engine {
+		case db.Postgres:
+			if _, err := parser.Parse(parser.Postgres, parser.ParseContext{}, exec.Statement); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid sql statement: %v", err))
+			}
+		case db.Oracle:
+			if _, err := parser.ParsePLSQL(exec.Statement); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid sql statement: %v", err))
+			}
+		case db.TiDB:
+			if _, err := parser.ParseTiDB(exec.Statement, "", ""); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid sql statement: %v", err))
+			}
+		case db.MySQL, db.OceanBase:
+			if _, err := parser.ParseMySQL(exec.Statement, "", ""); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid sql statement: %v", err))
+			}
 		}
 
 		if !parser.ValidateSQLForEditor(convertToParserEngine(instance.Engine), exec.Statement) {
@@ -318,6 +210,16 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 				if _, err := s.store.SetProjectIAMPolicy(ctx, newPolicy, api.SystemBotID, project.UID); err != nil {
 					return err
 				}
+				// Post project IAM policy update activity.
+				if _, err := s.ActivityManager.CreateActivity(ctx, &api.ActivityCreate{
+					CreatorID:   api.SystemBotID,
+					ContainerID: project.UID,
+					Type:        api.ActivityProjectMemberCreate,
+					Level:       api.ActivityInfo,
+					Comment:     fmt.Sprintf("Granted %s to %s (%s).", user.Name, user.Email, api.Role(common.ProjectExporter)),
+				}, &activity.Metadata{}); err != nil {
+					log.Warn("Failed to create project activity", zap.Error(err))
+				}
 			}
 		}
 
@@ -332,7 +234,8 @@ func (s *Server) registerSQLRoutes(g *echo.Group) {
 		adviceLevel := advisor.Success
 		adviceList := []advisor.Advice{}
 
-		if api.IsSQLReviewSupported(instance.Engine) && exec.DatabaseName != "" {
+		if api.IsSQLReviewSupported(instance.Engine) && exec.DatabaseName != "" && !isExport {
+			// Skip SQL review for exporting data.
 			dbType, err := advisorDB.ConvertToAdvisorDBType(string(instance.Engine))
 			if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to convert db type %v into advisor db type", instance.Engine))

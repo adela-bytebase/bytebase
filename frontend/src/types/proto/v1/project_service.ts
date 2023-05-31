@@ -246,6 +246,96 @@ export function operatorTypeToJSON(object: OperatorType): string {
   }
 }
 
+export enum DatabaseGroupView {
+  /**
+   * DATABASE_GROUP_VIEW_UNSPECIFIED - The default / unset value.
+   * The API will default to the BASIC view.
+   */
+  DATABASE_GROUP_VIEW_UNSPECIFIED = 0,
+  /** DATABASE_GROUP_VIEW_BASIC - Include basic information about the database group, but exclude the list of matched databases and unmatched databases. */
+  DATABASE_GROUP_VIEW_BASIC = 1,
+  /** DATABASE_GROUP_VIEW_FULL - Include everything. */
+  DATABASE_GROUP_VIEW_FULL = 2,
+  UNRECOGNIZED = -1,
+}
+
+export function databaseGroupViewFromJSON(object: any): DatabaseGroupView {
+  switch (object) {
+    case 0:
+    case "DATABASE_GROUP_VIEW_UNSPECIFIED":
+      return DatabaseGroupView.DATABASE_GROUP_VIEW_UNSPECIFIED;
+    case 1:
+    case "DATABASE_GROUP_VIEW_BASIC":
+      return DatabaseGroupView.DATABASE_GROUP_VIEW_BASIC;
+    case 2:
+    case "DATABASE_GROUP_VIEW_FULL":
+      return DatabaseGroupView.DATABASE_GROUP_VIEW_FULL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return DatabaseGroupView.UNRECOGNIZED;
+  }
+}
+
+export function databaseGroupViewToJSON(object: DatabaseGroupView): string {
+  switch (object) {
+    case DatabaseGroupView.DATABASE_GROUP_VIEW_UNSPECIFIED:
+      return "DATABASE_GROUP_VIEW_UNSPECIFIED";
+    case DatabaseGroupView.DATABASE_GROUP_VIEW_BASIC:
+      return "DATABASE_GROUP_VIEW_BASIC";
+    case DatabaseGroupView.DATABASE_GROUP_VIEW_FULL:
+      return "DATABASE_GROUP_VIEW_FULL";
+    case DatabaseGroupView.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
+export enum SchemaGroupView {
+  /**
+   * SCHEMA_GROUP_VIEW_UNSPECIFIED - The default / unset value.
+   * The API will default to the BASIC view.
+   */
+  SCHEMA_GROUP_VIEW_UNSPECIFIED = 0,
+  /** SCHEMA_GROUP_VIEW_BASIC - Include basic information about the schema group, but exclude the list of matched tables and unmatched tables. */
+  SCHEMA_GROUP_VIEW_BASIC = 1,
+  /** SCHEMA_GROUP_VIEW_FULL - Include everything. */
+  SCHEMA_GROUP_VIEW_FULL = 2,
+  UNRECOGNIZED = -1,
+}
+
+export function schemaGroupViewFromJSON(object: any): SchemaGroupView {
+  switch (object) {
+    case 0:
+    case "SCHEMA_GROUP_VIEW_UNSPECIFIED":
+      return SchemaGroupView.SCHEMA_GROUP_VIEW_UNSPECIFIED;
+    case 1:
+    case "SCHEMA_GROUP_VIEW_BASIC":
+      return SchemaGroupView.SCHEMA_GROUP_VIEW_BASIC;
+    case 2:
+    case "SCHEMA_GROUP_VIEW_FULL":
+      return SchemaGroupView.SCHEMA_GROUP_VIEW_FULL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SchemaGroupView.UNRECOGNIZED;
+  }
+}
+
+export function schemaGroupViewToJSON(object: SchemaGroupView): string {
+  switch (object) {
+    case SchemaGroupView.SCHEMA_GROUP_VIEW_UNSPECIFIED:
+      return "SCHEMA_GROUP_VIEW_UNSPECIFIED";
+    case SchemaGroupView.SCHEMA_GROUP_VIEW_BASIC:
+      return "SCHEMA_GROUP_VIEW_BASIC";
+    case SchemaGroupView.SCHEMA_GROUP_VIEW_FULL:
+      return "SCHEMA_GROUP_VIEW_FULL";
+    case SchemaGroupView.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface GetProjectRequest {
   /**
    * The name of the project to retrieve.
@@ -825,6 +915,236 @@ export function activity_TypeToJSON(object: Activity_Type): string {
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface ListDatabaseGroupsRequest {
+  /**
+   * The parent resource whose database groups are to be listed.
+   * Format: projects/{project}
+   */
+  parent: string;
+  /**
+   * Not used. The maximum number of anomalies to return. The service may return fewer than
+   * this value.
+   * If unspecified, at most 50 anomalies will be returned.
+   * The maximum value is 1000; values above 1000 will be coerced to 1000.
+   */
+  pageSize: number;
+  /**
+   * Not used. A page token, received from a previous `ListDatabaseGroups` call.
+   * Provide this to retrieve the subsequent page.
+   *
+   * When paginating, all other parameters provided to `ListDatabaseGroups` must match
+   * the call that provided the page token.
+   */
+  pageToken: string;
+}
+
+export interface ListDatabaseGroupsResponse {
+  /** database_groups is the list of database groups. */
+  databaseGroups: DatabaseGroup[];
+  /**
+   * Not used. A token, which can be sent as `page_token` to retrieve the next page.
+   * If this field is omitted, there are no subsequent pages.
+   */
+  nextPageToken: string;
+}
+
+export interface GetDatabaseGroupRequest {
+  /**
+   * The name of the database group to retrieve.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}
+   */
+  name: string;
+  /** The view to return. Defaults to DATABASE_GROUP_VIEW_BASIC. */
+  view: DatabaseGroupView;
+}
+
+export interface CreateDatabaseGroupRequest {
+  /**
+   * The parent resource where this database group will be created.
+   * Format: projects/{project}
+   */
+  parent: string;
+  /** The database group to create. */
+  databaseGroup?: DatabaseGroup;
+  /**
+   * The ID to use for the database group, which will become the final component of
+   * the database group's resource name.
+   *
+   * This value should be 4-63 characters, and valid characters
+   * are /[a-z][0-9]-/.
+   */
+  databaseGroupId: string;
+  /** If set, validate the create request and preview the full database group response, but do not actually create it. */
+  validateOnly: boolean;
+}
+
+export interface UpdateDatabaseGroupRequest {
+  /**
+   * The database group to update.
+   *
+   * The database group's `name` field is used to identify the database group to update.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}
+   */
+  databaseGroup?: DatabaseGroup;
+  /** The list of fields to update. */
+  updateMask?: string[];
+}
+
+export interface DeleteDatabaseGroupRequest {
+  /**
+   * The name of the database group to delete.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}
+   */
+  name: string;
+}
+
+export interface DatabaseGroup {
+  /**
+   * The name of the database group.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}
+   */
+  name: string;
+  /**
+   * The short name used in actual databases specified by users.
+   * For example, the placeholder for db1_2010, db1_2021, db1_2023 will be "db1".
+   */
+  databasePlaceholder: string;
+  /** The condition that is associated with this database group. */
+  databaseExpr?: Expr;
+  /** The list of databases that match the database group condition. */
+  matchedDatabases: DatabaseGroup_Database[];
+  /** The list of databases that match the database group condition. */
+  unmatchedDatabases: DatabaseGroup_Database[];
+}
+
+export interface DatabaseGroup_Database {
+  /**
+   * The resource name of the database.
+   * Format: instances/{instance}/databases/{database}
+   */
+  name: string;
+}
+
+export interface CreateSchemaGroupRequest {
+  /**
+   * The parent resource where this schema group will be created.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}
+   */
+  parent: string;
+  /** The schema group to create. */
+  schemaGroup?: SchemaGroup;
+  /**
+   * The ID to use for the schema group, which will become the final component of
+   * the schema group's resource name.
+   *
+   * This value should be 4-63 characters, and valid characters
+   * are /[a-z][0-9]-/.
+   */
+  schemaGroupId: string;
+  /** If set, validate the create request and preview the full schema group response, but do not actually create it. */
+  validateOnly: boolean;
+}
+
+export interface UpdateSchemaGroupRequest {
+  /**
+   * The schema group to update.
+   *
+   * The schema group's `name` field is used to identify the schema group to update.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}/schemaGroups/{schemaGroup}
+   */
+  schemaGroup?: SchemaGroup;
+  /** The list of fields to update. */
+  updateMask?: string[];
+}
+
+export interface DeleteSchemaGroupRequest {
+  /**
+   * The name of the schema group to delete.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}/schemaGroups/{schemaGroup}
+   */
+  name: string;
+}
+
+export interface ListSchemaGroupsRequest {
+  /**
+   * The parent resource whose schema groups are to be listed.
+   * Format: projects/{project}/schemaGroups/{schemaGroup}
+   */
+  parent: string;
+  /**
+   * Not used. The maximum number of anomalies to return. The service may return fewer than
+   * this value.
+   * If unspecified, at most 50 anomalies will be returned.
+   * The maximum value is 1000; values above 1000 will be coerced to 1000.
+   */
+  pageSize: number;
+  /**
+   * Not used. A page token, received from a previous `ListSchemaGroups` call.
+   * Provide this to retrieve the subsequent page.
+   *
+   * When paginating, all other parameters provided to `ListSchemaGroups` must match
+   * the call that provided the page token.
+   */
+  pageToken: string;
+}
+
+export interface ListSchemaGroupsResponse {
+  /** schema_groups is the list of schema groups. */
+  schemaGroups: SchemaGroup[];
+  /**
+   * Not used. A token, which can be sent as `page_token` to retrieve the next page.
+   * If this field is omitted, there are no subsequent pages.
+   */
+  nextPageToken: string;
+}
+
+export interface GetSchemaGroupRequest {
+  /**
+   * The name of the database group to retrieve.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}/schemaGroups/{schemaGroup}
+   */
+  name: string;
+  /** The view to return. Defaults to SCHEMA_GROUP_VIEW_BASIC. */
+  view: SchemaGroupView;
+}
+
+export interface SchemaGroup {
+  /**
+   * The name of the schema group.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}/schemaGroups/{schemaGroup}
+   */
+  name: string;
+  /**
+   * The table condition that is associated with this schema group.
+   * The table_placeholder in the sheet script will be rendered to the actual table name.
+   */
+  tableExpr?: Expr;
+  /**
+   * The table placeholder used for rendering. For example, if set to "tbl", all the table name
+   * "tbl" in the SQL script will be rendered to the actual table name.
+   */
+  tablePlaceholder: string;
+  /** The list of databases that match the database group condition. */
+  matchedTables: SchemaGroup_Table[];
+  /** The list of databases that match the database group condition. */
+  unmatchedTables: SchemaGroup_Table[];
+}
+
+/**
+ * In the future, we can introduce schema_expr if users use schema (Postgres schema) for groups.
+ * Its keyword will be {{SCHEMA}}.
+ * All the expressions will be used to filter the schema objects in DatabaseSchema.
+ */
+export interface SchemaGroup_Table {
+  /**
+   * The resource name of the database.
+   * Format: instances/{instance}/databases/{database}
+   */
+  database: string;
+  schema: string;
+  table: string;
 }
 
 function createBaseGetProjectRequest(): GetProjectRequest {
@@ -3372,6 +3692,1319 @@ export const Activity = {
   },
 };
 
+function createBaseListDatabaseGroupsRequest(): ListDatabaseGroupsRequest {
+  return { parent: "", pageSize: 0, pageToken: "" };
+}
+
+export const ListDatabaseGroupsRequest = {
+  encode(message: ListDatabaseGroupsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.parent !== "") {
+      writer.uint32(10).string(message.parent);
+    }
+    if (message.pageSize !== 0) {
+      writer.uint32(16).int32(message.pageSize);
+    }
+    if (message.pageToken !== "") {
+      writer.uint32(26).string(message.pageToken);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ListDatabaseGroupsRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListDatabaseGroupsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parent = reader.string();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.pageSize = reader.int32();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.pageToken = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListDatabaseGroupsRequest {
+    return {
+      parent: isSet(object.parent) ? String(object.parent) : "",
+      pageSize: isSet(object.pageSize) ? Number(object.pageSize) : 0,
+      pageToken: isSet(object.pageToken) ? String(object.pageToken) : "",
+    };
+  },
+
+  toJSON(message: ListDatabaseGroupsRequest): unknown {
+    const obj: any = {};
+    message.parent !== undefined && (obj.parent = message.parent);
+    message.pageSize !== undefined && (obj.pageSize = Math.round(message.pageSize));
+    message.pageToken !== undefined && (obj.pageToken = message.pageToken);
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListDatabaseGroupsRequest>): ListDatabaseGroupsRequest {
+    return ListDatabaseGroupsRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<ListDatabaseGroupsRequest>): ListDatabaseGroupsRequest {
+    const message = createBaseListDatabaseGroupsRequest();
+    message.parent = object.parent ?? "";
+    message.pageSize = object.pageSize ?? 0;
+    message.pageToken = object.pageToken ?? "";
+    return message;
+  },
+};
+
+function createBaseListDatabaseGroupsResponse(): ListDatabaseGroupsResponse {
+  return { databaseGroups: [], nextPageToken: "" };
+}
+
+export const ListDatabaseGroupsResponse = {
+  encode(message: ListDatabaseGroupsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.databaseGroups) {
+      DatabaseGroup.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.nextPageToken !== "") {
+      writer.uint32(18).string(message.nextPageToken);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ListDatabaseGroupsResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListDatabaseGroupsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.databaseGroups.push(DatabaseGroup.decode(reader, reader.uint32()));
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.nextPageToken = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListDatabaseGroupsResponse {
+    return {
+      databaseGroups: Array.isArray(object?.databaseGroups)
+        ? object.databaseGroups.map((e: any) => DatabaseGroup.fromJSON(e))
+        : [],
+      nextPageToken: isSet(object.nextPageToken) ? String(object.nextPageToken) : "",
+    };
+  },
+
+  toJSON(message: ListDatabaseGroupsResponse): unknown {
+    const obj: any = {};
+    if (message.databaseGroups) {
+      obj.databaseGroups = message.databaseGroups.map((e) => e ? DatabaseGroup.toJSON(e) : undefined);
+    } else {
+      obj.databaseGroups = [];
+    }
+    message.nextPageToken !== undefined && (obj.nextPageToken = message.nextPageToken);
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListDatabaseGroupsResponse>): ListDatabaseGroupsResponse {
+    return ListDatabaseGroupsResponse.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<ListDatabaseGroupsResponse>): ListDatabaseGroupsResponse {
+    const message = createBaseListDatabaseGroupsResponse();
+    message.databaseGroups = object.databaseGroups?.map((e) => DatabaseGroup.fromPartial(e)) || [];
+    message.nextPageToken = object.nextPageToken ?? "";
+    return message;
+  },
+};
+
+function createBaseGetDatabaseGroupRequest(): GetDatabaseGroupRequest {
+  return { name: "", view: 0 };
+}
+
+export const GetDatabaseGroupRequest = {
+  encode(message: GetDatabaseGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.view !== 0) {
+      writer.uint32(16).int32(message.view);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetDatabaseGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetDatabaseGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.view = reader.int32() as any;
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetDatabaseGroupRequest {
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      view: isSet(object.view) ? databaseGroupViewFromJSON(object.view) : 0,
+    };
+  },
+
+  toJSON(message: GetDatabaseGroupRequest): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    message.view !== undefined && (obj.view = databaseGroupViewToJSON(message.view));
+    return obj;
+  },
+
+  create(base?: DeepPartial<GetDatabaseGroupRequest>): GetDatabaseGroupRequest {
+    return GetDatabaseGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<GetDatabaseGroupRequest>): GetDatabaseGroupRequest {
+    const message = createBaseGetDatabaseGroupRequest();
+    message.name = object.name ?? "";
+    message.view = object.view ?? 0;
+    return message;
+  },
+};
+
+function createBaseCreateDatabaseGroupRequest(): CreateDatabaseGroupRequest {
+  return { parent: "", databaseGroup: undefined, databaseGroupId: "", validateOnly: false };
+}
+
+export const CreateDatabaseGroupRequest = {
+  encode(message: CreateDatabaseGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.parent !== "") {
+      writer.uint32(10).string(message.parent);
+    }
+    if (message.databaseGroup !== undefined) {
+      DatabaseGroup.encode(message.databaseGroup, writer.uint32(18).fork()).ldelim();
+    }
+    if (message.databaseGroupId !== "") {
+      writer.uint32(26).string(message.databaseGroupId);
+    }
+    if (message.validateOnly === true) {
+      writer.uint32(32).bool(message.validateOnly);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): CreateDatabaseGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateDatabaseGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parent = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.databaseGroup = DatabaseGroup.decode(reader, reader.uint32());
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.databaseGroupId = reader.string();
+          continue;
+        case 4:
+          if (tag !== 32) {
+            break;
+          }
+
+          message.validateOnly = reader.bool();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateDatabaseGroupRequest {
+    return {
+      parent: isSet(object.parent) ? String(object.parent) : "",
+      databaseGroup: isSet(object.databaseGroup) ? DatabaseGroup.fromJSON(object.databaseGroup) : undefined,
+      databaseGroupId: isSet(object.databaseGroupId) ? String(object.databaseGroupId) : "",
+      validateOnly: isSet(object.validateOnly) ? Boolean(object.validateOnly) : false,
+    };
+  },
+
+  toJSON(message: CreateDatabaseGroupRequest): unknown {
+    const obj: any = {};
+    message.parent !== undefined && (obj.parent = message.parent);
+    message.databaseGroup !== undefined &&
+      (obj.databaseGroup = message.databaseGroup ? DatabaseGroup.toJSON(message.databaseGroup) : undefined);
+    message.databaseGroupId !== undefined && (obj.databaseGroupId = message.databaseGroupId);
+    message.validateOnly !== undefined && (obj.validateOnly = message.validateOnly);
+    return obj;
+  },
+
+  create(base?: DeepPartial<CreateDatabaseGroupRequest>): CreateDatabaseGroupRequest {
+    return CreateDatabaseGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<CreateDatabaseGroupRequest>): CreateDatabaseGroupRequest {
+    const message = createBaseCreateDatabaseGroupRequest();
+    message.parent = object.parent ?? "";
+    message.databaseGroup = (object.databaseGroup !== undefined && object.databaseGroup !== null)
+      ? DatabaseGroup.fromPartial(object.databaseGroup)
+      : undefined;
+    message.databaseGroupId = object.databaseGroupId ?? "";
+    message.validateOnly = object.validateOnly ?? false;
+    return message;
+  },
+};
+
+function createBaseUpdateDatabaseGroupRequest(): UpdateDatabaseGroupRequest {
+  return { databaseGroup: undefined, updateMask: undefined };
+}
+
+export const UpdateDatabaseGroupRequest = {
+  encode(message: UpdateDatabaseGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.databaseGroup !== undefined) {
+      DatabaseGroup.encode(message.databaseGroup, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.updateMask !== undefined) {
+      FieldMask.encode(FieldMask.wrap(message.updateMask), writer.uint32(18).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateDatabaseGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUpdateDatabaseGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.databaseGroup = DatabaseGroup.decode(reader, reader.uint32());
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.updateMask = FieldMask.unwrap(FieldMask.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UpdateDatabaseGroupRequest {
+    return {
+      databaseGroup: isSet(object.databaseGroup) ? DatabaseGroup.fromJSON(object.databaseGroup) : undefined,
+      updateMask: isSet(object.updateMask) ? FieldMask.unwrap(FieldMask.fromJSON(object.updateMask)) : undefined,
+    };
+  },
+
+  toJSON(message: UpdateDatabaseGroupRequest): unknown {
+    const obj: any = {};
+    message.databaseGroup !== undefined &&
+      (obj.databaseGroup = message.databaseGroup ? DatabaseGroup.toJSON(message.databaseGroup) : undefined);
+    message.updateMask !== undefined && (obj.updateMask = FieldMask.toJSON(FieldMask.wrap(message.updateMask)));
+    return obj;
+  },
+
+  create(base?: DeepPartial<UpdateDatabaseGroupRequest>): UpdateDatabaseGroupRequest {
+    return UpdateDatabaseGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<UpdateDatabaseGroupRequest>): UpdateDatabaseGroupRequest {
+    const message = createBaseUpdateDatabaseGroupRequest();
+    message.databaseGroup = (object.databaseGroup !== undefined && object.databaseGroup !== null)
+      ? DatabaseGroup.fromPartial(object.databaseGroup)
+      : undefined;
+    message.updateMask = object.updateMask ?? undefined;
+    return message;
+  },
+};
+
+function createBaseDeleteDatabaseGroupRequest(): DeleteDatabaseGroupRequest {
+  return { name: "" };
+}
+
+export const DeleteDatabaseGroupRequest = {
+  encode(message: DeleteDatabaseGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): DeleteDatabaseGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDeleteDatabaseGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DeleteDatabaseGroupRequest {
+    return { name: isSet(object.name) ? String(object.name) : "" };
+  },
+
+  toJSON(message: DeleteDatabaseGroupRequest): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  create(base?: DeepPartial<DeleteDatabaseGroupRequest>): DeleteDatabaseGroupRequest {
+    return DeleteDatabaseGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<DeleteDatabaseGroupRequest>): DeleteDatabaseGroupRequest {
+    const message = createBaseDeleteDatabaseGroupRequest();
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseDatabaseGroup(): DatabaseGroup {
+  return { name: "", databasePlaceholder: "", databaseExpr: undefined, matchedDatabases: [], unmatchedDatabases: [] };
+}
+
+export const DatabaseGroup = {
+  encode(message: DatabaseGroup, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.databasePlaceholder !== "") {
+      writer.uint32(18).string(message.databasePlaceholder);
+    }
+    if (message.databaseExpr !== undefined) {
+      Expr.encode(message.databaseExpr, writer.uint32(26).fork()).ldelim();
+    }
+    for (const v of message.matchedDatabases) {
+      DatabaseGroup_Database.encode(v!, writer.uint32(34).fork()).ldelim();
+    }
+    for (const v of message.unmatchedDatabases) {
+      DatabaseGroup_Database.encode(v!, writer.uint32(42).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): DatabaseGroup {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDatabaseGroup();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.databasePlaceholder = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.databaseExpr = Expr.decode(reader, reader.uint32());
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.matchedDatabases.push(DatabaseGroup_Database.decode(reader, reader.uint32()));
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.unmatchedDatabases.push(DatabaseGroup_Database.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DatabaseGroup {
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      databasePlaceholder: isSet(object.databasePlaceholder) ? String(object.databasePlaceholder) : "",
+      databaseExpr: isSet(object.databaseExpr) ? Expr.fromJSON(object.databaseExpr) : undefined,
+      matchedDatabases: Array.isArray(object?.matchedDatabases)
+        ? object.matchedDatabases.map((e: any) => DatabaseGroup_Database.fromJSON(e))
+        : [],
+      unmatchedDatabases: Array.isArray(object?.unmatchedDatabases)
+        ? object.unmatchedDatabases.map((e: any) => DatabaseGroup_Database.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: DatabaseGroup): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    message.databasePlaceholder !== undefined && (obj.databasePlaceholder = message.databasePlaceholder);
+    message.databaseExpr !== undefined &&
+      (obj.databaseExpr = message.databaseExpr ? Expr.toJSON(message.databaseExpr) : undefined);
+    if (message.matchedDatabases) {
+      obj.matchedDatabases = message.matchedDatabases.map((e) => e ? DatabaseGroup_Database.toJSON(e) : undefined);
+    } else {
+      obj.matchedDatabases = [];
+    }
+    if (message.unmatchedDatabases) {
+      obj.unmatchedDatabases = message.unmatchedDatabases.map((e) => e ? DatabaseGroup_Database.toJSON(e) : undefined);
+    } else {
+      obj.unmatchedDatabases = [];
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<DatabaseGroup>): DatabaseGroup {
+    return DatabaseGroup.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<DatabaseGroup>): DatabaseGroup {
+    const message = createBaseDatabaseGroup();
+    message.name = object.name ?? "";
+    message.databasePlaceholder = object.databasePlaceholder ?? "";
+    message.databaseExpr = (object.databaseExpr !== undefined && object.databaseExpr !== null)
+      ? Expr.fromPartial(object.databaseExpr)
+      : undefined;
+    message.matchedDatabases = object.matchedDatabases?.map((e) => DatabaseGroup_Database.fromPartial(e)) || [];
+    message.unmatchedDatabases = object.unmatchedDatabases?.map((e) => DatabaseGroup_Database.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseDatabaseGroup_Database(): DatabaseGroup_Database {
+  return { name: "" };
+}
+
+export const DatabaseGroup_Database = {
+  encode(message: DatabaseGroup_Database, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): DatabaseGroup_Database {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDatabaseGroup_Database();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DatabaseGroup_Database {
+    return { name: isSet(object.name) ? String(object.name) : "" };
+  },
+
+  toJSON(message: DatabaseGroup_Database): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  create(base?: DeepPartial<DatabaseGroup_Database>): DatabaseGroup_Database {
+    return DatabaseGroup_Database.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<DatabaseGroup_Database>): DatabaseGroup_Database {
+    const message = createBaseDatabaseGroup_Database();
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseCreateSchemaGroupRequest(): CreateSchemaGroupRequest {
+  return { parent: "", schemaGroup: undefined, schemaGroupId: "", validateOnly: false };
+}
+
+export const CreateSchemaGroupRequest = {
+  encode(message: CreateSchemaGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.parent !== "") {
+      writer.uint32(10).string(message.parent);
+    }
+    if (message.schemaGroup !== undefined) {
+      SchemaGroup.encode(message.schemaGroup, writer.uint32(18).fork()).ldelim();
+    }
+    if (message.schemaGroupId !== "") {
+      writer.uint32(26).string(message.schemaGroupId);
+    }
+    if (message.validateOnly === true) {
+      writer.uint32(32).bool(message.validateOnly);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): CreateSchemaGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateSchemaGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parent = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.schemaGroup = SchemaGroup.decode(reader, reader.uint32());
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.schemaGroupId = reader.string();
+          continue;
+        case 4:
+          if (tag !== 32) {
+            break;
+          }
+
+          message.validateOnly = reader.bool();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateSchemaGroupRequest {
+    return {
+      parent: isSet(object.parent) ? String(object.parent) : "",
+      schemaGroup: isSet(object.schemaGroup) ? SchemaGroup.fromJSON(object.schemaGroup) : undefined,
+      schemaGroupId: isSet(object.schemaGroupId) ? String(object.schemaGroupId) : "",
+      validateOnly: isSet(object.validateOnly) ? Boolean(object.validateOnly) : false,
+    };
+  },
+
+  toJSON(message: CreateSchemaGroupRequest): unknown {
+    const obj: any = {};
+    message.parent !== undefined && (obj.parent = message.parent);
+    message.schemaGroup !== undefined &&
+      (obj.schemaGroup = message.schemaGroup ? SchemaGroup.toJSON(message.schemaGroup) : undefined);
+    message.schemaGroupId !== undefined && (obj.schemaGroupId = message.schemaGroupId);
+    message.validateOnly !== undefined && (obj.validateOnly = message.validateOnly);
+    return obj;
+  },
+
+  create(base?: DeepPartial<CreateSchemaGroupRequest>): CreateSchemaGroupRequest {
+    return CreateSchemaGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<CreateSchemaGroupRequest>): CreateSchemaGroupRequest {
+    const message = createBaseCreateSchemaGroupRequest();
+    message.parent = object.parent ?? "";
+    message.schemaGroup = (object.schemaGroup !== undefined && object.schemaGroup !== null)
+      ? SchemaGroup.fromPartial(object.schemaGroup)
+      : undefined;
+    message.schemaGroupId = object.schemaGroupId ?? "";
+    message.validateOnly = object.validateOnly ?? false;
+    return message;
+  },
+};
+
+function createBaseUpdateSchemaGroupRequest(): UpdateSchemaGroupRequest {
+  return { schemaGroup: undefined, updateMask: undefined };
+}
+
+export const UpdateSchemaGroupRequest = {
+  encode(message: UpdateSchemaGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.schemaGroup !== undefined) {
+      SchemaGroup.encode(message.schemaGroup, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.updateMask !== undefined) {
+      FieldMask.encode(FieldMask.wrap(message.updateMask), writer.uint32(18).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateSchemaGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUpdateSchemaGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.schemaGroup = SchemaGroup.decode(reader, reader.uint32());
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.updateMask = FieldMask.unwrap(FieldMask.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UpdateSchemaGroupRequest {
+    return {
+      schemaGroup: isSet(object.schemaGroup) ? SchemaGroup.fromJSON(object.schemaGroup) : undefined,
+      updateMask: isSet(object.updateMask) ? FieldMask.unwrap(FieldMask.fromJSON(object.updateMask)) : undefined,
+    };
+  },
+
+  toJSON(message: UpdateSchemaGroupRequest): unknown {
+    const obj: any = {};
+    message.schemaGroup !== undefined &&
+      (obj.schemaGroup = message.schemaGroup ? SchemaGroup.toJSON(message.schemaGroup) : undefined);
+    message.updateMask !== undefined && (obj.updateMask = FieldMask.toJSON(FieldMask.wrap(message.updateMask)));
+    return obj;
+  },
+
+  create(base?: DeepPartial<UpdateSchemaGroupRequest>): UpdateSchemaGroupRequest {
+    return UpdateSchemaGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<UpdateSchemaGroupRequest>): UpdateSchemaGroupRequest {
+    const message = createBaseUpdateSchemaGroupRequest();
+    message.schemaGroup = (object.schemaGroup !== undefined && object.schemaGroup !== null)
+      ? SchemaGroup.fromPartial(object.schemaGroup)
+      : undefined;
+    message.updateMask = object.updateMask ?? undefined;
+    return message;
+  },
+};
+
+function createBaseDeleteSchemaGroupRequest(): DeleteSchemaGroupRequest {
+  return { name: "" };
+}
+
+export const DeleteSchemaGroupRequest = {
+  encode(message: DeleteSchemaGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): DeleteSchemaGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDeleteSchemaGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DeleteSchemaGroupRequest {
+    return { name: isSet(object.name) ? String(object.name) : "" };
+  },
+
+  toJSON(message: DeleteSchemaGroupRequest): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  create(base?: DeepPartial<DeleteSchemaGroupRequest>): DeleteSchemaGroupRequest {
+    return DeleteSchemaGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<DeleteSchemaGroupRequest>): DeleteSchemaGroupRequest {
+    const message = createBaseDeleteSchemaGroupRequest();
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseListSchemaGroupsRequest(): ListSchemaGroupsRequest {
+  return { parent: "", pageSize: 0, pageToken: "" };
+}
+
+export const ListSchemaGroupsRequest = {
+  encode(message: ListSchemaGroupsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.parent !== "") {
+      writer.uint32(10).string(message.parent);
+    }
+    if (message.pageSize !== 0) {
+      writer.uint32(16).int32(message.pageSize);
+    }
+    if (message.pageToken !== "") {
+      writer.uint32(26).string(message.pageToken);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ListSchemaGroupsRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListSchemaGroupsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parent = reader.string();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.pageSize = reader.int32();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.pageToken = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListSchemaGroupsRequest {
+    return {
+      parent: isSet(object.parent) ? String(object.parent) : "",
+      pageSize: isSet(object.pageSize) ? Number(object.pageSize) : 0,
+      pageToken: isSet(object.pageToken) ? String(object.pageToken) : "",
+    };
+  },
+
+  toJSON(message: ListSchemaGroupsRequest): unknown {
+    const obj: any = {};
+    message.parent !== undefined && (obj.parent = message.parent);
+    message.pageSize !== undefined && (obj.pageSize = Math.round(message.pageSize));
+    message.pageToken !== undefined && (obj.pageToken = message.pageToken);
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListSchemaGroupsRequest>): ListSchemaGroupsRequest {
+    return ListSchemaGroupsRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<ListSchemaGroupsRequest>): ListSchemaGroupsRequest {
+    const message = createBaseListSchemaGroupsRequest();
+    message.parent = object.parent ?? "";
+    message.pageSize = object.pageSize ?? 0;
+    message.pageToken = object.pageToken ?? "";
+    return message;
+  },
+};
+
+function createBaseListSchemaGroupsResponse(): ListSchemaGroupsResponse {
+  return { schemaGroups: [], nextPageToken: "" };
+}
+
+export const ListSchemaGroupsResponse = {
+  encode(message: ListSchemaGroupsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.schemaGroups) {
+      SchemaGroup.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.nextPageToken !== "") {
+      writer.uint32(18).string(message.nextPageToken);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ListSchemaGroupsResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListSchemaGroupsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.schemaGroups.push(SchemaGroup.decode(reader, reader.uint32()));
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.nextPageToken = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListSchemaGroupsResponse {
+    return {
+      schemaGroups: Array.isArray(object?.schemaGroups)
+        ? object.schemaGroups.map((e: any) => SchemaGroup.fromJSON(e))
+        : [],
+      nextPageToken: isSet(object.nextPageToken) ? String(object.nextPageToken) : "",
+    };
+  },
+
+  toJSON(message: ListSchemaGroupsResponse): unknown {
+    const obj: any = {};
+    if (message.schemaGroups) {
+      obj.schemaGroups = message.schemaGroups.map((e) => e ? SchemaGroup.toJSON(e) : undefined);
+    } else {
+      obj.schemaGroups = [];
+    }
+    message.nextPageToken !== undefined && (obj.nextPageToken = message.nextPageToken);
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListSchemaGroupsResponse>): ListSchemaGroupsResponse {
+    return ListSchemaGroupsResponse.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<ListSchemaGroupsResponse>): ListSchemaGroupsResponse {
+    const message = createBaseListSchemaGroupsResponse();
+    message.schemaGroups = object.schemaGroups?.map((e) => SchemaGroup.fromPartial(e)) || [];
+    message.nextPageToken = object.nextPageToken ?? "";
+    return message;
+  },
+};
+
+function createBaseGetSchemaGroupRequest(): GetSchemaGroupRequest {
+  return { name: "", view: 0 };
+}
+
+export const GetSchemaGroupRequest = {
+  encode(message: GetSchemaGroupRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.view !== 0) {
+      writer.uint32(16).int32(message.view);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetSchemaGroupRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetSchemaGroupRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.view = reader.int32() as any;
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetSchemaGroupRequest {
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      view: isSet(object.view) ? schemaGroupViewFromJSON(object.view) : 0,
+    };
+  },
+
+  toJSON(message: GetSchemaGroupRequest): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    message.view !== undefined && (obj.view = schemaGroupViewToJSON(message.view));
+    return obj;
+  },
+
+  create(base?: DeepPartial<GetSchemaGroupRequest>): GetSchemaGroupRequest {
+    return GetSchemaGroupRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<GetSchemaGroupRequest>): GetSchemaGroupRequest {
+    const message = createBaseGetSchemaGroupRequest();
+    message.name = object.name ?? "";
+    message.view = object.view ?? 0;
+    return message;
+  },
+};
+
+function createBaseSchemaGroup(): SchemaGroup {
+  return { name: "", tableExpr: undefined, tablePlaceholder: "", matchedTables: [], unmatchedTables: [] };
+}
+
+export const SchemaGroup = {
+  encode(message: SchemaGroup, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.tableExpr !== undefined) {
+      Expr.encode(message.tableExpr, writer.uint32(18).fork()).ldelim();
+    }
+    if (message.tablePlaceholder !== "") {
+      writer.uint32(26).string(message.tablePlaceholder);
+    }
+    for (const v of message.matchedTables) {
+      SchemaGroup_Table.encode(v!, writer.uint32(34).fork()).ldelim();
+    }
+    for (const v of message.unmatchedTables) {
+      SchemaGroup_Table.encode(v!, writer.uint32(42).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): SchemaGroup {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSchemaGroup();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.tableExpr = Expr.decode(reader, reader.uint32());
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.tablePlaceholder = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.matchedTables.push(SchemaGroup_Table.decode(reader, reader.uint32()));
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.unmatchedTables.push(SchemaGroup_Table.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SchemaGroup {
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      tableExpr: isSet(object.tableExpr) ? Expr.fromJSON(object.tableExpr) : undefined,
+      tablePlaceholder: isSet(object.tablePlaceholder) ? String(object.tablePlaceholder) : "",
+      matchedTables: Array.isArray(object?.matchedTables)
+        ? object.matchedTables.map((e: any) => SchemaGroup_Table.fromJSON(e))
+        : [],
+      unmatchedTables: Array.isArray(object?.unmatchedTables)
+        ? object.unmatchedTables.map((e: any) => SchemaGroup_Table.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: SchemaGroup): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    message.tableExpr !== undefined && (obj.tableExpr = message.tableExpr ? Expr.toJSON(message.tableExpr) : undefined);
+    message.tablePlaceholder !== undefined && (obj.tablePlaceholder = message.tablePlaceholder);
+    if (message.matchedTables) {
+      obj.matchedTables = message.matchedTables.map((e) => e ? SchemaGroup_Table.toJSON(e) : undefined);
+    } else {
+      obj.matchedTables = [];
+    }
+    if (message.unmatchedTables) {
+      obj.unmatchedTables = message.unmatchedTables.map((e) => e ? SchemaGroup_Table.toJSON(e) : undefined);
+    } else {
+      obj.unmatchedTables = [];
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<SchemaGroup>): SchemaGroup {
+    return SchemaGroup.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<SchemaGroup>): SchemaGroup {
+    const message = createBaseSchemaGroup();
+    message.name = object.name ?? "";
+    message.tableExpr = (object.tableExpr !== undefined && object.tableExpr !== null)
+      ? Expr.fromPartial(object.tableExpr)
+      : undefined;
+    message.tablePlaceholder = object.tablePlaceholder ?? "";
+    message.matchedTables = object.matchedTables?.map((e) => SchemaGroup_Table.fromPartial(e)) || [];
+    message.unmatchedTables = object.unmatchedTables?.map((e) => SchemaGroup_Table.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSchemaGroup_Table(): SchemaGroup_Table {
+  return { database: "", schema: "", table: "" };
+}
+
+export const SchemaGroup_Table = {
+  encode(message: SchemaGroup_Table, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.database !== "") {
+      writer.uint32(10).string(message.database);
+    }
+    if (message.schema !== "") {
+      writer.uint32(18).string(message.schema);
+    }
+    if (message.table !== "") {
+      writer.uint32(26).string(message.table);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): SchemaGroup_Table {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSchemaGroup_Table();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.database = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.schema = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.table = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SchemaGroup_Table {
+    return {
+      database: isSet(object.database) ? String(object.database) : "",
+      schema: isSet(object.schema) ? String(object.schema) : "",
+      table: isSet(object.table) ? String(object.table) : "",
+    };
+  },
+
+  toJSON(message: SchemaGroup_Table): unknown {
+    const obj: any = {};
+    message.database !== undefined && (obj.database = message.database);
+    message.schema !== undefined && (obj.schema = message.schema);
+    message.table !== undefined && (obj.table = message.table);
+    return obj;
+  },
+
+  create(base?: DeepPartial<SchemaGroup_Table>): SchemaGroup_Table {
+    return SchemaGroup_Table.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<SchemaGroup_Table>): SchemaGroup_Table {
+    const message = createBaseSchemaGroup_Table();
+    message.database = object.database ?? "";
+    message.schema = object.schema ?? "";
+    message.table = object.table ?? "";
+    return message;
+  },
+};
+
 export type ProjectServiceDefinition = typeof ProjectServiceDefinition;
 export const ProjectServiceDefinition = {
   name: "ProjectService",
@@ -4370,6 +6003,845 @@ export const ProjectServiceDefinition = {
         },
       },
     },
+    listDatabaseGroups: {
+      name: "ListDatabaseGroups",
+      requestType: ListDatabaseGroupsRequest,
+      requestStream: false,
+      responseType: ListDatabaseGroupsResponse,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([6, 112, 97, 114, 101, 110, 116])],
+          578365826: [
+            new Uint8Array([
+              40,
+              18,
+              38,
+              47,
+              118,
+              49,
+              47,
+              123,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              125,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+            ]),
+          ],
+        },
+      },
+    },
+    getDatabaseGroup: {
+      name: "GetDatabaseGroup",
+      requestType: GetDatabaseGroupRequest,
+      requestStream: false,
+      responseType: DatabaseGroup,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([4, 110, 97, 109, 101])],
+          578365826: [
+            new Uint8Array([
+              40,
+              18,
+              38,
+              47,
+              118,
+              49,
+              47,
+              123,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+            ]),
+          ],
+        },
+      },
+    },
+    createDatabaseGroup: {
+      name: "CreateDatabaseGroup",
+      requestType: CreateDatabaseGroupRequest,
+      requestStream: false,
+      responseType: DatabaseGroup,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [
+            new Uint8Array([
+              20,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              44,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+            ]),
+          ],
+          578365826: [
+            new Uint8Array([
+              56,
+              58,
+              14,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              34,
+              38,
+              47,
+              118,
+              49,
+              47,
+              123,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              125,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+            ]),
+          ],
+        },
+      },
+    },
+    updateDatabaseGroup: {
+      name: "UpdateDatabaseGroup",
+      requestType: UpdateDatabaseGroupRequest,
+      requestStream: false,
+      responseType: DatabaseGroup,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [
+            new Uint8Array([
+              26,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              44,
+              117,
+              112,
+              100,
+              97,
+              116,
+              101,
+              95,
+              109,
+              97,
+              115,
+              107,
+            ]),
+          ],
+          578365826: [
+            new Uint8Array([
+              71,
+              58,
+              14,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              50,
+              53,
+              47,
+              118,
+              49,
+              47,
+              123,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              46,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+            ]),
+          ],
+        },
+      },
+    },
+    deleteDatabaseGroup: {
+      name: "DeleteDatabaseGroup",
+      requestType: DeleteDatabaseGroupRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([4, 110, 97, 109, 101])],
+          578365826: [
+            new Uint8Array([
+              40,
+              42,
+              38,
+              47,
+              118,
+              49,
+              47,
+              123,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+            ]),
+          ],
+        },
+      },
+    },
+    listSchemaGroups: {
+      name: "ListSchemaGroups",
+      requestType: ListSchemaGroupsRequest,
+      requestStream: false,
+      responseType: ListSchemaGroupsResponse,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([6, 112, 97, 114, 101, 110, 116])],
+          578365826: [
+            new Uint8Array([
+              55,
+              18,
+              53,
+              47,
+              118,
+              49,
+              47,
+              123,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+              47,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+            ]),
+          ],
+        },
+      },
+    },
+    getSchemaGroup: {
+      name: "GetSchemaGroup",
+      requestType: GetSchemaGroupRequest,
+      requestStream: false,
+      responseType: SchemaGroup,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([4, 110, 97, 109, 101])],
+          578365826: [
+            new Uint8Array([
+              55,
+              18,
+              53,
+              47,
+              118,
+              49,
+              47,
+              123,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              47,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+            ]),
+          ],
+        },
+      },
+    },
+    createSchemaGroup: {
+      name: "CreateSchemaGroup",
+      requestType: CreateSchemaGroupRequest,
+      requestStream: false,
+      responseType: SchemaGroup,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [
+            new Uint8Array([
+              20,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              44,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+            ]),
+          ],
+          578365826: [
+            new Uint8Array([
+              69,
+              58,
+              12,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              34,
+              53,
+              47,
+              118,
+              49,
+              47,
+              123,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+              47,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+            ]),
+          ],
+        },
+      },
+    },
+    updateSchemaGroup: {
+      name: "UpdateSchemaGroup",
+      requestType: UpdateSchemaGroupRequest,
+      requestStream: false,
+      responseType: SchemaGroup,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [
+            new Uint8Array([
+              24,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              44,
+              117,
+              112,
+              100,
+              97,
+              116,
+              101,
+              95,
+              109,
+              97,
+              115,
+              107,
+            ]),
+          ],
+          578365826: [
+            new Uint8Array([
+              82,
+              58,
+              12,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              50,
+              66,
+              47,
+              118,
+              49,
+              47,
+              123,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              95,
+              103,
+              114,
+              111,
+              117,
+              112,
+              46,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              47,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+            ]),
+          ],
+        },
+      },
+    },
+    deleteSchemaGroup: {
+      name: "DeleteSchemaGroup",
+      requestType: DeleteSchemaGroupRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([4, 110, 97, 109, 101])],
+          578365826: [
+            new Uint8Array([
+              55,
+              42,
+              53,
+              47,
+              118,
+              49,
+              47,
+              123,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              100,
+              97,
+              116,
+              97,
+              98,
+              97,
+              115,
+              101,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              47,
+              115,
+              99,
+              104,
+              101,
+              109,
+              97,
+              71,
+              114,
+              111,
+              117,
+              112,
+              115,
+              47,
+              42,
+              125,
+            ]),
+          ],
+        },
+      },
+    },
   },
 } as const;
 
@@ -4420,6 +6892,46 @@ export interface ProjectServiceImplementation<CallContextExt = {}> {
     request: SetProjectGitOpsInfoRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ProjectGitOpsInfo>>;
+  listDatabaseGroups(
+    request: ListDatabaseGroupsRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<ListDatabaseGroupsResponse>>;
+  getDatabaseGroup(
+    request: GetDatabaseGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<DatabaseGroup>>;
+  createDatabaseGroup(
+    request: CreateDatabaseGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<DatabaseGroup>>;
+  updateDatabaseGroup(
+    request: UpdateDatabaseGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<DatabaseGroup>>;
+  deleteDatabaseGroup(
+    request: DeleteDatabaseGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<Empty>>;
+  listSchemaGroups(
+    request: ListSchemaGroupsRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<ListSchemaGroupsResponse>>;
+  getSchemaGroup(
+    request: GetSchemaGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<SchemaGroup>>;
+  createSchemaGroup(
+    request: CreateSchemaGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<SchemaGroup>>;
+  updateSchemaGroup(
+    request: UpdateSchemaGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<SchemaGroup>>;
+  deleteSchemaGroup(
+    request: DeleteSchemaGroupRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<Empty>>;
 }
 
 export interface ProjectServiceClient<CallOptionsExt = {}> {
@@ -4469,6 +6981,46 @@ export interface ProjectServiceClient<CallOptionsExt = {}> {
     request: DeepPartial<SetProjectGitOpsInfoRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<ProjectGitOpsInfo>;
+  listDatabaseGroups(
+    request: DeepPartial<ListDatabaseGroupsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<ListDatabaseGroupsResponse>;
+  getDatabaseGroup(
+    request: DeepPartial<GetDatabaseGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<DatabaseGroup>;
+  createDatabaseGroup(
+    request: DeepPartial<CreateDatabaseGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<DatabaseGroup>;
+  updateDatabaseGroup(
+    request: DeepPartial<UpdateDatabaseGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<DatabaseGroup>;
+  deleteDatabaseGroup(
+    request: DeepPartial<DeleteDatabaseGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<Empty>;
+  listSchemaGroups(
+    request: DeepPartial<ListSchemaGroupsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<ListSchemaGroupsResponse>;
+  getSchemaGroup(
+    request: DeepPartial<GetSchemaGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<SchemaGroup>;
+  createSchemaGroup(
+    request: DeepPartial<CreateSchemaGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<SchemaGroup>;
+  updateSchemaGroup(
+    request: DeepPartial<UpdateSchemaGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<SchemaGroup>;
+  deleteSchemaGroup(
+    request: DeepPartial<DeleteSchemaGroupRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<Empty>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

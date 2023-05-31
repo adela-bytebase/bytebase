@@ -53,8 +53,9 @@ import { useRouter } from "vue-router";
 import { databaseServiceClient } from "@/grpcweb";
 import { getErrorCode } from "@/utils/grpcweb";
 import { Status } from "nice-grpc-common";
-import { featureToRef, hasFeature, useSettingStore } from "@/store";
+import { featureToRef, hasFeature } from "@/store";
 import FeatureBadge from "@/components/FeatureBadge.vue";
+import { useSettingV1Store } from "@/store/modules/v1/setting";
 
 const props = defineProps<{
   slowQueryLog: ComposedSlowQueryLog;
@@ -76,14 +77,14 @@ const state = reactive<LocalState>({
   createIndexStatement: "",
   showFeatureModal: false,
 });
-const settingStore = useSettingStore();
+const settingV1Store = useSettingV1Store();
 const hasIndexAdvisorFeature = featureToRef("bb.feature.index-advisor");
 const hasOpenAIKeySetup = computed(() => {
-  const openAIKeySetting = settingStore.getSettingByName(
+  const openAIKeySetting = settingV1Store.getSettingByName(
     "bb.plugin.openai.key"
   );
   if (openAIKeySetting) {
-    return openAIKeySetting.value !== "";
+    return openAIKeySetting.value?.stringValue !== "";
   }
   return false;
 });
@@ -99,11 +100,11 @@ const showIndexAdvisor = computed(() => {
 const handleCreateIndex = () => {
   const query: Record<string, any> = {
     template: "bb.issue.database.schema.update",
-    project: database.value.projectId,
+    project: database.value.projectEntity.uid,
     mode: "normal",
     ghost: undefined,
   };
-  query.databaseList = database.value.id;
+  query.databaseList = database.value.uid;
   query.sql = state.createIndexStatement;
   query.name = generateIssueName();
 
@@ -119,7 +120,7 @@ const handleCreateIndex = () => {
 
 const generateIssueName = () => {
   const issueNameParts: string[] = [];
-  issueNameParts.push(`[${database.value.name}]`);
+  issueNameParts.push(`[${database.value.databaseName}]`);
   issueNameParts.push(`Create index`);
   const datetime = dayjs().format("@MM-DD HH:mm");
   const tz = "UTC" + dayjs().format("ZZ");

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,7 +21,7 @@ import (
 	"github.com/casbin/casbin/v2/model"
 	"github.com/google/uuid"
 	"github.com/gosimple/slug"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	grpcRuntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/labstack/echo-contrib/pprof"
 	"github.com/labstack/echo-contrib/prometheus"
@@ -38,6 +39,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
+
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 
 	"github.com/bytebase/bytebase/backend/api/auth"
 	v1 "github.com/bytebase/bytebase/backend/api/v1"
@@ -107,6 +110,10 @@ import (
 	_ "github.com/bytebase/bytebase/backend/plugin/advisor/mysql"
 	// Register postgresql advisor.
 	_ "github.com/bytebase/bytebase/backend/plugin/advisor/pg"
+	// Register oracle advisor.
+	_ "github.com/bytebase/bytebase/backend/plugin/advisor/oracle"
+	// Register clickhouse driver.
+	_ "github.com/bytebase/bytebase/backend/plugin/db/clickhouse"
 
 	// Register mysql differ driver.
 	_ "github.com/bytebase/bytebase/backend/plugin/parser/sql/differ/mysql"
@@ -129,6 +136,7 @@ const (
 	webhookAPIPrefix = "/hook"
 	// openAPIPrefix is the API prefix for Bytebase OpenAPI.
 	openAPIPrefix = "/v1"
+	maxStacksize  = 8 * 1024
 )
 
 // Server is the Bytebase server.
@@ -262,14 +270,16 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 
 	// Start a Postgres sample server. This is used for onboarding users without requiring them to
 	// configure an external instance.
-	log.Info("-----Sample Postgres Instance BEGIN-----")
-	sampleDataDir := common.GetPostgresSampleDataDir(profile.DataDir)
-	log.Info(fmt.Sprintf("sampleDatabasePort=%d", profile.SampleDatabasePort))
-	log.Info(fmt.Sprintf("sampleDataDir=%s", sampleDataDir))
-	if err := postgres.StartSampleInstance(ctx, s.pgBinDir, sampleDataDir, profile.SampleDatabasePort, profile.Mode); err != nil {
-		return nil, err
+	if profile.SampleDatabasePort != 0 {
+		log.Info("-----Sample Postgres Instance BEGIN-----")
+		sampleDataDir := common.GetPostgresSampleDataDir(profile.DataDir)
+		log.Info(fmt.Sprintf("sampleDatabasePort=%d", profile.SampleDatabasePort))
+		log.Info(fmt.Sprintf("sampleDataDir=%s", sampleDataDir))
+		if err := postgres.StartSampleInstance(ctx, s.pgBinDir, sampleDataDir, profile.SampleDatabasePort, profile.Mode); err != nil {
+			return nil, err
+		}
+		log.Info("-----Sample Postgres Instance END-----")
 	}
-	log.Info("-----Sample Postgres Instance END-----")
 
 	// New MetadataDB instance.
 	if profile.UseEmbedDB() {
@@ -456,10 +466,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 
 	// Middleware
 	//
-	// Error recorder middleware.
-	e.HTTPErrorHandler = func(err error, c echo.Context) {
-		errorRecorderMiddleware(err, s, c, e)
-	}
 	// API logger middleware.
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Skipper: func(c echo.Context) bool {
@@ -497,14 +503,8 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	apiGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return aclMiddleware(s, internalAPIPrefix, ce, next, profile.Readonly)
 	})
-	s.registerDebugRoutes(apiGroup)
-	s.registerSettingRoutes(apiGroup)
 	s.registerOAuthRoutes(apiGroup)
-	s.registerPrincipalRoutes(apiGroup)
-	s.registerMemberRoutes(apiGroup)
-	s.registerPolicyRoutes(apiGroup)
 	s.registerProjectRoutes(apiGroup)
-	s.registerProjectWebhookRoutes(apiGroup)
 	s.registerEnvironmentRoutes(apiGroup)
 	s.registerInstanceRoutes(apiGroup)
 	s.registerDatabaseRoutes(apiGroup)
@@ -517,9 +517,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	s.registerBookmarkRoutes(apiGroup)
 	s.registerSQLRoutes(apiGroup)
 	s.registerVCSRoutes(apiGroup)
-	s.registerPlanRoutes(apiGroup)
 	s.registerSheetRoutes(apiGroup)
-	s.registerSheetOrganizerRoutes(apiGroup)
 	s.registerAnomalyRoutes(apiGroup)
 
 	// Register healthz endpoint.
@@ -530,8 +528,17 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	// Setup the gRPC and grpc-gateway.
 	authProvider := auth.New(s.store, s.secret, s.licenseService, profile.Mode)
 	aclProvider := v1.NewACLInterceptor(s.store, s.secret, s.licenseService, profile.Mode)
+	debugProvider := v1.NewDebugInterceptor(&s.errorRecordRing)
+	onPanic := func(p any) error {
+		stack := make([]byte, maxStacksize)
+		stack = stack[:runtime.Stack(stack, true)]
+		// keep a multiline stack
+		log.Error("v1 server panic error", zap.Error(errors.Errorf("error: %v\n%s", p, stack)))
+		return status.Errorf(codes.Unknown, "error: %v", p)
+	}
+	recoveryUnaryInterceptor := recovery.UnaryServerInterceptor(recovery.WithRecoveryHandler(onPanic))
 	s.grpcServer = grpc.NewServer(
-		grpc.ChainUnaryInterceptor(authProvider.AuthenticationInterceptor, aclProvider.ACLInterceptor),
+		grpc.ChainUnaryInterceptor(debugProvider.DebugInterceptor, authProvider.AuthenticationInterceptor, aclProvider.ACLInterceptor, recoveryUnaryInterceptor),
 	)
 	v1pb.RegisterAuthServiceServer(s.grpcServer, v1.NewAuthService(s.store, s.secret, s.licenseService, s.MetricReporter, &profile,
 		func(ctx context.Context, user *store.UserMessage, firstEndUser bool) error {
@@ -540,13 +547,15 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 			}
 			// Only generate onboarding data after the first enduser signup.
 			if firstEndUser {
-				if err := s.generateOnboardingData(ctx, user.ID); err != nil {
-					return status.Errorf(codes.Internal, "failed to prepare onboarding data, error: %v", err)
+				if profile.SampleDatabasePort != 0 {
+					if err := s.generateOnboardingData(ctx, user.ID); err != nil {
+						return status.Errorf(codes.Internal, "failed to prepare onboarding data, error: %v", err)
+					}
 				}
 			}
 			return nil
 		}))
-	v1pb.RegisterActuatorServiceServer(s.grpcServer, v1.NewActuatorService(s.store, &s.profile))
+	v1pb.RegisterActuatorServiceServer(s.grpcServer, v1.NewActuatorService(s.store, &s.profile, &s.errorRecordRing))
 	v1pb.RegisterSubscriptionServiceServer(s.grpcServer, v1.NewSubscriptionService(
 		s.store,
 		&s.profile,
@@ -560,18 +569,21 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.secret,
 		s.stateCfg,
 		s.dbFactory))
-	v1pb.RegisterProjectServiceServer(s.grpcServer, v1.NewProjectService(s.store))
+	v1pb.RegisterProjectServiceServer(s.grpcServer, v1.NewProjectService(s.store, s.ActivityManager))
 	v1pb.RegisterDatabaseServiceServer(s.grpcServer, v1.NewDatabaseService(s.store, s.BackupRunner, s.licenseService))
 	v1pb.RegisterInstanceRoleServiceServer(s.grpcServer, v1.NewInstanceRoleService(s.store, s.dbFactory))
 	v1pb.RegisterOrgPolicyServiceServer(s.grpcServer, v1.NewOrgPolicyService(s.store, s.licenseService))
 	v1pb.RegisterIdentityProviderServiceServer(s.grpcServer, v1.NewIdentityProviderService(s.store, s.licenseService))
-	v1pb.RegisterSettingServiceServer(s.grpcServer, v1.NewSettingService(s.store, &s.profile, s.licenseService, s.stateCfg))
+	v1pb.RegisterSettingServiceServer(s.grpcServer, v1.NewSettingService(s.store, &s.profile, s.licenseService, s.stateCfg, s.feishuProvider))
 	v1pb.RegisterAnomalyServiceServer(s.grpcServer, v1.NewAnomalyService(s.store))
 	v1pb.RegisterSQLServiceServer(s.grpcServer, v1.NewSQLService())
 	v1pb.RegisterExternalVersionControlServiceServer(s.grpcServer, v1.NewExternalVersionControlService(s.store))
 	v1pb.RegisterRiskServiceServer(s.grpcServer, v1.NewRiskService(s.store, s.licenseService))
 	v1pb.RegisterReviewServiceServer(s.grpcServer, v1.NewReviewService(s.store, s.ActivityManager, s.TaskScheduler, s.stateCfg))
+	v1pb.RegisterRolloutServiceServer(s.grpcServer, v1.NewRolloutService(s.store, s.licenseService, s.dbFactory, s.TaskScheduler, s.TaskCheckScheduler, s.stateCfg, s.ActivityManager))
 	v1pb.RegisterRoleServiceServer(s.grpcServer, v1.NewRoleService(s.store, s.licenseService))
+	v1pb.RegisterSheetServiceServer(s.grpcServer, v1.NewSheetService(s.store))
+	v1pb.RegisterCelServiceServer(s.grpcServer, v1.NewCelService())
 	reflection.Register(s.grpcServer)
 
 	// REST gateway proxy.
@@ -580,7 +592,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	mux := runtime.NewServeMux(runtime.WithForwardResponseOption(auth.GatewayResponseModifier))
+	mux := grpcRuntime.NewServeMux(grpcRuntime.WithForwardResponseOption(auth.GatewayResponseModifier))
 	if err := v1pb.RegisterAuthServiceHandler(ctx, mux, grpcConn); err != nil {
 		return nil, err
 	}
@@ -626,6 +638,12 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	if err := v1pb.RegisterRoleServiceHandler(ctx, mux, grpcConn); err != nil {
 		return nil, err
 	}
+	if err := v1pb.RegisterSheetServiceHandler(ctx, mux, grpcConn); err != nil {
+		return nil, err
+	}
+	if err := v1pb.RegisterRolloutServiceHandler(ctx, mux, grpcConn); err != nil {
+		return nil, err
+	}
 	e.Any("/v1/*", echo.WrapHandler(mux))
 	// GRPC web proxy.
 	options := []grpcweb.Option{
@@ -638,7 +656,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	e.Any("/bytebase.v1.*", echo.WrapHandler(wrappedGrpc))
 
 	// Register open API routes
-	s.registerOpenAPIRoutes(e, ce, profile)
+	s.registerOpenAPIRoutes(e)
 
 	// Register pprof endpoints.
 	pprof.Register(e)
@@ -650,20 +668,9 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) registerOpenAPIRoutes(e *echo.Echo, ce *casbin.Enforcer, prof config.Profile) {
-	jwtMiddlewareFunc := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return JWTMiddleware(openAPIPrefix, s.store, next, prof.Mode, s.secret)
-	}
-	aclMiddlewareFunc := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return aclMiddleware(s, openAPIPrefix, ce, next, prof.Readonly)
-	}
-	metricMiddlewareFunc := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return openAPIMetricMiddleware(s, next)
-	}
+func (s *Server) registerOpenAPIRoutes(e *echo.Echo) {
 	e.POST("/v1/sql/advise", s.sqlCheckController)
 	e.POST("/v1/sql/schema/diff", schemaDiff)
-	e.PATCH("/v1/instances/:instanceName/databases/:database", s.updateInstanceDatabase, jwtMiddlewareFunc, aclMiddlewareFunc, metricMiddlewareFunc)
-	e.POST("/v1/issues", s.createIssueByOpenAPI, jwtMiddlewareFunc, aclMiddlewareFunc, metricMiddlewareFunc)
 }
 
 // initMetricReporter will initial the metric scheduler.
@@ -741,7 +748,7 @@ func (s *Server) getInitSetting(ctx context.Context, datastore *store.Store) (*w
 	// initial feishu app
 	if _, _, err := datastore.CreateSettingIfNotExistV2(ctx, &store.SettingMessage{
 		Name:        api.SettingAppIM,
-		Value:       "",
+		Value:       "{}",
 		Description: "",
 	}, api.SystemBotID); err != nil {
 		return nil, err
@@ -909,8 +916,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	// Shutdown postgres sample instance.
-	if err := postgres.Stop(s.pgBinDir, common.GetPostgresSampleDataDir(s.profile.DataDir)); err != nil {
-		log.Error("Failed to stop postgres sample instance", zap.Error(err))
+	if s.profile.SampleDatabasePort != 0 {
+		if err := postgres.Stop(s.pgBinDir, common.GetPostgresSampleDataDir(s.profile.DataDir)); err != nil {
+			log.Error("Failed to stop postgres sample instance", zap.Error(err))
+		}
 	}
 
 	// Shutdown postgres server if embed.
@@ -1056,13 +1065,32 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 		return errors.Wrapf(err, "failed to create onboarding SQL Review policy")
 	}
 
+	// Create a standalone sample SQL sheet.
+	// This is different from another sample SQL sheet created below, which is created as part of
+	// creating a schema change issue.
+	sheetCreate := &api.SheetCreate{
+		CreatorID:  userID,
+		ProjectID:  project.UID,
+		DatabaseID: &database.UID,
+		Name:       "Sample Sheet",
+		Statement:  "SELECT * FROM salary;",
+		Visibility: api.ProjectSheet,
+		Source:     api.SheetFromBytebase,
+		Type:       api.SheetForSQL,
+	}
+	_, err = s.store.CreateSheet(ctx, sheetCreate)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create sample sheet")
+	}
+
+	// Create a schema update issue and start with creating the sheet for the schema update.
 	sheet, err := s.store.CreateSheet(ctx, &api.SheetCreate{
 		CreatorID: api.SystemBotID,
 
 		ProjectID:  project.UID,
 		DatabaseID: &database.UID,
 
-		Name:       "Sheet for Sample Project",
+		Name:       "Alter table sheet for Sample Issue",
 		Statement:  "ALTER TABLE employee ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';",
 		Visibility: api.ProjectSheet,
 		Source:     api.SheetFromBytebaseArtifact,
@@ -1073,7 +1101,6 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 		return errors.Wrapf(err, "failed to create sheet for sample project")
 	}
 
-	// Create a schema update issue.
 	createContext, err := json.Marshal(
 		&api.MigrationContext{
 			DetailList: []*api.MigrationDetail{
@@ -1144,22 +1171,6 @@ Click "Approve" button to apply the schema update.`,
 	}, userID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create onboarding sensitive data policy")
-	}
-
-	// Create a SQL sheet with sample queries.
-	sheetCreate := &api.SheetCreate{
-		CreatorID:  userID,
-		ProjectID:  project.UID,
-		DatabaseID: &database.UID,
-		Name:       "Sample Sheet",
-		Statement:  "SELECT * FROM salary;",
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebase,
-		Type:       api.SheetForSQL,
-	}
-	_, err = s.store.CreateSheet(ctx, sheetCreate)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create sample sheet")
 	}
 
 	return nil

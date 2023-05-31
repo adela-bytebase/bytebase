@@ -3,16 +3,19 @@
     :column-list="COLUMNS"
     :data-source="composedSlowQueryPolicyList"
     :row-clickable="false"
-    :row-key="(item: ComposedSlowQueryPolicy) => item.instance.id"
+    :row-key="(item: ComposedSlowQueryPolicy) => item.instance.uid"
     class="border"
   >
     <template #item="{ item }: { item: ComposedSlowQueryPolicy }">
       <div class="bb-grid-cell">
-        <InstanceName :instance="item.instance" />
+        <InstanceV1Name :instance="item.instance" :link="false" />
       </div>
 
       <div class="bb-grid-cell">
-        <EnvironmentName :environment="item.instance.environment" />
+        <EnvironmentV1Name
+          :environment="item.instance.environmentEntity"
+          :link="false"
+        />
       </div>
       <div class="bb-grid-cell">
         <SpinnerSwitch
@@ -30,18 +33,22 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { type BBGridColumn, BBGrid } from "@/bbkit";
-import type { Instance, ComposedSlowQueryPolicy } from "@/types";
-import { InstanceName, EnvironmentName, SpinnerSwitch } from "@/components/v2/";
-import { useCurrentUser } from "@/store";
-import { hasWorkspacePermission } from "@/utils";
+import type { ComposedInstance, ComposedSlowQueryPolicy } from "@/types";
+import {
+  InstanceV1Name,
+  EnvironmentV1Name,
+  SpinnerSwitch,
+} from "@/components/v2/";
+import { useCurrentUserV1 } from "@/store";
+import { hasWorkspacePermissionV1 } from "@/utils";
 
 defineProps<{
   composedSlowQueryPolicyList: ComposedSlowQueryPolicy[];
-  toggleActive: (instance: Instance, active: boolean) => Promise<void>;
+  toggleActive: (instance: ComposedInstance, active: boolean) => Promise<void>;
 }>();
 
 const { t } = useI18n();
-const currentUser = useCurrentUser();
+const currentUserV1 = useCurrentUserV1();
 
 const COLUMNS = computed((): BBGridColumn[] => {
   return [
@@ -61,9 +68,9 @@ const COLUMNS = computed((): BBGridColumn[] => {
 });
 
 const allowAdmin = computed(() => {
-  return hasWorkspacePermission(
+  return hasWorkspacePermissionV1(
     "bb.permission.workspace.manage-slow-query",
-    currentUser.value.role
+    currentUserV1.value.userRole
   );
 });
 </script>

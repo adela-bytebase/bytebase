@@ -1,123 +1,129 @@
 <template>
-  <p class="text-sm text-gray-500 px-4">
-    {{ $t("database.sync-schema.description") }}
-    <LearnMoreLink
-      url="https://www.bytebase.com/docs/change-database/synchronize-schema?source=console"
-    />
-  </p>
-  <BBStepTab
-    class="p-4 h-auto min-h-[calc(100%-40px)] overflow-y-auto"
-    :step-item-list="stepTabList"
-    :show-cancel="false"
-    :allow-next="allowNext"
-    :finish-title="$t('database.sync-schema.preview-issue')"
-    :current-step="state.currentStep"
-    @cancel="cancelSetup"
-    @try-change-step="tryChangeStep"
-    @try-finish="tryFinishSetup"
-  >
-    <template #0>
-      <div
-        class="w-full mx-auto flex flex-col justify-start items-start space-y-4 my-8"
-      >
-        <div class="w-full flex flex-row justify-start items-center">
-          <span class="flex w-40 items-center">
-            {{ $t("database.sync-schema.select-project") }}
-          </span>
-          <ProjectSelect
-            class="!w-60 shrink-0"
-            :selected-id="state.projectId"
-            @select-project-id="handleSourceProjectSelect"
-          />
-        </div>
-        <div class="w-full flex flex-row justify-start items-center">
-          <span class="flex w-40 items-center shrink-0">
-            {{ $t("database.sync-schema.source-database") }}
-          </span>
-          <EnvironmentSelect
-            class="!w-60 mr-4 shrink-0"
-            name="environment"
-            :selected-id="state.sourceSchema.environmentId"
-            :select-default="false"
-            @select-environment-id="handleSourceEnvironmentSelect"
-          />
-          <DatabaseSelect
-            class="!w-128"
-            :selected-id="(state.sourceSchema.databaseId as DatabaseId)"
-            :mode="'USER'"
-            :environment-id="state.sourceSchema.environmentId"
-            :project-id="state.projectId"
-            :engine-type-list="allowedEngineTypeList"
-            :sync-status="'OK'"
-            :customize-item="true"
-            @select-database-id="handleSourceDatabaseSelect"
-          >
-            <template #customizeItem="{ database }">
-              <div class="flex items-center">
-                <InstanceEngineIcon :instance="database.instance" />
-                <span class="mx-2">{{ database.name }}</span>
-                <span class="text-gray-400"
-                  >({{ database.instance.name }})</span
-                >
-              </div>
-            </template>
-          </DatabaseSelect>
-        </div>
-        <div class="w-full flex flex-row justify-start items-center">
-          <span class="flex w-40 items-center shrink-0">
-            {{ $t("database.sync-schema.schema-version.self") }}
-          </span>
-          <div
-            class="w-192 flex flex-row justify-start items-center relative"
-            :class="isValidId(state.projectId) ? '' : 'opacity-50'"
-          >
-            <BBSelect
-              class="w-full"
-              :selected-item="state.sourceSchema.migrationHistory"
-              :item-list="
-                databaseMigrationHistoryList(state.sourceSchema.databaseId as DatabaseId)
-              "
-              :placeholder="$t('change-history.select')"
-              :show-prefix-item="databaseMigrationHistoryList(state.sourceSchema.databaseId as DatabaseId).length > 0"
-              @select-item="(migrationHistory: MigrationHistory) => handleSchemaVersionSelect(migrationHistory)"
+  <div class="w-full h-full overflow-hidden flex flex-col">
+    <p class="text-sm text-gray-500 px-4">
+      {{ $t("database.sync-schema.description") }}
+      <LearnMoreLink
+        url="https://www.bytebase.com/docs/change-database/synchronize-schema?source=console"
+      />
+    </p>
+    <BBStepTab
+      class="p-4 flex-1 overflow-hidden flex flex-col"
+      :step-item-list="stepTabList"
+      :show-cancel="false"
+      :allow-next="allowNext"
+      :finish-title="$t('database.sync-schema.preview-issue')"
+      :current-step="state.currentStep"
+      pane-class="flex-1 overflow-y-auto"
+      @cancel="cancelSetup"
+      @try-change-step="tryChangeStep"
+      @try-finish="tryFinishSetup"
+    >
+      <template #0>
+        <div
+          class="w-full mx-auto flex flex-col justify-start items-start space-y-4 my-8"
+        >
+          <div class="w-full flex flex-row justify-start items-center">
+            <span class="flex w-40 items-center">
+              {{ $t("database.sync-schema.select-project") }}
+            </span>
+            <ProjectSelect
+              class="!w-60 shrink-0"
+              :selected-id="state.projectId"
+              @select-project-id="handleSourceProjectSelect"
+            />
+          </div>
+          <div class="w-full flex flex-row justify-start items-center">
+            <span class="flex w-40 items-center shrink-0">
+              {{ $t("database.sync-schema.source-database") }}
+            </span>
+            <EnvironmentSelect
+              class="!w-60 mr-4 shrink-0"
+              name="environment"
+              :selected-id="state.sourceSchema.environmentId"
+              :select-default="false"
+              @select-environment-id="handleSourceEnvironmentSelect"
+            />
+            <DatabaseSelect
+              class="!w-128"
+              :selected-id="state.sourceSchema.databaseId ?? String(UNKNOWN_ID)"
+              :mode="'USER'"
+              :environment-id="state.sourceSchema.environmentId"
+              :project-id="state.projectId"
+              :engine-type-list="allowedEngineTypeList"
+              :sync-status="'OK'"
+              :customize-item="true"
+              @select-database-id="handleSourceDatabaseSelect"
             >
-              <template #menuItem="{ item: migrationHistory }">
-                <div class="flex justify-between mr-2">
-                  <NEllipsis class="pr-2" :tooltip="false">
-                    {{ migrationHistory.version }} -
-                    {{ migrationHistory.description }}
-                  </NEllipsis>
-                  <span class="text-control-light">
-                    {{
-                      dayjs(migrationHistory.updatedTs * 1000).format(
-                        "YYYY-MM-DD HH:mm:ss"
-                      )
-                    }}
+              <template #customizeItem="{ database }">
+                <div class="flex items-center">
+                  <InstanceV1EngineIcon :instance="database.instanceEntity" />
+                  <span class="mx-2">{{ database.databaseName }}</span>
+
+                  <span class="text-gray-400">
+                    ({{ instanceV1Name(database.instanceEntity) }})
                   </span>
                 </div>
               </template>
-              <template v-if="shouldShowMoreVersionButton" #suffixItem>
-                <div
-                  class="w-full flex flex-row justify-start items-center pl-3 leading-8 text-accent cursor-pointer hover:opacity-80"
-                  @click.prevent.capture="() => (state.showFeatureModal = true)"
-                >
-                  <heroicons-solid:sparkles class="w-4 h-auto mr-1" />
-                  {{ $t("database.sync-schema.more-version") }}
-                </div>
-              </template>
-            </BBSelect>
+            </DatabaseSelect>
+          </div>
+          <div class="w-full flex flex-row justify-start items-center">
+            <span class="flex w-40 items-center shrink-0">
+              {{ $t("database.sync-schema.schema-version.self") }}
+            </span>
+            <div
+              class="w-192 flex flex-row justify-start items-center relative"
+              :class="isValidId(state.projectId) ? '' : 'opacity-50'"
+            >
+              <BBSelect
+                class="w-full"
+                :selected-item="state.sourceSchema.migrationHistory"
+                :item-list="
+                databaseMigrationHistoryList(state.sourceSchema.databaseId as string)
+              "
+                :placeholder="$t('change-history.select')"
+                :show-prefix-item="databaseMigrationHistoryList(state.sourceSchema.databaseId as string).length > 0"
+                @select-item="(migrationHistory: MigrationHistory) => handleSchemaVersionSelect(migrationHistory)"
+              >
+                <template #menuItem="{ item: migrationHistory }">
+                  <div class="flex justify-between mr-2">
+                    <NEllipsis class="pr-2" :tooltip="false">
+                      {{ migrationHistory.version }} -
+                      {{ migrationHistory.description }}
+                    </NEllipsis>
+                    <span class="text-control-light">
+                      {{
+                        dayjs(migrationHistory.updatedTs * 1000).format(
+                          "YYYY-MM-DD HH:mm:ss"
+                        )
+                      }}
+                    </span>
+                  </div>
+                </template>
+                <template v-if="shouldShowMoreVersionButton" #suffixItem>
+                  <div
+                    class="w-full flex flex-row justify-start items-center pl-3 leading-8 text-accent cursor-pointer hover:opacity-80"
+                    @click.prevent.capture="
+                      () => (state.showFeatureModal = true)
+                    "
+                  >
+                    <heroicons-solid:sparkles class="w-4 h-auto mr-1" />
+                    {{ $t("database.sync-schema.more-version") }}
+                  </div>
+                </template>
+              </BBSelect>
+            </div>
           </div>
         </div>
-      </div>
-    </template>
-    <template #1>
-      <SelectTargetDatabasesView
-        ref="targetDatabaseViewRef"
-        :project-id="state.projectId as ProjectId"
-        :source-schema="state.sourceSchema as any"
-      />
-    </template>
-  </BBStepTab>
+      </template>
+      <template #1>
+        <SelectTargetDatabasesView
+          ref="targetDatabaseViewRef"
+          :project-id="state.projectId!"
+          :source-schema="state.sourceSchema as any"
+        />
+      </template>
+    </BBStepTab>
+  </div>
 
   <FeatureModal
     v-if="state.showFeatureModal"
@@ -135,20 +141,16 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import {
   hasFeature,
-  useDatabaseStore,
+  useDatabaseV1Store,
   useInstanceStore,
-  useProjectStore,
+  useProjectV1Store,
 } from "@/store";
-import {
-  DatabaseId,
-  EngineType,
-  EnvironmentId,
-  MigrationHistory,
-  MigrationType,
-  ProjectId,
-  UNKNOWN_ID,
-} from "@/types";
+import { MigrationHistory, MigrationType, UNKNOWN_ID } from "@/types";
+import DatabaseSelect from "@/components/DatabaseSelect.vue";
 import SelectTargetDatabasesView from "./SelectTargetDatabasesView.vue";
+import { Engine } from "@/types/proto/v1/common";
+import { InstanceV1EngineIcon } from "@/components/v2";
+import { instanceV1Name } from "@/utils";
 
 const SELECT_SOURCE_DATABASE = 0;
 const SELECT_TARGET_DATABASE_LIST = 1;
@@ -156,19 +158,19 @@ const SELECT_TARGET_DATABASE_LIST = 1;
 type Step = typeof SELECT_SOURCE_DATABASE | typeof SELECT_TARGET_DATABASE_LIST;
 
 interface SourceSchema {
-  environmentId?: EnvironmentId;
-  databaseId?: DatabaseId;
+  environmentId?: string;
+  databaseId?: string;
   migrationHistory?: MigrationHistory;
 }
 
 interface LocalState {
   currentStep: Step;
-  projectId?: ProjectId;
+  projectId?: string;
   sourceSchema: SourceSchema;
   showFeatureModal: boolean;
 }
 
-const allowedEngineTypeList: EngineType[] = ["MYSQL", "POSTGRES"];
+const allowedEngineTypeList: Engine[] = [Engine.MYSQL, Engine.POSTGRES];
 const allowedMigrationTypeList: MigrationType[] = [
   "BASELINE",
   "MIGRATE",
@@ -178,9 +180,9 @@ const allowedMigrationTypeList: MigrationType[] = [
 const { t } = useI18n();
 const router = useRouter();
 const dialog = useDialog();
-const projectStore = useProjectStore();
-const instanceStore = useInstanceStore();
-const databaseStore = useDatabaseStore();
+const projectStore = useProjectV1Store();
+const legacyInstanceStore = useInstanceStore();
+const databaseStore = useDatabaseV1Store();
 const targetDatabaseViewRef =
   ref<InstanceType<typeof SelectTargetDatabasesView>>();
 const state = reactive<LocalState>({
@@ -196,7 +198,7 @@ const hasSyncSchemaFeature = computed(() => {
 const shouldShowMoreVersionButton = computed(() => {
   return (
     !hasSyncSchemaFeature.value &&
-    databaseMigrationHistoryList(state.sourceSchema.databaseId as DatabaseId)
+    databaseMigrationHistoryList(state.sourceSchema.databaseId as string)
       .length > 0
   );
 });
@@ -222,9 +224,9 @@ const allowNext = computed(() => {
     const targetDatabaseList = targetDatabaseViewRef.value?.targetDatabaseList;
     const targetDatabaseDiffList = targetDatabaseList
       .map((db) => {
-        const diff = targetDatabaseViewRef.value!.databaseDiffCache[db.id];
+        const diff = targetDatabaseViewRef.value!.databaseDiffCache[db.uid];
         return {
-          id: db.id,
+          id: db.uid,
           diff: diff?.edited || "",
         };
       })
@@ -233,12 +235,12 @@ const allowNext = computed(() => {
   }
 });
 
-const databaseMigrationHistoryList = (databaseId: DatabaseId) => {
-  const database = databaseStore.getDatabaseById(databaseId);
-  const list = instanceStore
+const databaseMigrationHistoryList = (databaseId: string) => {
+  const database = databaseStore.getDatabaseByUID(databaseId);
+  const list = legacyInstanceStore
     .getMigrationHistoryListByInstanceIdAndDatabaseName(
-      database.instance.id,
-      database.name
+      Number(database.instanceEntity.uid),
+      database.databaseName
     )
     .filter((migrationHistory) =>
       allowedMigrationTypeList.includes(migrationHistory.type)
@@ -250,26 +252,27 @@ const databaseMigrationHistoryList = (databaseId: DatabaseId) => {
   return list;
 };
 
-const handleSourceProjectSelect = async (projectId: ProjectId) => {
+const handleSourceProjectSelect = async (projectId: string) => {
   if (projectId !== state.projectId) {
-    state.sourceSchema.databaseId = UNKNOWN_ID;
+    state.sourceSchema.databaseId = String(UNKNOWN_ID);
   }
   state.projectId = projectId;
 };
 
-const handleSourceEnvironmentSelect = async (environmentId: EnvironmentId) => {
+const handleSourceEnvironmentSelect = async (environmentId: string) => {
   if (environmentId !== state.sourceSchema.environmentId) {
-    state.sourceSchema.databaseId = UNKNOWN_ID;
+    state.sourceSchema.databaseId = String(UNKNOWN_ID);
   }
   state.sourceSchema.environmentId = environmentId;
 };
 
-const handleSourceDatabaseSelect = async (databaseId: DatabaseId) => {
+const handleSourceDatabaseSelect = async (databaseId: string) => {
   if (isValidId(databaseId)) {
-    const database = databaseStore.getDatabaseById(databaseId as DatabaseId);
+    const database = databaseStore.getDatabaseByUID(databaseId);
     if (database) {
-      state.projectId = database.projectId;
-      state.sourceSchema.environmentId = database.instance.environment.id;
+      state.projectId = database.projectEntity.uid;
+      state.sourceSchema.environmentId =
+        database.instanceEntity.environmentEntity.uid;
       state.sourceSchema.databaseId = databaseId;
     }
   }
@@ -279,8 +282,8 @@ const handleSchemaVersionSelect = (migrationHistory: MigrationHistory) => {
   state.sourceSchema.migrationHistory = migrationHistory;
 };
 
-const isValidId = (id: any) => {
-  if (isNull(id) || isUndefined(id) || id === UNKNOWN_ID) {
+const isValidId = (id: any): id is string => {
+  if (isNull(id) || isUndefined(id) || String(id) === String(UNKNOWN_ID)) {
     return false;
   }
   return true;
@@ -299,6 +302,7 @@ const tryChangeStep = async (
         positiveText: t("common.confirm"),
         negativeText: t("common.cancel"),
         title: t("deployment-config.confirm-to-revert"),
+        autoFocus: false,
         closable: false,
         maskClosable: false,
         closeOnEsc: false,
@@ -325,9 +329,9 @@ const tryFinishSetup = async () => {
   const targetDatabaseList = targetDatabaseViewRef.value.targetDatabaseList;
   const targetDatabaseDiffList = targetDatabaseList
     .map((db) => {
-      const diff = targetDatabaseViewRef.value!.databaseDiffCache[db.id];
+      const diff = targetDatabaseViewRef.value!.databaseDiffCache[db.uid];
       return {
-        id: db.id,
+        id: db.uid,
         diff: diff.edited,
       };
     })
@@ -335,11 +339,11 @@ const tryFinishSetup = async () => {
   const databaseIdList = targetDatabaseDiffList.map((item) => item.id);
   const statementList = targetDatabaseDiffList.map((item) => item.diff);
 
-  const project = await projectStore.getOrFetchProjectById(state.projectId!);
+  const project = await projectStore.getOrFetchProjectByUID(state.projectId!);
 
   const query: Record<string, any> = {
     template: "bb.issue.database.schema.update",
-    project: project.id,
+    project: project.uid,
     mode: "normal",
     ghost: undefined,
   };
@@ -386,12 +390,12 @@ watch(
       return;
     }
 
-    const database = databaseStore.getDatabaseById(databaseId as DatabaseId);
+    const database = databaseStore.getDatabaseByUID(databaseId);
     if (database) {
       const migrationHistoryList = (
-        await instanceStore.fetchMigrationHistory({
-          instanceId: database.instance.id,
-          databaseName: database.name,
+        await legacyInstanceStore.fetchMigrationHistory({
+          instanceId: database.instanceEntity.uid,
+          databaseName: database.databaseName,
         })
       ).filter((migrationHistory) =>
         allowedMigrationTypeList.includes(migrationHistory.type)
@@ -402,13 +406,13 @@ watch(
         state.sourceSchema.migrationHistory = head(migrationHistoryList);
       } else {
         // If database has no migration history, we will use its latest schema.
-        const schema = await databaseStore.fetchDatabaseSchemaById(
-          databaseId as DatabaseId
+        const schema = await databaseStore.fetchDatabaseSchema(
+          `${database.name}/schema`
         );
         state.sourceSchema.migrationHistory = {
           id: UNKNOWN_ID,
           updatedTs: Date.now() / 1000,
-          schema: schema,
+          schema: schema.schema,
           version: "Latest version",
           description: "the latest schema of database",
         } as any as MigrationHistory;

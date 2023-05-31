@@ -20,6 +20,7 @@ import (
 	"github.com/bytebase/bytebase/backend/resources/postgres"
 	"github.com/bytebase/bytebase/backend/tests/fake"
 	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
 func TestSyncerForPostgreSQL(t *testing.T) {
@@ -160,7 +161,7 @@ func TestSyncerForPostgreSQL(t *testing.T) {
 	ctx := context.Background()
 	ctl := &controller{}
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:            dataDir,
 		vcsProviderCreator: fake.NewGitLab,
 	})
@@ -189,50 +190,47 @@ func TestSyncerForPostgreSQL(t *testing.T) {
 	a.NoError(err)
 
 	// Create a project.
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "Test Syncer For PostgreSQL",
-		Key:        "TestSyncerForPostgreSQL",
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
-	instance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID:    generateRandomString("instance", 10),
-		EnvironmentID: prodEnvironment.ID,
-		Name:          "pgInstance",
-		Engine:        db.Postgres,
-		Host:          "/tmp",
-		Port:          strconv.Itoa(pgPort),
-		Username:      "bytebase",
-		Password:      "bytebase",
+	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: generateRandomString("instance", 10),
+		Instance: &v1pb.Instance{
+			Title:       "pgInstance",
+			Engine:      v1pb.Engine_POSTGRES,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: "/tmp", Port: strconv.Itoa(pgPort), Username: "bytebase", Password: "bytebase"}},
+		},
 	})
+	a.NoError(err)
+	instanceUID, err := strconv.Atoi(instance.Uid)
 	a.NoError(err)
 
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Nil(databases)
 
-	err = ctl.createDatabase(project, instance, databaseName, "bytebase", nil)
+	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "bytebase", nil)
 	a.NoError(err)
 
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Equal(1, len(databases))
 
 	database := databases[0]
-	a.Equal(instance.ID, database.Instance.ID)
+	a.Equal(instanceUID, database.Instance.ID)
 
 	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "create schema",
 		Statement:  createSchema,
 		Visibility: api.ProjectSheet,
@@ -253,7 +251,7 @@ func TestSyncerForPostgreSQL(t *testing.T) {
 	})
 	a.NoError(err)
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("Create sequence for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("Create sequence of database %q.", databaseName),
@@ -261,7 +259,7 @@ func TestSyncerForPostgreSQL(t *testing.T) {
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
-	status, err := ctl.waitIssuePipeline(issue.ID)
+	status, err := ctl.waitIssuePipeline(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -452,7 +450,7 @@ func TestSyncerForMySQL(t *testing.T) {
 	ctx := context.Background()
 	ctl := &controller{}
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:            dataDir,
 		vcsProviderCreator: fake.NewGitLab,
 	})
@@ -480,50 +478,47 @@ func TestSyncerForMySQL(t *testing.T) {
 	a.NoError(err)
 
 	// Create a project.
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "Test Sync MySQL Schema",
-		Key:        "TestSyncMySQLSchema",
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
-	instance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID:    generateRandomString("instance", 10),
-		EnvironmentID: prodEnvironment.ID,
-		Name:          "mysqlInstance",
-		Engine:        db.MySQL,
-		Host:          "127.0.0.1",
-		Port:          strconv.Itoa(mysqlPort),
-		Username:      "bytebase",
-		Password:      "bytebase",
+	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: generateRandomString("instance", 10),
+		Instance: &v1pb.Instance{
+			Title:       "mysqlInstance",
+			Engine:      v1pb.Engine_MYSQL,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: "127.0.0.1", Port: strconv.Itoa(mysqlPort), Username: "bytebase", Password: "bytebase"}},
+		},
 	})
+	a.NoError(err)
+	instanceUID, err := strconv.Atoi(instance.Uid)
 	a.NoError(err)
 
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Nil(databases)
 
-	err = ctl.createDatabase(project, instance, databaseName, "", nil)
+	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil)
 	a.NoError(err)
 
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Equal(1, len(databases))
 
 	database := databases[0]
-	a.Equal(instance.ID, database.Instance.ID)
+	a.Equal(instanceUID, database.Instance.ID)
 
 	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "create schema",
 		Statement:  createSchema,
 		Visibility: api.ProjectSheet,
@@ -544,7 +539,7 @@ func TestSyncerForMySQL(t *testing.T) {
 	})
 	a.NoError(err)
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("Create sequence for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("Create sequence of database %q.", databaseName),
@@ -552,7 +547,7 @@ func TestSyncerForMySQL(t *testing.T) {
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
-	status, err := ctl.waitIssuePipeline(issue.ID)
+	status, err := ctl.waitIssuePipeline(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 

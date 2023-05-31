@@ -2,13 +2,13 @@ import type { Ref } from "vue";
 import { type useDialog } from "naive-ui";
 import { IssueTemplate } from "@/plugins";
 import {
+  ComposedProject,
   Database,
   Issue,
   IssueCreate,
   IssuePatch,
   IssueStatus,
   Pipeline,
-  Project,
   SheetId,
   Stage,
   StageCreate,
@@ -22,7 +22,7 @@ import {
 type IssueLogic = {
   // base params
   create: Ref<boolean>;
-  project: Ref<Project>;
+  project: Ref<ComposedProject>;
   issue: Ref<Issue | IssueCreate>;
   template: Ref<IssueTemplate>;
 

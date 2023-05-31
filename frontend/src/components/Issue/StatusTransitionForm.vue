@@ -26,13 +26,12 @@
               </div>
             </template>
             <template v-if="field.type == 'Database'">
-              <!-- eslint-disable vue/attribute-hyphenation -->
               <DatabaseSelect
                 class="mt-1 w-64"
                 :disabled="true"
                 :mode="'ENVIRONMENT'"
-                :environmentId="environmentId"
-                :selectedId="state.outputValueList[index]"
+                :environment-id="environmentId"
+                :selected-id="state.outputValueList[index]"
                 @select-database-id="
                   (databaseId: string) => {
                     state.outputValueList[index] = databaseId;
@@ -221,7 +220,7 @@ export default defineComponent({
     });
 
     const environmentId = computed(() => {
-      return activeEnvironment(props.issue.pipeline).id;
+      return String(activeEnvironment(props.issue.pipeline).id);
     });
 
     // Code block below will raise an eslint ERROR.

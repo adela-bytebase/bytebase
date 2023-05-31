@@ -2,7 +2,6 @@
 package tests
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -15,13 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/jsonapi"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/grpc/metadata"
+
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 
 	// Import pg driver.
 	// init() in pgx/v4/stdlib will register it's pgx driver.
@@ -33,7 +33,6 @@ import (
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/server"
 	"github.com/bytebase/bytebase/backend/tests/fake"
-	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 )
 
 var (
@@ -157,10 +156,18 @@ CREATE TABLE book4 (
 )
 
 type controller struct {
-	server   *server.Server
-	profile  componentConfig.Profile
-	client   *http.Client
-	grpcConn *grpc.ClientConn
+	server                   *server.Server
+	profile                  componentConfig.Profile
+	client                   *http.Client
+	grpcConn                 *grpc.ClientConn
+	reviewServiceClient      v1pb.ReviewServiceClient
+	orgPolicyServiceClient   v1pb.OrgPolicyServiceClient
+	projectServiceClient     v1pb.ProjectServiceClient
+	authServiceClient        v1pb.AuthServiceClient
+	settingServiceClient     v1pb.SettingServiceClient
+	environmentServiceClient v1pb.EnvironmentServiceClient
+	instanceServiceClient    v1pb.InstanceServiceClient
+	sheetServiceClient       v1pb.SheetServiceClient
 
 	cookie             string
 	grpcMDAccessToken  string
@@ -187,11 +194,11 @@ type config struct {
 
 var (
 	mu       sync.Mutex
-	nextPort = 1234
+	nextPort = time.Now().Second()*200 + 5010
 
 	// Shared external PG server variables.
 	externalPgUser     = "bbexternal"
-	externalPgPort     = 21113
+	externalPgPort     = time.Now().Second()*200 + 5000
 	externalPgBinDir   string
 	externalPgDataDir  string
 	nextDatabaseNumber = 20210113
@@ -228,21 +235,21 @@ func getTestDatabaseString() string {
 }
 
 // StartServerWithExternalPg starts the main server with external Postgres.
-func (ctl *controller) StartServerWithExternalPg(ctx context.Context, config *config) error {
+func (ctl *controller) StartServerWithExternalPg(ctx context.Context, config *config) (context.Context, error) {
 	log.SetLevel(zap.DebugLevel)
 	if err := ctl.startMockServers(config.vcsProviderCreator, config.feishuProverdierCreator); err != nil {
-		return err
+		return nil, err
 	}
 
 	pgMainURL := fmt.Sprintf("postgresql://%s@:%d/%s?host=%s", externalPgUser, externalPgPort, "postgres", common.GetPostgresSocketDir())
 	db, err := sql.Open("pgx", pgMainURL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer db.Close()
 	databaseName := getTestDatabaseString()
 	if _, err := db.Exec(fmt.Sprintf("CREATE DATABASE %s", databaseName)); err != nil {
-		return err
+		return nil, err
 	}
 
 	pgURL := fmt.Sprintf("postgresql://%s@:%d/%s?host=%s", externalPgUser, externalPgPort, databaseName, common.GetPostgresSocketDir())
@@ -250,34 +257,32 @@ func (ctl *controller) StartServerWithExternalPg(ctx context.Context, config *co
 	profile := getTestProfileWithExternalPg(config.dataDir, resourceDir, serverPort, externalPgUser, pgURL, ctl.feishuProvider.APIURL(ctl.feishuURL), config.skipOnboardingData)
 	server, err := server.NewServer(ctx, profile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ctl.server = server
 	ctl.profile = profile
 
-	if err := ctl.start(ctx, serverPort); err != nil {
-		return err
+	metaCtx, err := ctl.start(ctx, serverPort)
+	if err != nil {
+		return nil, err
 	}
-	if err := ctl.Signup(); err != nil {
-		return err
+	if err := ctl.initWorkspaceProfile(metaCtx); err != nil {
+		return nil, err
 	}
-	if err := ctl.Login(); err != nil {
-		return err
-	}
-	return ctl.initWorkspaceProfile()
+	return metaCtx, nil
 }
 
 // StartServer starts the main server with embed Postgres.
-func (ctl *controller) StartServer(ctx context.Context, config *config) error {
+func (ctl *controller) StartServer(ctx context.Context, config *config) (context.Context, error) {
 	log.SetLevel(zap.DebugLevel)
 	if err := ctl.startMockServers(config.vcsProviderCreator, config.feishuProverdierCreator); err != nil {
-		return err
+		return nil, err
 	}
 	serverPort := getTestPortForEmbeddedPg()
 	profile := getTestProfile(config.dataDir, resourceDir, serverPort, config.readOnly, ctl.feishuProvider.APIURL(ctl.feishuURL))
 	server, err := server.NewServer(ctx, profile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ctl.server = server
 	ctl.profile = profile
@@ -285,18 +290,21 @@ func (ctl *controller) StartServer(ctx context.Context, config *config) error {
 	return ctl.start(ctx, serverPort)
 }
 
-func (ctl *controller) initWorkspaceProfile() error {
-	bytes, err := protojson.Marshal(&storepb.WorkspaceProfileSetting{
-		ExternalUrl:    ctl.profile.ExternalURL,
-		DisallowSignup: false,
+func (ctl *controller) initWorkspaceProfile(ctx context.Context) error {
+	_, err := ctl.settingServiceClient.SetSetting(ctx, &v1pb.SetSettingRequest{
+		Setting: &v1pb.Setting{
+			Name: fmt.Sprintf("settings/%s", api.SettingWorkspaceProfile),
+			Value: &v1pb.Value{
+				Value: &v1pb.Value_WorkspaceProfileSettingValue{
+					WorkspaceProfileSettingValue: &v1pb.WorkspaceProfileSetting{
+						ExternalUrl:    ctl.profile.ExternalURL,
+						DisallowSignup: false,
+					},
+				},
+			},
+		},
 	})
-	if err != nil {
-		return err
-	}
-	return ctl.patchSetting(api.SettingPatch{
-		Name:  api.SettingWorkspaceProfile,
-		Value: string(bytes),
-	})
+	return err
 }
 
 // GetTestProfile will return a profile for testing.
@@ -307,7 +315,7 @@ func getTestProfile(dataDir, resourceDir string, port int, readOnly bool, feishu
 		ExternalURL:          fmt.Sprintf("http://localhost:%d", port),
 		GrpcPort:             port + 1,
 		DatastorePort:        port + 2,
-		SampleDatabasePort:   port + 3,
+		SampleDatabasePort:   0,
 		PgUser:               "bbtest",
 		Readonly:             readOnly,
 		DataDir:              dataDir,
@@ -327,7 +335,7 @@ func getTestProfileWithExternalPg(dataDir, resourceDir string, port int, pgUser 
 		Mode:                       testReleaseMode,
 		ExternalURL:                fmt.Sprintf("http://localhost:%d", port),
 		GrpcPort:                   port + 1,
-		SampleDatabasePort:         port + 2,
+		SampleDatabasePort:         0,
 		PgUser:                     pgUser,
 		DataDir:                    dataDir,
 		ResourceDir:                resourceDir,
@@ -383,7 +391,7 @@ func (ctl *controller) startMockServers(vcsProviderCreator fake.VCSProviderCreat
 }
 
 // start only called by StartServer() and StartServerWithExternalPg().
-func (ctl *controller) start(ctx context.Context, port int) error {
+func (ctl *controller) start(ctx context.Context, port int) (context.Context, error) {
 	ctl.rootURL = fmt.Sprintf("http://localhost:%d", port)
 	ctl.apiURL = fmt.Sprintf("http://localhost:%d/api", port)
 	ctl.v1APIURL = fmt.Sprintf("http://localhost:%d/v1", port)
@@ -397,24 +405,42 @@ func (ctl *controller) start(ctx context.Context, port int) error {
 	}()
 
 	if err := waitForServerStart(ctl.server, errChan); err != nil {
-		return errors.Wrap(err, "failed to wait for server to start")
+		return nil, errors.Wrap(err, "failed to wait for server to start")
 	}
 
 	// initialize controller clients.
 	ctl.client = &http.Client{}
 
+	if err := ctl.waitForHealthz(); err != nil {
+		return nil, errors.Wrap(err, "failed to wait for healthz")
+	}
+
+	if err := ctl.Signup(); err != nil && !strings.Contains(err.Error(), "exist") {
+		return nil, err
+	}
+	if err := ctl.Login(); err != nil {
+		return nil, err
+	}
+
 	// initialize grpc connection.
 	grpcConn, err := grpc.Dial(fmt.Sprintf("127.0.0.1:%d", ctl.profile.GrpcPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return errors.Wrap(err, "failed to dial grpc")
+		return nil, errors.Wrap(err, "failed to dial grpc")
 	}
 	ctl.grpcConn = grpcConn
+	ctl.reviewServiceClient = v1pb.NewReviewServiceClient(ctl.grpcConn)
+	ctl.orgPolicyServiceClient = v1pb.NewOrgPolicyServiceClient(ctl.grpcConn)
+	ctl.projectServiceClient = v1pb.NewProjectServiceClient(ctl.grpcConn)
+	ctl.authServiceClient = v1pb.NewAuthServiceClient(ctl.grpcConn)
+	ctl.settingServiceClient = v1pb.NewSettingServiceClient(ctl.grpcConn)
+	ctl.environmentServiceClient = v1pb.NewEnvironmentServiceClient(ctl.grpcConn)
+	ctl.instanceServiceClient = v1pb.NewInstanceServiceClient(ctl.grpcConn)
+	ctl.sheetServiceClient = v1pb.NewSheetServiceClient(ctl.grpcConn)
 
-	if err := ctl.waitForHealthz(); err != nil {
-		return errors.Wrap(err, "failed to wait for healthz")
-	}
-
-	return nil
+	return metadata.NewOutgoingContext(ctx, metadata.Pairs(
+		"Authorization",
+		fmt.Sprintf("Bearer %s", ctl.grpcMDAccessToken),
+	)), nil
 }
 
 func waitForServerStart(s *server.Server, errChan <-chan error) error {
@@ -679,23 +705,5 @@ func (ctl *controller) Login() error {
 	ctl.grpcMDAccessToken = resp.Header.Get("grpc-metadata-bytebase-access-token")
 	ctl.grpcMDRefreshToken = resp.Header.Get("grpc-metadata-bytebase-refresh-token")
 	ctl.grpcMDUser = resp.Header.Get("grpc-metadata-bytebase-user")
-	return nil
-}
-
-func (ctl *controller) patchSetting(settingPatch api.SettingPatch) error {
-	buf := new(bytes.Buffer)
-	if err := jsonapi.MarshalPayload(buf, &settingPatch); err != nil {
-		return errors.Wrap(err, "failed to marshal settingPatch")
-	}
-
-	body, err := ctl.patch(fmt.Sprintf("/setting/%s", settingPatch.Name), buf)
-	if err != nil {
-		return err
-	}
-
-	setting := new(api.Setting)
-	if err = jsonapi.UnmarshalPayload(body, setting); err != nil {
-		return errors.Wrap(err, "fail to unmarshal setting response")
-	}
 	return nil
 }

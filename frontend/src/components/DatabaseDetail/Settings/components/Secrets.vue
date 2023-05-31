@@ -193,15 +193,15 @@ import { cloneDeep } from "lodash-es";
 
 import { type BBGridColumn, type BBGridRow, BBGrid } from "@/bbkit";
 import { Secret } from "@/types/proto/v1/database_service";
-import { type Database } from "@/types";
+import { type ComposedDatabase } from "@/types";
 import {
   pushNotification,
   useDatabaseSecretStore,
   hasFeature,
-  useCurrentUser,
+  useCurrentUserV1,
 } from "@/store";
 import { useGracefulRequest } from "@/store/modules/utils";
-import { hasPermissionInProject, hasWorkspacePermission } from "@/utils";
+import { hasPermissionInProjectV1, hasWorkspacePermissionV1 } from "@/utils";
 
 export type Detail = {
   secret: Secret;
@@ -214,7 +214,7 @@ export type Detail = {
 export type SecretRow = BBGridRow<Secret>;
 
 const props = defineProps<{
-  database: Database;
+  database: ComposedDatabase;
 }>();
 
 const store = useDatabaseSecretStore();
@@ -222,12 +222,11 @@ const { t } = useI18n();
 const secretList = ref<Secret[]>([]);
 const ready = ref(false);
 const parent = computed(() => {
-  const { database } = props;
-  return `instances/${database.instance.resourceId}/databases/${database.name}`;
+  return props.database.name;
 });
 const detail = ref<Detail>();
 const showFeatureModal = ref(false);
-const currentUser = useCurrentUser();
+const currentUserV1 = useCurrentUserV1();
 
 const COLUMNS = computed(() => {
   const columns: BBGridColumn[] = [
@@ -248,14 +247,15 @@ const COLUMNS = computed(() => {
 });
 
 const allowAdmin = computed(() => {
+  const project = props.database.projectEntity;
   return (
-    hasWorkspacePermission(
+    hasWorkspacePermissionV1(
       "bb.permission.workspace.manage-database-secrets",
-      currentUser.value.role
+      currentUserV1.value.userRole
     ) ||
-    hasPermissionInProject(
-      props.database.project,
-      currentUser.value,
+    hasPermissionInProjectV1(
+      project.iamPolicy,
+      currentUserV1.value,
       "bb.permission.project.manage-database-secrets"
     )
   );
@@ -407,7 +407,7 @@ const handleDelete = async (secret: Secret) => {
 };
 
 watch(
-  () => props.database.id,
+  () => props.database.name,
   async () => {
     ready.value = false;
     try {

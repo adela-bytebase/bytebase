@@ -26,9 +26,6 @@
           @update:value="state.resourceId = $event"
         />
       </div>
-      <div>
-        {{ state.resourceId }}
-      </div>
       <div class="col-span-1">
         <label for="name" class="text-base leading-6 font-medium text-control">
           {{ $t("project.create-modal.key") }}
@@ -200,7 +197,7 @@ const allowCreate = computed(() => {
 
 const create = async () => {
   if (
-    state.project.tenantMode === TenantMode.TENANT_MODE_DISABLED &&
+    state.project.tenantMode === TenantMode.TENANT_MODE_ENABLED &&
     !hasFeature("bb.feature.multi-tenancy")
   ) {
     state.showFeatureModal = true;
@@ -224,7 +221,7 @@ const create = async () => {
       module: "bytebase",
       style: "SUCCESS",
       title: t("project.create-modal.success-prompt", {
-        name: createdProject.name,
+        name: createdProject.title,
       }),
     });
     const url = {

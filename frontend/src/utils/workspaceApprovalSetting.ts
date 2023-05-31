@@ -4,22 +4,18 @@ import { v4 as uuidv4 } from "uuid";
 import {
   DEFAULT_RISK_LEVEL,
   ParsedApprovalRule,
-  SYSTEM_BOT_ID,
-  UNKNOWN_ID,
+  SYSTEM_BOT_EMAIL,
+  unknownUser,
+  UNKNOWN_USER_NAME,
   UnrecognizedApprovalRule,
 } from "@/types";
 import { ParsedExpr } from "@/types/proto/google/api/expr/v1alpha1/syntax";
-import {
-  WorkspaceApprovalSetting,
-  WorkspaceApprovalSetting_Rule as ApprovalRule,
-} from "@/types/proto/store/setting";
 import { Risk_Source } from "@/types/proto/v1/risk_service";
 import {
   LocalApprovalConfig,
   LocalApprovalRule,
   PresetRiskLevelList,
   SupportedSourceList,
-  unknown,
 } from "@/types";
 import { t, te } from "@/plugins/i18n";
 import {
@@ -29,7 +25,7 @@ import {
   ApprovalNode_Type,
   ApprovalStep_Type,
 } from "@/types/proto/v1/review_service";
-import { usePrincipalStore } from "@/store";
+import { useUserStore } from "@/store";
 import {
   buildCELExpr,
   EqualityExpr,
@@ -38,6 +34,11 @@ import {
   SimpleExpr,
 } from "@/plugins/cel";
 import { displayRoleTitle } from "./role";
+import {
+  WorkspaceApprovalSetting,
+  WorkspaceApprovalSetting_Rule as ApprovalRule,
+} from "@/types/proto/v1/setting_service";
+import { userNamePrefix } from "@/store/modules/v1/common";
 
 export const approvalNodeGroupValueText = (group: ApprovalNode_GroupValue) => {
   const name = approvalNode_GroupValueToJSON(group);
@@ -256,7 +257,7 @@ export const seedWorkspaceApprovalSetting = () => {
       template: {
         title,
         description,
-        creatorId: SYSTEM_BOT_ID,
+        creator: `${userNamePrefix}${SYSTEM_BOT_EMAIL}`,
         flow: {
           steps: roles.map((role) => ({
             type: ApprovalStep_Type.ANY,
@@ -316,11 +317,8 @@ export const seedWorkspaceApprovalSetting = () => {
 };
 
 export const creatorOfRule = (rule: LocalApprovalRule) => {
-  const creatorId = rule.template.creatorId ?? UNKNOWN_ID;
-  if (creatorId === UNKNOWN_ID) return unknown("PRINCIPAL");
-  if (creatorId === SYSTEM_BOT_ID) {
-    return usePrincipalStore().principalById(creatorId);
-  }
+  const creatorName = rule.template.creator ?? UNKNOWN_USER_NAME;
+  if (creatorName === UNKNOWN_USER_NAME) return unknownUser();
 
-  return usePrincipalStore().principalById(creatorId);
+  return useUserStore().getUserByIdentifier(creatorName) ?? unknownUser();
 };

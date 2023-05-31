@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,6 +11,7 @@ import (
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/vcs"
 	"github.com/bytebase/bytebase/backend/tests/fake"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
 func TestSheetVCS(t *testing.T) {
@@ -45,7 +47,7 @@ func TestSheetVCS(t *testing.T) {
 			a := require.New(t)
 			ctx := context.Background()
 			ctl := &controller{}
-			err := ctl.StartServerWithExternalPg(ctx, &config{
+			ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 				dataDir:            t.TempDir(),
 				vcsProviderCreator: test.vcsProviderCreator,
 			})
@@ -68,13 +70,9 @@ func TestSheetVCS(t *testing.T) {
 			a.NoError(err)
 
 			// Create a project.
-			project, err := ctl.createProject(
-				api.ProjectCreate{
-					ResourceID: generateRandomString("project", 10),
-					Name:       "Test VCS Project",
-					Key:        "TestVCSSchemaUpdate",
-				},
-			)
+			project, err := ctl.createProject(ctx)
+			a.NoError(err)
+			projectUID, err := strconv.Atoi(project.Uid)
 			a.NoError(err)
 
 			// Create a repository.
@@ -87,7 +85,7 @@ func TestSheetVCS(t *testing.T) {
 			_, err = ctl.createRepository(
 				api.RepositoryCreate{
 					VCSID:              vcs.ID,
-					ProjectID:          project.ID,
+					ProjectID:          projectUID,
 					Name:               "Test Repository",
 					FullPath:           test.repositoryFullPath,
 					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
@@ -113,19 +111,29 @@ func TestSheetVCS(t *testing.T) {
 			err = ctl.vcsProvider.AddFiles(test.externalID, files)
 			a.NoError(err)
 
-			sheetsBefore, err := ctl.listMySheets()
+			resp, err := ctl.sheetServiceClient.SearchSheets(ctx, &v1pb.SearchSheetsRequest{
+				Parent: "projects/-",
+				Filter: "creator = users/demo@example.com",
+			})
+			a.NoError(err)
+			sheetsBefore := resp.Sheets
 			a.NoError(err)
 
-			err = ctl.syncSheet(project.ID)
+			err = ctl.syncSheet(projectUID)
 			a.NoError(err)
 
-			sheetsAfter, err := ctl.listMySheets()
+			resp, err = ctl.sheetServiceClient.SearchSheets(ctx, &v1pb.SearchSheetsRequest{
+				Parent: "projects/-",
+				Filter: "creator = users/demo@example.com",
+			})
+			a.NoError(err)
+			sheetsAfter := resp.Sheets
 			a.NoError(err)
 			a.Len(sheetsAfter, len(sheetsBefore)+1)
 
 			sheetFromVCS := sheetsAfter[len(sheetsAfter)-1]
-			a.Equal("all_employee", sheetFromVCS.Name)
-			a.Equal(fileContent, sheetFromVCS.Statement)
+			a.Equal("all_employee", sheetFromVCS.Title)
+			a.Equal(fileContent, string(sheetFromVCS.Content))
 		})
 	}
 }

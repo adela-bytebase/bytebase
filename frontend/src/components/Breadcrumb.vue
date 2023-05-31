@@ -72,8 +72,8 @@ import {
   useCurrentUser,
   useRouterStore,
   useBookmarkStore,
-  useDatabaseStore,
   useProjectV1Store,
+  useDatabaseV1Store,
 } from "@/store";
 import HelpTriggerIcon from "@/components/HelpTriggerIcon.vue";
 
@@ -140,6 +140,10 @@ export default defineComponent({
       const sqlReviewPolicySlug = routeSlug.sqlReviewPolicySlug;
       const ssoName = routeSlug.ssoName;
 
+      const projectName = routeSlug.projectName;
+      const databaseGroupName = routeSlug.databaseGroupName;
+      const schemaGroupName = routeSlug.schemaGroupName;
+
       const list: Array<BreadcrumbItem> = [];
       if (environmentSlug) {
         list.push({
@@ -154,7 +158,7 @@ export default defineComponent({
 
         if (projectWebhookSlug) {
           const project = projectV1Store.getProjectByUID(
-            idFromSlug(projectSlug)
+            String(idFromSlug(projectSlug))
           );
           list.push({
             name: `${project.title}`,
@@ -173,8 +177,8 @@ export default defineComponent({
         });
 
         if (tableName || dataSourceSlug || migrationHistory) {
-          const database = useDatabaseStore().getDatabaseById(
-            idFromSlug(databaseSlug)
+          const database = useDatabaseV1Store().getDatabaseByUID(
+            String(idFromSlug(databaseSlug))
           );
           list.push({
             name: database.name,
@@ -203,6 +207,21 @@ export default defineComponent({
             name: t("settings.sidebar.sso"),
             path: "/setting/sso",
           });
+        }
+      } else if (schemaGroupName) {
+        if (projectName && databaseGroupName) {
+          list.push(
+            {
+              name: "Databases",
+            },
+            {
+              name: databaseGroupName,
+              path: `/projects/${projectName}/database-groups/${databaseGroupName}`,
+            },
+            {
+              name: `Tables - ${schemaGroupName}`,
+            }
+          );
         }
       }
 

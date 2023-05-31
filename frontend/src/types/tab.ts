@@ -1,10 +1,4 @@
-import {
-  Advice,
-  DatabaseId,
-  InstanceId,
-  SheetId,
-  SQLResultSet,
-} from "../types";
+import { Advice, SQLResultSet } from "../types";
 
 export type ExecuteConfig = {
   databaseType: string;
@@ -15,8 +9,8 @@ export type ExecuteOption = {
 };
 
 export type Connection = {
-  instanceId: InstanceId;
-  databaseId: DatabaseId;
+  instanceId: string;
+  databaseId: string;
 };
 
 export enum TabMode {
@@ -43,9 +37,9 @@ export interface TabInfo {
   };
   isExecutingSQL: boolean;
   queryResult?: SQLResultSet;
-  sheetId?: SheetId;
+  sheetName?: string;
   adviceList?: Advice[];
 }
 
-export type CoreTabInfo = Pick<TabInfo, "connection" | "sheetId" | "mode">;
+export type CoreTabInfo = Pick<TabInfo, "connection" | "sheetName" | "mode">;
 export type AnyTabInfo = Partial<TabInfo>;

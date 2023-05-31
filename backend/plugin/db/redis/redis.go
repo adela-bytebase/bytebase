@@ -20,6 +20,7 @@ import (
 	"github.com/bytebase/bytebase/backend/common/log"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/plugin/db/util"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
 var (
@@ -43,11 +44,7 @@ func newDriver(_ db.DriverConfig) db.Driver {
 
 // Open opens the redis driver.
 func (d *Driver) Open(ctx context.Context, _ db.Type, config db.ConnectionConfig, _ db.ConnectionContext) (db.Driver, error) {
-	port := config.Port
-	if port == "" {
-		port = "6379"
-	}
-	addr := fmt.Sprintf("%s:%s", config.Host, port)
+	addr := fmt.Sprintf("%s:%s", config.Host, config.Port)
 	tlsConfig, err := config.TLSConfig.GetSslConfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "redis: failed to get tls config")
@@ -231,4 +228,49 @@ func (*Driver) Dump(_ context.Context, _ io.Writer, schemaOnly bool) (string, er
 // Restore the database from src, which is a full backup.
 func (*Driver) Restore(context.Context, io.Reader) error {
 	return errors.New("redis: not supported")
+}
+
+// QueryConn2 queries a SQL statement in a given connection.
+func (d *Driver) QueryConn2(ctx context.Context, _ *sql.Conn, statement string, _ *db.QueryContext) ([]*v1pb.QueryResult, error) {
+	lines := strings.Split(statement, "\n")
+	for i := range lines {
+		lines[i] = strings.Trim(lines[i], " \n\t\r")
+	}
+
+	var data []*v1pb.QueryRow
+	var cmds []*redis.Cmd
+
+	if _, err := d.rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
+		for _, line := range lines {
+			if line == "" {
+				continue
+			}
+			var input []any
+			for _, s := range strings.Split(line, " ") {
+				input = append(input, s)
+			}
+			cmd := p.Do(ctx, input...)
+			cmds = append(cmds, cmd)
+		}
+		return nil
+	}); err != nil && err != redis.Nil {
+		return nil, err
+	}
+
+	for _, cmd := range cmds {
+		if cmd.Err() == redis.Nil {
+			data = append(data, &v1pb.QueryRow{Values: []*v1pb.RowValue{{Kind: &v1pb.RowValue_StringValue{StringValue: "redis: nil"}}}})
+			continue
+		}
+
+		// RowValue cannot handle interface{} type
+		val := cmd.String()
+		data = append(data, &v1pb.QueryRow{Values: []*v1pb.RowValue{{Kind: &v1pb.RowValue_StringValue{StringValue: val}}}})
+	}
+
+	return []*v1pb.QueryResult{{
+		ColumnNames:     []string{"result"},
+		ColumnTypeNames: []string{"TEXT"},
+		Rows:            data,
+	}}, nil
 }

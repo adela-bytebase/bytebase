@@ -20,10 +20,10 @@ import (
 
 	"github.com/bytebase/bytebase/backend/common/log"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
-	"github.com/bytebase/bytebase/backend/plugin/db"
 	resourcemysql "github.com/bytebase/bytebase/backend/resources/mysql"
 	"github.com/bytebase/bytebase/backend/tests/fake"
 	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 
 	"go.uber.org/zap"
 
@@ -41,7 +41,7 @@ func TestRestoreToNewDatabase(t *testing.T) {
 	a := require.New(t)
 	ctx := context.Background()
 	ctl := &controller{}
-	project, mysqlDB, database, backup, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
+	ctx, project, mysqlDB, database, backup, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
 	defer cleanFn()
 
 	metadata, err := ctl.getLatestSchemaMetadata(database.ID)
@@ -64,12 +64,12 @@ func TestRestoreToNewDatabase(t *testing.T) {
 	a.NoError(err)
 
 	// Restore stage.
-	status, err := ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err := ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
 	// Cutover stage.
-	status, err = ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err = ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -83,7 +83,7 @@ func TestRetentionPolicy(t *testing.T) {
 	a := require.New(t)
 	ctx := context.Background()
 	ctl := &controller{}
-	_, _, database, backup, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
+	ctx, _, _, database, backup, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
 	defer cleanFn()
 
 	metaDB, err := sql.Open("pgx", ctl.profile.PgURL)
@@ -115,7 +115,7 @@ func TestPITRGeneral(t *testing.T) {
 	a := require.New(t)
 	ctx := context.Background()
 	ctl := &controller{}
-	project, mysqlDB, database, _, mysqlPort, cleanFn := setUpForPITRTest(ctx, t, ctl)
+	ctx, project, mysqlDB, database, _, mysqlPort, cleanFn := setUpForPITRTest(ctx, t, ctl)
 	defer cleanFn()
 
 	insertRangeData(t, mysqlDB, numRowsTime0, numRowsTime1)
@@ -135,7 +135,7 @@ func TestPITRGeneral(t *testing.T) {
 	a.NoError(err)
 
 	// Restore stage.
-	status, err := ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err := ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -144,7 +144,7 @@ func TestPITRGeneral(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// Cutover stage.
-	status, err = ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err = ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -158,7 +158,7 @@ func TestPITRDropDatabase(t *testing.T) {
 	a := require.New(t)
 	ctx := context.Background()
 	ctl := &controller{}
-	project, mysqlDB, database, _, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
+	ctx, project, mysqlDB, database, _, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
 	defer cleanFn()
 
 	insertRangeData(t, mysqlDB, numRowsTime0, numRowsTime1)
@@ -188,7 +188,7 @@ func TestPITRDropDatabase(t *testing.T) {
 	a.NoError(err)
 
 	// Restore stage.
-	status, err := ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err := ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -196,7 +196,7 @@ func TestPITRDropDatabase(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// Cutover stage.
-	status, err = ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err = ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -210,7 +210,7 @@ func TestPITRTwice(t *testing.T) {
 	a := require.New(t)
 	ctx := context.Background()
 	ctl := &controller{}
-	project, mysqlDB, database, _, mysqlPort, cleanFn := setUpForPITRTest(ctx, t, ctl)
+	ctx, project, mysqlDB, database, _, mysqlPort, cleanFn := setUpForPITRTest(ctx, t, ctl)
 	defer cleanFn()
 
 	log.Debug("Creating issue for the first PITR.")
@@ -225,7 +225,7 @@ func TestPITRTwice(t *testing.T) {
 	a.NoError(err)
 
 	// Restore stage.
-	status, err := ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err := ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -234,7 +234,7 @@ func TestPITRTwice(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// Cutover stage.
-	status, err = ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err = ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -265,7 +265,7 @@ func TestPITRTwice(t *testing.T) {
 	a.NoError(err)
 
 	// Restore stage.
-	status, err = ctl.waitIssueNextTaskWithTaskApproval(issue2.ID)
+	status, err = ctl.waitIssueNextTaskWithTaskApproval(ctx, issue2.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -274,7 +274,7 @@ func TestPITRTwice(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// Cutover stage.
-	status, err = ctl.waitIssueNextTaskWithTaskApproval(issue2.ID)
+	status, err = ctl.waitIssueNextTaskWithTaskApproval(ctx, issue2.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -290,28 +290,31 @@ func TestPITRToNewDatabaseInAnotherInstance(t *testing.T) {
 	a := require.New(t)
 	ctx := context.Background()
 	ctl := &controller{}
-	project, sourceMySQLDB, database, _, mysqlPort, cleanFn := setUpForPITRTest(ctx, t, ctl)
+	ctx, project, sourceMySQLDB, database, _, mysqlPort, cleanFn := setUpForPITRTest(ctx, t, ctl)
 	defer cleanFn()
+	projectUID, err := strconv.Atoi(project.Uid)
+	a.NoError(err)
 
 	dstPort := getTestPort()
 	dstStopFn := resourcemysql.SetupTestInstance(t, dstPort, mysqlBinDir)
 	defer dstStopFn()
 	dstConnCfg := getMySQLConnectionConfig(strconv.Itoa(dstPort), "")
 
-	environments, err := ctl.getEnvironments()
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
-	a.NoError(err)
-	dstInstance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID: generateRandomString("instance", 10),
-		// The target instance must be within the same environment as the instance of the original database now.
-		EnvironmentID: prodEnvironment.ID,
-		Name:          "DestinationInstance",
-		Engine:        db.MySQL,
-		Host:          dstConnCfg.Host,
-		Port:          dstConnCfg.Port,
-		Username:      dstConnCfg.Username,
+	dstInstance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: "destinationinstance",
+		Instance: &v1pb.Instance{
+			Title:       "DestinationInstance",
+			Engine:      v1pb.Engine_MYSQL,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: dstConnCfg.Host, Port: dstConnCfg.Port, Username: dstConnCfg.Username}},
+		},
 	})
+	a.NoError(err)
+	dstInstanceUID, err := strconv.Atoi(dstInstance.Uid)
+	a.NoError(err)
+	prodEnvironmentResourceID := strings.TrimPrefix(prodEnvironment.Name, "environments/")
 	a.NoError(err)
 
 	insertRangeData(t, sourceMySQLDB, numRowsTime0, numRowsTime1)
@@ -326,7 +329,7 @@ func TestPITRToNewDatabaseInAnotherInstance(t *testing.T) {
 	_, err = sourceMySQLDB.ExecContext(ctx, dropColumnStmt)
 	a.NoError(err)
 
-	labels, err := marshalLabels(nil, dstInstance.Environment.ResourceID)
+	labels, err := marshalLabels(nil, prodEnvironmentResourceID)
 	a.NoError(err)
 
 	targetDatabaseName := "new_database"
@@ -334,7 +337,7 @@ func TestPITRToNewDatabaseInAnotherInstance(t *testing.T) {
 		DatabaseID:    database.ID,
 		PointInTimeTs: &targetTs,
 		CreateDatabaseCtx: &api.CreateDatabaseContext{
-			InstanceID:   dstInstance.ID,
+			InstanceID:   dstInstanceUID,
 			DatabaseName: targetDatabaseName,
 			Labels:       labels,
 			CharacterSet: "utf8mb4",
@@ -344,7 +347,7 @@ func TestPITRToNewDatabaseInAnotherInstance(t *testing.T) {
 	a.NoError(err)
 
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("Restore database %s to the time %d", database.Name, targetTs),
 		Type:          api.IssueDatabaseRestorePITR,
 		AssigneeID:    api.SystemBotID,
@@ -353,12 +356,12 @@ func TestPITRToNewDatabaseInAnotherInstance(t *testing.T) {
 	a.NoError(err)
 
 	// Create database task
-	status, err := ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err := ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
 	// Restore task
-	status, err = ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err = ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -378,7 +381,7 @@ func TestPITRInvalidTimePoint(t *testing.T) {
 	ctx := context.Background()
 	ctl := &controller{}
 	targetTs := time.Now().Unix()
-	project, _, database, _, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
+	ctx, project, _, database, _, _, cleanFn := setUpForPITRTest(ctx, t, ctl)
 	defer cleanFn()
 
 	issue, err := createPITRIssue(ctl, project, api.PITRContext{
@@ -387,18 +390,22 @@ func TestPITRInvalidTimePoint(t *testing.T) {
 	})
 	a.NoError(err)
 
-	status, err := ctl.waitIssueNextTaskWithTaskApproval(issue.ID)
+	status, err := ctl.waitIssueNextTaskWithTaskApproval(ctx, issue.ID)
 	a.Error(err)
 	a.Equal(api.TaskFailed, status)
 }
 
-func createPITRIssue(ctl *controller, project *api.Project, pitrContext api.PITRContext) (*api.Issue, error) {
+func createPITRIssue(ctl *controller, project *v1pb.Project, pitrContext api.PITRContext) (*api.Issue, error) {
+	projectUID, err := strconv.Atoi(project.Uid)
+	if err != nil {
+		return nil, err
+	}
 	pitrIssueCtx, err := json.Marshal(&pitrContext)
 	if err != nil {
 		return nil, err
 	}
 	return ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("Restore database %d", pitrContext.DatabaseID),
 		Type:          api.IssueDatabaseRestorePITR,
 		AssigneeID:    api.SystemBotID,
@@ -406,11 +413,11 @@ func createPITRIssue(ctl *controller, project *api.Project, pitrContext api.PITR
 	})
 }
 
-func setUpForPITRTest(ctx context.Context, t *testing.T, ctl *controller) (*api.Project, *sql.DB, *api.Database, *api.Backup, int, func()) {
+func setUpForPITRTest(ctx context.Context, t *testing.T, ctl *controller) (context.Context, *v1pb.Project, *sql.DB, *api.Database, *api.Backup, int, func()) {
 	a := require.New(t)
 
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:            dataDir,
 		vcsProviderCreator: fake.NewGitLab,
 	})
@@ -418,25 +425,24 @@ func setUpForPITRTest(ctx context.Context, t *testing.T, ctl *controller) (*api.
 	err = ctl.setLicense()
 	a.NoError(err)
 
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "PITRTest",
-		Key:        "PTT",
-		TenantMode: api.TenantModeDisabled,
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
-	policy := api.BackupPlanPolicy{Schedule: api.BackupPlanPolicyScheduleUnset}
-	buf, err := json.Marshal(policy)
-	a.NoError(err)
-	str := string(buf)
-	_, err = ctl.upsertPolicy(api.PolicyResourceTypeEnvironment, prodEnvironment.ID, api.PolicyTypeBackupPlan, api.PolicyUpsert{
-		Payload: &str,
+	_, err = ctl.orgPolicyServiceClient.CreatePolicy(ctx, &v1pb.CreatePolicyRequest{
+		Parent: prodEnvironment.Name,
+		Policy: &v1pb.Policy{
+			Type: v1pb.PolicyType_BACKUP_PLAN,
+			Policy: &v1pb.Policy_BackupPlanPolicy{
+				BackupPlanPolicy: &v1pb.BackupPlanPolicy{
+					Schedule: v1pb.BackupPlanSchedule_UNSET,
+				},
+			},
+		},
 	})
 	a.NoError(err)
 
@@ -446,22 +452,25 @@ func setUpForPITRTest(ctx context.Context, t *testing.T, ctl *controller) (*api.
 	mysqlPort := getTestPort()
 	stopInstance := resourcemysql.SetupTestInstance(t, mysqlPort, mysqlBinDir)
 	connCfg := getMySQLConnectionConfig(strconv.Itoa(mysqlPort), "")
-	instance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID:    generateRandomString("instance", 10),
-		EnvironmentID: prodEnvironment.ID,
-		Name:          baseName + "_Instance",
-		Engine:        db.MySQL,
-		Host:          connCfg.Host,
-		Port:          connCfg.Port,
-		Username:      connCfg.Username,
+	a.NoError(err)
+	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: generateRandomString("instance", 10),
+		Instance: &v1pb.Instance{
+			Title:       baseName + "_Instance",
+			Engine:      v1pb.Engine_MYSQL,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: connCfg.Host, Port: connCfg.Port, Username: connCfg.Username}},
+		},
 	})
 	a.NoError(err)
+	instanceUID, err := strconv.Atoi(instance.Uid)
+	a.NoError(err)
 
-	err = ctl.createDatabase(project, instance, databaseName, "", nil)
+	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil)
 	a.NoError(err)
 
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		InstanceID: &instance.ID,
+		InstanceID: &instanceUID,
 	})
 	a.NoError(err)
 	a.Equal(1, len(databases))
@@ -485,7 +494,7 @@ func setUpForPITRTest(ctx context.Context, t *testing.T, ctl *controller) (*api.
 	err = ctl.waitBackup(database.ID, backup.ID)
 	a.NoError(err)
 
-	return project, mysqlDB, database, backup, mysqlPort, func() {
+	return ctx, project, mysqlDB, database, backup, mysqlPort, func() {
 		a.NoError(ctl.Close(ctx))
 		stopInstance()
 		a.NoError(mysqlDB.Close())

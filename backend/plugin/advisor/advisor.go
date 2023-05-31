@@ -335,6 +335,9 @@ const (
 
 	// Oracle Advisor.
 
+	// OracleSyntax is an advisor type for Oracle syntax.
+	OracleSyntax Type = "bb.plugin.advisor.oracle.syntax"
+
 	// OracleTableRequirePK is an advisor type for Oracle table require primary key.
 	OracleTableRequirePK Type = "bb.plugin.advisor.oracle.table.require-pk"
 
@@ -382,6 +385,12 @@ const (
 
 	// OracleTableNamingNoKeyword is an advisor type for Oracle table naming convention without keyword.
 	OracleTableNamingNoKeyword Type = "bb.plugin.advisor.oracle.naming.table-no-keyword"
+
+	// OracleIdentifierNamingNoKeyword is an advisor type for Oracle identifier naming convention without keyword.
+	OracleIdentifierNamingNoKeyword Type = "bb.plugin.advisor.oracle.naming.identifier-no-keyword"
+
+	// OracleIdentifierCase is an advisor type for Oracle identifier case.
+	OracleIdentifierCase Type = "bb.plugin.advisor.oracle.naming.identifier-case"
 )
 
 // Advice is the result of an advisor.
@@ -504,7 +513,7 @@ func Check(dbType db.Type, advType Type, ctx Context, statement string) (adviceL
 // IsSyntaxCheckSupported checks the engine type if syntax check supports it.
 func IsSyntaxCheckSupported(dbType db.Type) bool {
 	switch dbType {
-	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres:
+	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres, db.Oracle, db.OceanBase:
 		return true
 	}
 	return false
@@ -513,7 +522,7 @@ func IsSyntaxCheckSupported(dbType db.Type) bool {
 // IsSQLReviewSupported checks the engine type if SQL review supports it.
 func IsSQLReviewSupported(dbType db.Type) bool {
 	switch dbType {
-	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres:
+	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres, db.Oracle, db.OceanBase:
 		return true
 	}
 	return false

@@ -1,19 +1,25 @@
 package v1
 
 import (
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/google/cel-go/cel"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/ebnf"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/bytebase/bytebase/backend/plugin/db"
+	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
-type comparatorType string
+type operatorType string
 
 const (
 	projectNamePrefix            = "projects/"
@@ -30,9 +36,17 @@ const (
 	externalVersionControlPrefix = "externalVersionControls/"
 	riskPrefix                   = "risks/"
 	reviewPrefix                 = "reviews/"
+	rolloutPrefix                = "rollouts/"
+	stagePrefix                  = "stages/"
+	taskPrefix                   = "tasks/"
+	planPrefix                   = "plans/"
 	rolePrefix                   = "roles/"
 	secretNamePrefix             = "secrets/"
 	webhookIDPrefix              = "webhooks/"
+	sheetIDPrefix                = "sheets/"
+	databaseGroupNamePrefix      = "databaseGroups/"
+	schemaGroupNamePrefix        = "schemaGroups/"
+	changeHistoryPrefix          = "changeHistories/"
 
 	deploymentConfigSuffix = "/deploymentConfig"
 	backupSettingSuffix    = "/backupSetting"
@@ -41,12 +55,12 @@ const (
 
 	setupExternalURLError = "external URL isn't setup yet, see https://www.bytebase.com/docs/get-started/install/external-url"
 
-	comparatorTypeEqual        comparatorType = "="
-	comparatorTypeLess         comparatorType = "<"
-	comparatorTypeLessEqual    comparatorType = "<="
-	comparatorTypeGreater      comparatorType = ">"
-	comparatorTypeGreaterEqual comparatorType = ">="
-	comparatorTypeNotEqual     comparatorType = "!="
+	comparatorTypeEqual        operatorType = "="
+	comparatorTypeLess         operatorType = "<"
+	comparatorTypeLessEqual    operatorType = "<="
+	comparatorTypeGreater      operatorType = ">"
+	comparatorTypeGreaterEqual operatorType = ">="
+	comparatorTypeNotEqual     operatorType = "!="
 )
 
 var (
@@ -69,6 +83,22 @@ func getProjectID(name string) (string, error) {
 		return "", err
 	}
 	return tokens[0], nil
+}
+
+func getProjectIDDatabaseGroupID(name string) (string, string, error) {
+	tokens, err := getNameParentTokens(name, projectNamePrefix, databaseGroupNamePrefix)
+	if err != nil {
+		return "", "", err
+	}
+	return tokens[0], tokens[1], nil
+}
+
+func getProjectIDDatabaseGroupIDSchemaGroupID(name string) (string, string, string, error) {
+	tokens, err := getNameParentTokens(name, projectNamePrefix, databaseGroupNamePrefix, schemaGroupNamePrefix)
+	if err != nil {
+		return "", "", "", err
+	}
+	return tokens[0], tokens[1], tokens[2], nil
 }
 
 func getProjectIDWebhookID(name string) (string, string, error) {
@@ -130,6 +160,15 @@ func getInstanceDatabaseID(name string) (string, string, error) {
 	return tokens[0], tokens[1], nil
 }
 
+func getInstanceDatabaseIDChangeHistory(name string) (string, string, string, error) {
+	// the name should be instances/{instance-id}/databases/{database-id}/changeHistories/{changeHistory-id}
+	tokens, err := getNameParentTokens(name, instanceNamePrefix, databaseIDPrefix, changeHistoryPrefix)
+	if err != nil {
+		return "", "", "", err
+	}
+	return tokens[0], tokens[1], tokens[2], nil
+}
+
 func getInstanceDatabaseIDSecretName(name string) (string, string, string, error) {
 	// the instance request should be instances/{instance-id}/databases/{database-id}/secrets/{secret-name}
 	tokens, err := getNameParentTokens(name, instanceNamePrefix, databaseIDPrefix, secretNamePrefix)
@@ -157,6 +196,14 @@ func getUserID(name string) (int, error) {
 		return 0, errors.Errorf("invalid user ID %q", tokens[0])
 	}
 	return userID, nil
+}
+
+func getUserEmail(name string) (string, error) {
+	tokens, err := getNameParentTokens(name, userNamePrefix)
+	if err != nil {
+		return "", err
+	}
+	return tokens[0], nil
 }
 
 func getSettingName(name string) (string, error) {
@@ -227,12 +274,56 @@ func getReviewID(name string) (int, error) {
 	return reviewID, nil
 }
 
+func getTaskID(name string) (int, error) {
+	tokens, err := getNameParentTokens(name, projectNamePrefix, rolloutPrefix, stagePrefix, taskPrefix)
+	if err != nil {
+		return 0, err
+	}
+	taskID, err := strconv.Atoi(tokens[3])
+	if err != nil {
+		return 0, errors.Errorf("invalid task ID %q", tokens[1])
+	}
+	return taskID, nil
+}
+
+func getPlanID(name string) (int64, error) {
+	tokens, err := getNameParentTokens(name, projectNamePrefix, planPrefix)
+	if err != nil {
+		return 0, err
+	}
+	planID, err := strconv.ParseInt(tokens[1], 10, 64)
+	if err != nil {
+		return 0, errors.Errorf("invalid plan ID %q", tokens[1])
+	}
+	return planID, nil
+}
+
+func getProjectIDRolloutID(name string) (string, int, error) {
+	tokens, err := getNameParentTokens(name, projectNamePrefix, rolloutPrefix)
+	if err != nil {
+		return "", 0, err
+	}
+	rolloutID, err := strconv.Atoi(tokens[1])
+	if err != nil {
+		return "", 0, errors.Errorf("invalid rollout ID %q", tokens[1])
+	}
+	return tokens[0], rolloutID, nil
+}
+
 func getRoleID(name string) (string, error) {
 	tokens, err := getNameParentTokens(name, rolePrefix)
 	if err != nil {
 		return "", err
 	}
 	return tokens[0], nil
+}
+
+func getProjectResourceIDSheetID(name string) (string, string, error) {
+	tokens, err := getNameParentTokens(name, projectNamePrefix, sheetIDPrefix)
+	if err != nil {
+		return "", "", err
+	}
+	return tokens[0], tokens[1], nil
 }
 
 func trimSuffix(name, suffix string) (string, error) {
@@ -272,29 +363,41 @@ func isValidResourceID(resourceID string) bool {
 	return resourceIDMatcher.MatchString(resourceID)
 }
 
-const filterExample = `project = "projects/abc".`
+const filterExample = `project == "projects/abc"`
 
-// getFilter will parse the simple filter such as `project = "abc".` to "project" and "abc" .
-func getFilter(filter, filterKey string) (string, error) {
+// getProjectFilter will parse the simple filter such as `project = "projects/abc"` to "projects/abc" .
+func getProjectFilter(filter string) (string, error) {
 	retErr := errors.Errorf("invalid filter %q, example %q", filter, filterExample)
-	grammar, err := ebnf.Parse("", strings.NewReader(filter))
+	e, err := cel.NewEnv(cel.Variable("project", cel.StringType))
 	if err != nil {
+		return "", err
+	}
+	ast, issues := e.Compile(filter)
+	if issues != nil {
+		return "", status.Errorf(codes.InvalidArgument, issues.String())
+	}
+	expr := ast.Expr()
+	if expr == nil {
 		return "", retErr
 	}
-	if len(grammar) != 1 {
+	callExpr := expr.GetCallExpr()
+	if callExpr == nil {
 		return "", retErr
 	}
-	for key, production := range grammar {
-		if filterKey != key {
-			return "", errors.Errorf("support filter key %q only", filterKey)
-		}
-		token, ok := production.Expr.(*ebnf.Token)
-		if !ok {
-			return "", retErr
-		}
-		return token.String, nil
+	if callExpr.Function != "_==_" {
+		return "", retErr
 	}
-	return "", retErr
+	if len(callExpr.Args) != 2 {
+		return "", retErr
+	}
+	if callExpr.Args[0].GetIdentExpr() == nil || callExpr.Args[0].GetIdentExpr().Name != "project" {
+		return "", retErr
+	}
+	constExpr := callExpr.Args[1].GetConstExpr()
+	if constExpr == nil {
+		return "", retErr
+	}
+	return constExpr.GetStringValue(), nil
 }
 
 // getEBNFTokens will parse the simple filter such as `project = "abc" | "def".` to {project: ["abc", "def"]} .
@@ -368,9 +471,9 @@ func parseOrderBy(orderBy string) ([]orderByKey, error) {
 }
 
 type expression struct {
-	key        string
-	comparator comparatorType
-	value      string
+	key      string
+	operator operatorType
+	value    string
 }
 
 // parseFilter will parse the simple filter.
@@ -430,13 +533,13 @@ func parseExpression(expr string) (expression, error) {
 	}
 
 	return expression{
-		key:        words[0],
-		comparator: comparator,
-		value:      words[2],
+		key:      words[0],
+		operator: comparator,
+		value:    words[2],
 	}, nil
 }
 
-func getComparatorType(op string) (comparatorType, error) {
+func getComparatorType(op string) (operatorType, error) {
 	switch op {
 	case "=":
 		return comparatorTypeEqual, nil
@@ -571,4 +674,23 @@ func convertEngine(engine v1pb.Engine) db.Type {
 		return db.OceanBase
 	}
 	return db.UnknownType
+}
+
+func marshalPageToken(pageToken *storepb.PageToken) (string, error) {
+	b, err := proto.Marshal(pageToken)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to marshal page token")
+	}
+	return base64.StdEncoding.EncodeToString(b), nil
+}
+
+func unmarshalPageToken(s string, pageToken *storepb.PageToken) error {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return errors.Wrapf(err, "failed to decode page token")
+	}
+	if err := proto.Unmarshal(b, pageToken); err != nil {
+		return errors.Wrapf(err, "failed to unmarshal page token")
+	}
+	return nil
 }

@@ -12,13 +12,13 @@ import type { AIContextEvents } from "../types";
 import { useChatByTab, provideAIContext } from "../logic";
 import {
   useCurrentTab,
-  useInstanceById,
+  useInstanceV1ByUID,
   useMetadataByDatabaseId,
-  useSettingByName,
 } from "@/store";
 import ChatPanel from "./ChatPanel.vue";
 import MockInputPlaceholder from "./MockInputPlaceholder.vue";
 import { Connection } from "@/types";
+import { useSettingV1Store } from "@/store/modules/v1/setting";
 
 type LocalState = {
   showHistoryDialog: boolean;
@@ -37,17 +37,24 @@ const state = reactive<LocalState>({
   showHistoryDialog: false,
 });
 
-const openAIKeySetting = useSettingByName("bb.plugin.openai.key");
-const openAIEndpointSetting = useSettingByName("bb.plugin.openai.endpoint");
-const openAIKey = computed(() => openAIKeySetting.value?.value ?? "");
-const openAIEndpoint = computed(() => openAIEndpointSetting.value?.value ?? "");
+const settingV1Store = useSettingV1Store();
+const openAIKeySetting = settingV1Store.getSettingByName(
+  "bb.plugin.openai.key"
+);
+const openAIEndpointSetting = settingV1Store.getSettingByName(
+  "bb.plugin.openai.endpoint"
+);
+const openAIKey = computed(() => openAIKeySetting?.value?.stringValue ?? "");
+const openAIEndpoint = computed(
+  () => openAIEndpointSetting?.value?.stringValue ?? ""
+);
 const tab = useCurrentTab();
 
-const instance = useInstanceById(
-  computed(() => tab.value.connection.instanceId)
+const { instance } = useInstanceV1ByUID(
+  computed(() => tab.value.connection.databaseId)
 );
 const databaseMetadata = useMetadataByDatabaseId(
-  computed(() => tab.value.connection.databaseId),
+  computed(() => Number(tab.value.connection.databaseId)),
   false /* !skipCache */
 );
 
@@ -65,7 +72,7 @@ const chat = useChatByTab();
 provideAIContext({
   openAIKey,
   openAIEndpoint,
-  engineType: computed(() => instance.value.engine),
+  engine: computed(() => instance.value.engine),
   databaseMetadata: databaseMetadata,
   autoRun,
   showHistoryDialog: toRef(state, "showHistoryDialog"),

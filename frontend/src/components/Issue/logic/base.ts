@@ -4,7 +4,6 @@ import { isEmpty } from "lodash-es";
 import {
   Issue,
   IssueCreate,
-  Project,
   Stage,
   StageCreate,
   StageId,
@@ -28,11 +27,19 @@ import {
 import {
   useDatabaseStore,
   useIssueStore,
-  useProjectStore,
-  useSheetStore,
+  useProjectV1Store,
+  useSheetV1Store,
+  useSheetStatementByUid,
 } from "@/store";
 import { flattenTaskList, TaskTypeWithStatement } from "./common";
 import { maybeCreateBackTraceComments } from "../rollback/common";
+import { TenantMode } from "@/types/proto/v1/project_service";
+import { sheetNamePrefix } from "@/store/modules/v1/common";
+import {
+  Sheet_Visibility,
+  Sheet_Source,
+  Sheet_Type,
+} from "@/types/proto/v1/sheet_service";
 
 export const useBaseIssueLogic = (params: {
   create: Ref<boolean>;
@@ -42,17 +49,15 @@ export const useBaseIssueLogic = (params: {
   const route = useRoute();
   const router = useRouter();
   const issueStore = useIssueStore();
-  const projectStore = useProjectStore();
+  const projectV1Store = useProjectV1Store();
   const databaseStore = useDatabaseStore();
-  const sheetStore = useSheetStore();
+  const sheetV1Store = useSheetV1Store();
 
-  const project = computed((): Project => {
-    if (create.value) {
-      return projectStore.getProjectById(
-        (issue.value as IssueCreate).projectId
-      );
-    }
-    return (issue.value as Issue).project;
+  const project = computed(() => {
+    const projectUID = create.value
+      ? (issue.value as IssueCreate).projectId
+      : (issue.value as Issue).project.id;
+    return projectV1Store.getProjectByUID(String(projectUID));
   });
 
   const createIssue = async (issue: IssueCreate) => {
@@ -82,7 +87,7 @@ export const useBaseIssueLogic = (params: {
         return issue.value.pipeline!.stageList[index];
       }
       const stageId = idFromSlug(stageSlug);
-      const stageList = (issue.value as Issue).pipeline.stageList;
+      const stageList = (issue.value as Issue).pipeline!.stageList;
       for (const stage of stageList) {
         if (stage.id == stageId) {
           return stage;
@@ -90,7 +95,7 @@ export const useBaseIssueLogic = (params: {
       }
     } else if (!create.value && taskSlug) {
       const taskId = idFromSlug(taskSlug);
-      const stageList = (issue.value as Issue).pipeline.stageList;
+      const stageList = (issue.value as Issue).pipeline!.stageList;
       for (const stage of stageList) {
         for (const task of stage.taskList) {
           if (task.id == taskId) {
@@ -102,7 +107,7 @@ export const useBaseIssueLogic = (params: {
     if (create.value) {
       return issue.value.pipeline!.stageList[0];
     }
-    return activeStage((issue.value as Issue).pipeline);
+    return activeStage((issue.value as Issue).pipeline!);
   });
 
   const selectStageOrTask = (
@@ -178,7 +183,8 @@ export const useBaseIssueLogic = (params: {
   const isTenantMode = computed((): boolean => {
     // To sync databases schema in tenant mode, we use normal project logic to create issue.
     if (create.value && route.query.mode !== "tenant") return false;
-    if (project.value.tenantMode !== "TENANT") return false;
+    if (project.value.tenantMode !== TenantMode.TENANT_MODE_ENABLED)
+      return false;
 
     // We support single database migration in tenant mode projects.
     // So a pipeline should be tenant mode when it contains more
@@ -230,13 +236,13 @@ export const useBaseIssueLogic = (params: {
     if (create.value) {
       const taskCreate = task as TaskCreate;
       if (taskCreate.sheetId && taskCreate.sheetId !== UNKNOWN_ID) {
-        return sheetStore.getSheetById(taskCreate.sheetId)?.statement || "";
+        return useSheetStatementByUid(taskCreate.sheetId).value || "";
       }
       return (task as TaskCreate).statement;
     }
     return (
-      sheetStore.getSheetById(sheetIdOfTask(task as Task) || UNKNOWN_ID)
-        ?.statement || ""
+      useSheetStatementByUid(sheetIdOfTask(task as Task) || UNKNOWN_ID).value ||
+      ""
     );
   });
 
@@ -274,26 +280,40 @@ export const useBaseIssueLogic = (params: {
     const sheetId = task.sheetId;
     const statement = task.statement;
     let sheet = undefined;
+
     if (sheetId && sheetId !== UNKNOWN_ID) {
-      sheet = await sheetStore.getOrFetchSheetById(sheetId);
+      sheet = await sheetV1Store.getOrFetchSheetByName(
+        `${project.value.name}/${sheetNamePrefix}${sheetId}`
+      );
     }
 
     for (const taskItem of taskList) {
       if (TaskTypeWithStatement.includes(taskItem.type)) {
         if (sheet) {
-          if (sheet.statement.length < sheet.size) {
+          if (
+            new TextDecoder().decode(sheet.content).length < sheet.contentSize
+          ) {
             taskItem.sheetId = sheetId;
           } else {
-            const newSheet = await sheetStore.createSheet({
-              projectId: project.value.id,
-              databaseId: taskItem.databaseId,
-              name: uuidv4(),
-              statement,
-              visibility: "PROJECT",
-              source: "BYTEBASE_ARTIFACT",
-              payload: {},
-            });
-            taskItem.sheetId = newSheet.id;
+            let database = "";
+            if (taskItem.databaseId) {
+              database = (
+                await databaseStore.getOrFetchDatabaseById(taskItem.databaseId)
+              ).name;
+            }
+            const newSheet = await sheetV1Store.createSheet(
+              project.value.name,
+              {
+                title: uuidv4(),
+                content: new TextEncoder().encode(statement),
+                database: database,
+                visibility: Sheet_Visibility.VISIBILITY_PROJECT,
+                source: Sheet_Source.SOURCE_BYTEBASE_ARTIFACT,
+                type: Sheet_Type.TYPE_SQL,
+                payload: "{}",
+              }
+            );
+            taskItem.sheetId = sheetV1Store.getSheetUid(newSheet.name);
           }
           taskItem.statement = "";
         } else {

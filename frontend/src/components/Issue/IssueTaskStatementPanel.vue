@@ -120,7 +120,6 @@
 </template>
 
 <script lang="ts" setup>
-import { isNumber } from "lodash-es";
 import { useDialog } from "naive-ui";
 import { onMounted, reactive, watch, computed, ref, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
@@ -128,16 +127,15 @@ import {
   hasFeature,
   pushNotification,
   useDBSchemaStore,
-  useSheetStore,
   useUIStateStore,
+  useDatabaseStore,
+  useSheetV1Store,
 } from "@/store";
 import { useIssueLogic } from "./logic";
 import {
   Database,
   dialectOfEngine,
   Issue,
-  SheetCreate,
-  SheetId,
   SQLDialect,
   Task,
   TaskCreate,
@@ -146,16 +144,25 @@ import {
 } from "@/types";
 import {
   getBacktracePayloadWithIssue,
-  sheetIdOfTask,
+  sheetNameOfTask,
   useInstanceEditorLanguage,
 } from "@/utils";
 import { TableMetadata } from "@/types/proto/store/database";
 import MonacoEditor from "../MonacoEditor/MonacoEditor.vue";
 import { useSQLAdviceMarkers } from "./logic/useSQLAdviceMarkers";
 import UploadProgressButton from "../misc/UploadProgressButton.vue";
+import {
+  getSheetPathByLegacyProject,
+  getProjectPathByLegacyProject,
+} from "@/store/modules/v1/common";
+import {
+  Sheet_Visibility,
+  Sheet_Source,
+  Sheet_Type,
+} from "@/types/proto/v1/sheet_service";
 
 interface LocalState {
-  taskSheetId?: SheetId;
+  taskSheetName?: string;
   editing: boolean;
   editStatement: string;
   isUploadingFile: boolean;
@@ -194,7 +201,7 @@ const { t } = useI18n();
 const overrideSQLDialog = useDialog();
 const uiStateStore = useUIStateStore();
 const dbSchemaStore = useDBSchemaStore();
-const sheetStore = useSheetStore();
+const sheetV1Store = useSheetV1Store();
 const editorRef = ref<InstanceType<typeof MonacoEditor>>();
 
 const state = reactive<LocalState>({
@@ -294,11 +301,17 @@ const useTempEditState = (state: LocalState) => {
 
 useTempEditState(state);
 
-const getOrFetchSheetStatementById = async (sheetId: SheetId) => {
-  if (!sheetId || sheetId === UNKNOWN_ID) {
+const getOrFetchSheetStatementByName = async (
+  sheetName: string | undefined
+) => {
+  if (!sheetName) {
     return "";
   }
-  return (await sheetStore.getOrFetchSheetById(sheetId)).statement;
+  const sheet = await sheetV1Store.getOrFetchSheetByName(sheetName);
+  if (!sheet) {
+    return "";
+  }
+  return new TextDecoder().decode(sheet.content);
 };
 
 const readonly = computed(() => {
@@ -325,13 +338,25 @@ const formatOnSave = computed({
 
 const allowFormatOnSave = computed(() => language.value === "sql");
 
+const isValidSheetName = computed(() => {
+  if (!state.taskSheetName) {
+    return false;
+  }
+  return sheetV1Store.getSheetUid(state.taskSheetName) !== UNKNOWN_ID;
+});
+
 const isTaskSheetOversize = computed(() => {
-  if (!state.taskSheetId || state.taskSheetId === UNKNOWN_ID) {
+  if (!isValidSheetName.value) {
     return false;
   }
 
-  const taskSheet = sheetStore.getSheetById(state.taskSheetId);
-  return taskSheet.statement.length < taskSheet.size;
+  const taskSheet = sheetV1Store.getSheetByName(state.taskSheetName!);
+  if (!taskSheet) {
+    return false;
+  }
+  return (
+    new TextDecoder().decode(taskSheet.content).length < taskSheet.contentSize
+  );
 });
 
 const shouldShowStatementEditButtonForUI = computed(() => {
@@ -356,9 +381,9 @@ onMounted(async () => {
   if (create.value) {
     state.editing = true;
   } else {
-    const sheetId = sheetIdOfTask(selectedTask.value as Task);
-    if (sheetId && sheetId !== UNKNOWN_ID) {
-      state.taskSheetId = sheetId;
+    const sheetName = sheetNameOfTask(selectedTask.value as Task);
+    if (sheetName) {
+      state.taskSheetName = sheetName;
     }
   }
 });
@@ -382,13 +407,25 @@ watch(
   selectedTask,
   async () => {
     const task = selectedTask.value;
-    const sheetId = create.value
-      ? (task as TaskCreate).sheetId
-      : sheetIdOfTask(task as Task);
-    if (sheetId && sheetId !== UNKNOWN_ID) {
-      state.taskSheetId = sheetId;
+
+    // TODO: remove legacy logic.
+    let sheetName;
+    if (create.value) {
+      const taskCreate = task as TaskCreate;
+      if (taskCreate.databaseId) {
+        const db = await useDatabaseStore().getOrFetchDatabaseById(
+          taskCreate.databaseId
+        );
+        sheetName = getSheetPathByLegacyProject(db.project, taskCreate.sheetId);
+      }
     } else {
-      state.taskSheetId = undefined;
+      sheetName = sheetNameOfTask(task as Task);
+    }
+
+    if (sheetName) {
+      state.taskSheetName = sheetName;
+    } else {
+      state.taskSheetName = undefined;
     }
   },
   {
@@ -398,11 +435,11 @@ watch(
 );
 
 watch(
-  () => state.taskSheetId,
+  () => state.taskSheetName,
   async () => {
-    if (state.taskSheetId && state.taskSheetId !== UNKNOWN_ID) {
-      state.editStatement = await getOrFetchSheetStatementById(
-        state.taskSheetId
+    if (isValidSheetName.value) {
+      state.editStatement = await getOrFetchSheetStatementByName(
+        state.taskSheetName
       );
     }
   },
@@ -427,8 +464,8 @@ const saveEdit = async () => {
 };
 
 const cancelEdit = async () => {
-  state.editStatement = await getOrFetchSheetStatementById(
-    state.taskSheetId || UNKNOWN_ID
+  state.editStatement = await getOrFetchSheetStatementByName(
+    state.taskSheetName
   );
   state.editing = false;
 };
@@ -456,39 +493,31 @@ const handleUploadFile = async (event: Event, tick: (p: number) => void) => {
   }
 
   state.isUploadingFile = true;
-  const projectId = selectedDatabase.value.projectId;
+  const projectName = getProjectPathByLegacyProject(
+    selectedDatabase.value.project
+  );
   const { filename, content: statement } = await handleUploadFileEvent(
     event,
     100
   );
 
   const uploadStatementAsSheet = async (statement: string) => {
-    const sheetCreate: SheetCreate = {
-      projectId: projectId,
-      name: filename,
-      statement,
-      visibility: "PROJECT",
-      source: "BYTEBASE_ARTIFACT",
-      payload: {},
-    };
+    let payload = {};
     if (!create.value) {
-      sheetCreate.payload = getBacktracePayloadWithIssue(issue.value as Issue);
+      payload = getBacktracePayloadWithIssue(issue.value as Issue);
     }
-    const sheet = await sheetStore.createSheet(sheetCreate, {
-      timeout: 10 * 60 * 1000, // 10 minutes
-      onUploadProgress: (event) => {
-        console.debug("upload progress", event);
-        const progress = event.progress;
-        if (isNumber(progress)) {
-          tick(progress * 100);
-        } else {
-          tick(-1); // -1 to show a simple spinner instead of progress
-        }
-      },
+    // TODO: upload process
+    const sheet = await sheetV1Store.createSheet(projectName, {
+      title: filename,
+      content: new TextEncoder().encode(statement),
+      visibility: Sheet_Visibility.VISIBILITY_PROJECT,
+      source: Sheet_Source.SOURCE_BYTEBASE_ARTIFACT,
+      type: Sheet_Type.TYPE_SQL,
+      payload: JSON.stringify(payload),
     });
     state.isUploadingFile = false;
 
-    updateSheetId(sheet.id);
+    updateSheetId(sheetV1Store.getSheetUid(sheet.name));
     await updateStatement(statement);
     state.editing = false;
     if (selectedTask.value) {
@@ -503,6 +532,10 @@ const handleUploadFile = async (event: Event, tick: (p: number) => void) => {
         positiveText: t("common.confirm"),
         negativeText: t("common.cancel"),
         title: t("issue.override-current-statement"),
+        autoFocus: false,
+        closable: false,
+        maskClosable: false,
+        closeOnEsc: false,
         onNegativeClick: () => {
           state.isUploadingFile = false;
           reject();

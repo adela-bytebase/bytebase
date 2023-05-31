@@ -52,7 +52,6 @@
 import { computed, reactive, watchEffect } from "vue";
 import ArchiveBanner from "../components/ArchiveBanner.vue";
 import EnvironmentForm from "../components/EnvironmentForm.vue";
-import { EnvironmentPatch } from "../types";
 import { idFromSlug } from "../utils";
 import { hasFeature, pushNotification, useBackupStore } from "@/store";
 import { useI18n } from "vue-i18n";
@@ -110,7 +109,7 @@ const { t } = useI18n();
 
 const state = reactive<LocalState>({
   environment: environmentV1Store.getEnvironmentByUID(
-    idFromSlug(props.environmentSlug)
+    String(idFromSlug(props.environmentSlug))
   ),
   showArchiveModal: false,
   showDisableAutoBackupModal: false,
@@ -154,17 +153,14 @@ const assignEnvironment = (environment: Environment) => {
   state.environment = environment;
 };
 
-const doUpdate = (environmentPatch: EnvironmentPatch) => {
+const doUpdate = (environmentPatch: Environment) => {
   const pendingUpdate = cloneDeep(state.environment);
-  if (environmentPatch.title) {
+  if (environmentPatch.title !== pendingUpdate.title) {
     pendingUpdate.title = environmentPatch.title;
   }
-  if (environmentPatch.order) {
-    pendingUpdate.order = environmentPatch.order;
-  }
-  if (environmentPatch.tier) {
+  if (environmentPatch.tier !== pendingUpdate.tier) {
     if (
-      pendingUpdate.tier !== defaultEnvironmentTier &&
+      environmentPatch.tier !== defaultEnvironmentTier &&
       !hasFeature("bb.feature.environment-tier-policy")
     ) {
       state.missingRequiredFeature = "bb.feature.environment-tier-policy";
@@ -173,17 +169,46 @@ const doUpdate = (environmentPatch: EnvironmentPatch) => {
     pendingUpdate.tier = environmentPatch.tier;
   }
 
-  environmentV1Store.updateEnvironment(pendingUpdate).then((environment) => {
-    assignEnvironment(environment);
+  environmentV1Store
+    .updateEnvironment(pendingUpdate)
+    .then((environment) => {
+      assignEnvironment(environment);
 
-    pushNotification({
-      module: "bytebase",
-      style: "SUCCESS",
-      title: t("environment.successfully-updated-environment", {
-        name: environment.name,
-      }),
+      const disallowed = environment.tier === EnvironmentTier.PROTECTED;
+      if (disallowed) {
+        return policyV1Store.upsertPolicy({
+          parentPath: environment.name,
+          updateMask: ["payload", "inherit_from_parent"],
+          policy: {
+            type: PolicyTypeV1.ACCESS_CONTROL,
+            inheritFromParent: true,
+            accessControlPolicy: {
+              disallowRules: [{ fullDatabase: true }],
+            },
+          },
+        });
+      } else {
+        policyV1Store
+          .getOrFetchPolicyByParentAndType({
+            parentPath: environment.name,
+            policyType: PolicyTypeV1.ACCESS_CONTROL,
+          })
+          .then((existingPolicy) => {
+            if (existingPolicy) {
+              policyV1Store.deletePolicy(existingPolicy.name);
+            }
+          });
+      }
+    })
+    .then(() => {
+      pushNotification({
+        module: "bytebase",
+        style: "SUCCESS",
+        title: t("environment.successfully-updated-environment", {
+          name: state.environment.title,
+        }),
+      });
     });
-  });
 };
 
 const doArchive = (environment: Environment) => {
@@ -207,7 +232,7 @@ const success = () => {
     module: "bytebase",
     style: "SUCCESS",
     title: t("environment.successfully-updated-environment", {
-      name: state.environment.name,
+      name: state.environment.title,
     }),
   });
 };

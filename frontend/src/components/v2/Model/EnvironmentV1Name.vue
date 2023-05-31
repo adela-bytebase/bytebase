@@ -3,12 +3,12 @@
     :is="link ? 'router-link' : tag"
     v-bind="bindings"
     class="inline-flex items-center gap-x-1"
-    :class="link && 'normal-link'"
+    :class="link && !plain && 'normal-link'"
   >
     <span>{{ environmentV1Name(environment) }}</span>
     <ProductionEnvironmentV1Icon
       :environment="environment"
-      class="!text-current"
+      :class="iconClass ?? '!text-current'"
     />
   </component>
 </template>
@@ -17,7 +17,7 @@
 import { computed } from "vue";
 
 import { Environment } from "@/types/proto/v1/environment_service";
-import { environmentV1Name, environmentV1Slug } from "@/utils";
+import { VueClass, environmentV1Name, environmentV1Slug } from "@/utils";
 import ProductionEnvironmentV1Icon from "./ProductionEnvironmentV1Icon.vue";
 
 const props = withDefaults(
@@ -25,10 +25,14 @@ const props = withDefaults(
     environment: Environment;
     tag?: string;
     link?: boolean;
+    plain?: boolean;
+    iconClass?: VueClass;
   }>(),
   {
     tag: "span",
     link: true,
+    plain: false,
+    iconClass: undefined,
   }
 );
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/tests/fake"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
 func TestExternalApprovalFeishu_AllUserCanBeFound(t *testing.T) {
@@ -20,7 +23,7 @@ func TestExternalApprovalFeishu_AllUserCanBeFound(t *testing.T) {
 	ctx := context.Background()
 	ctl := &controller{}
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:                 dataDir,
 		vcsProviderCreator:      fake.NewGitLab,
 		feishuProverdierCreator: fake.NewFeishu,
@@ -43,35 +46,46 @@ func TestExternalApprovalFeishu_AllUserCanBeFound(t *testing.T) {
 		a.Equal(api.IssueCanceled, patchedIssue.Status)
 	}
 
-	err = ctl.patchSetting(api.SettingPatch{
-		Name:  api.SettingAppIM,
-		Value: `{"imType":"im.feishu","appId":"123","appSecret":"123","externalApproval":{"enabled":true}}`,
+	_, err = ctl.settingServiceClient.SetSetting(ctx, &v1pb.SetSettingRequest{
+		Setting: &v1pb.Setting{
+			Name: fmt.Sprintf("settings/%s", api.SettingAppIM),
+			Value: &v1pb.Value{
+				Value: &v1pb.Value_AppImSettingValue{
+					AppImSettingValue: &v1pb.AppIMSetting{
+						ImType:    v1pb.AppIMSetting_FEISHU,
+						AppId:     "123",
+						AppSecret: "123",
+						ExternalApproval: &v1pb.AppIMSetting_ExternalApproval{
+							Enabled: true,
+						},
+					},
+				},
+			},
+		},
 	})
 	a.NoError(err)
 
 	// Create a DBA account.
-	dba, err := ctl.createPrincipal(api.PrincipalCreate{
-		Type:  api.EndUser,
-		Name:  "DBA",
-		Email: "dba@dba.com",
+	dbaUser, err := ctl.authServiceClient.CreateUser(ctx, &v1pb.CreateUserRequest{
+		User: &v1pb.User{
+			Title:    "DBA",
+			Email:    "dba@dba.com",
+			UserRole: v1pb.UserRole_DBA,
+			UserType: v1pb.UserType_USER,
+			Password: "dbapass",
+		},
 	})
 	a.NoError(err)
-
-	_, err = ctl.createMember(api.MemberCreate{
-		Role:        api.DBA,
-		PrincipalID: dba.ID,
-	})
+	dbaUserUID, err := strconv.Atoi(strings.TrimPrefix(dbaUser.Name, "users/"))
 	a.NoError(err)
 
 	err = ctl.feishuProvider.RegisterEmails("demo@example.com", "dba@dba.com")
 	a.NoError(err)
 
 	// Create a project.
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "Test Project",
-		Key:        "TestExternalApprovalFeishu",
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
 	// Provision an instance.
@@ -80,50 +94,52 @@ func TestExternalApprovalFeishu_AllUserCanBeFound(t *testing.T) {
 	instanceDir, err := ctl.provisionSQLiteInstance(instanceRootDir, instanceName)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	// Add an instance.
-	instance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID:    generateRandomString("instance", 10),
-		EnvironmentID: prodEnvironment.ID,
-		Name:          instanceName,
-		Engine:        db.SQLite,
-		Host:          instanceDir,
+	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: generateRandomString("instance", 10),
+		Instance: &v1pb.Instance{
+			Title:       instanceName,
+			Engine:      v1pb.Engine_SQLITE,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: instanceDir}},
+		},
 	})
+	a.NoError(err)
+	instanceUID, err := strconv.Atoi(instance.Uid)
 	a.NoError(err)
 
 	// Expecting project to have no database.
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Zero(len(databases))
 	// Expecting instance to have no database.
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		InstanceID: &instance.ID,
+		InstanceID: &instanceUID,
 	})
 	a.NoError(err)
 	a.Zero(len(databases))
 
 	// Create an issue that creates a database.
 	databaseName := "testSchemaUpdate"
-	err = ctl.createDatabase(project, instance, databaseName, "", nil /* labelMap */)
+	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil /* labelMap */)
 	a.NoError(err)
 
 	// Expecting project to have 1 database.
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Equal(1, len(databases))
 	database := databases[0]
-	a.Equal(instance.ID, database.Instance.ID)
+	a.Equal(instanceUID, database.Instance.ID)
 
 	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "migration statement sheet",
 		Statement:  migrationStatement,
 		Visibility: api.ProjectSheet,
@@ -144,17 +160,19 @@ func TestExternalApprovalFeishu_AllUserCanBeFound(t *testing.T) {
 	})
 	a.NoError(err)
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
-		AssigneeID:    dba.ID,
+		AssigneeID:    dbaUserUID,
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
 
 	for {
-		review, err := ctl.getReview(fmt.Sprintf("projects/%d/reviews/%d", issue.ProjectID, issue.ID))
+		review, err := ctl.reviewServiceClient.GetReview(ctx, &v1pb.GetReviewRequest{
+			Name: fmt.Sprintf("projects/%d/reviews/%d", issue.ProjectID, issue.ID),
+		})
 		a.NoError(err)
 		if review.ApprovalFindingDone {
 			break
@@ -184,7 +202,7 @@ func TestExternalApprovalFeishu_AllUserCanBeFound(t *testing.T) {
 	ctl.feishuProvider.ApprovePendingApprovals()
 
 	// Waiting ApplicationRunner to approves the issue.
-	status, err := ctl.waitIssuePipelineWithNoApproval(issue.ID)
+	status, err := ctl.waitIssuePipelineWithNoApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 }
@@ -195,7 +213,7 @@ func TestExternalApprovalFeishu_AssigneeCanBeFound(t *testing.T) {
 	ctx := context.Background()
 	ctl := &controller{}
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:                 dataDir,
 		vcsProviderCreator:      fake.NewGitLab,
 		feishuProverdierCreator: fake.NewFeishu,
@@ -218,35 +236,47 @@ func TestExternalApprovalFeishu_AssigneeCanBeFound(t *testing.T) {
 		a.Equal(api.IssueCanceled, patchedIssue.Status)
 	}
 
-	err = ctl.patchSetting(api.SettingPatch{
-		Name:  api.SettingAppIM,
-		Value: `{"imType":"im.feishu","appId":"123","appSecret":"123","externalApproval":{"enabled":true}}`,
+	_, err = ctl.settingServiceClient.SetSetting(ctx, &v1pb.SetSettingRequest{
+		Setting: &v1pb.Setting{
+			Name: fmt.Sprintf("settings/%s", api.SettingAppIM),
+			Value: &v1pb.Value{
+				Value: &v1pb.Value_AppImSettingValue{
+					AppImSettingValue: &v1pb.AppIMSetting{
+						ImType:    v1pb.AppIMSetting_FEISHU,
+						AppId:     "123",
+						AppSecret: "123",
+						ExternalApproval: &v1pb.AppIMSetting_ExternalApproval{
+							Enabled: true,
+						},
+					},
+				},
+			},
+		},
 	})
 	a.NoError(err)
 
 	// Create a DBA account.
-	dba, err := ctl.createPrincipal(api.PrincipalCreate{
-		Type:  api.EndUser,
-		Name:  "DBA",
-		Email: "dba@dba.com",
+	// Create a DBA account.
+	dbaUser, err := ctl.authServiceClient.CreateUser(ctx, &v1pb.CreateUserRequest{
+		User: &v1pb.User{
+			Title:    "DBA",
+			Email:    "dba@dba.com",
+			UserRole: v1pb.UserRole_DBA,
+			UserType: v1pb.UserType_USER,
+			Password: "dbapass",
+		},
 	})
 	a.NoError(err)
-
-	_, err = ctl.createMember(api.MemberCreate{
-		Role:        api.DBA,
-		PrincipalID: dba.ID,
-	})
+	dbaUserUID, err := strconv.Atoi(strings.TrimPrefix(dbaUser.Name, "users/"))
 	a.NoError(err)
 
 	err = ctl.feishuProvider.RegisterEmails("dba@dba.com")
 	a.NoError(err)
 
 	// Create a project.
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "Test Project",
-		Key:        "TestExternalApprovalFeishu",
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
 	// Provision an instance.
@@ -255,50 +285,52 @@ func TestExternalApprovalFeishu_AssigneeCanBeFound(t *testing.T) {
 	instanceDir, err := ctl.provisionSQLiteInstance(instanceRootDir, instanceName)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	// Add an instance.
-	instance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID:    generateRandomString("instance", 10),
-		EnvironmentID: prodEnvironment.ID,
-		Name:          instanceName,
-		Engine:        db.SQLite,
-		Host:          instanceDir,
+	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: generateRandomString("instance", 10),
+		Instance: &v1pb.Instance{
+			Title:       instanceName,
+			Engine:      v1pb.Engine_SQLITE,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: instanceDir}},
+		},
 	})
+	a.NoError(err)
+	instanceUID, err := strconv.Atoi(instance.Uid)
 	a.NoError(err)
 
 	// Expecting project to have no database.
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Zero(len(databases))
 	// Expecting instance to have no database.
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		InstanceID: &instance.ID,
+		InstanceID: &instanceUID,
 	})
 	a.NoError(err)
 	a.Zero(len(databases))
 
 	// Create an issue that creates a database.
 	databaseName := "testSchemaUpdate"
-	err = ctl.createDatabase(project, instance, databaseName, "", nil /* labelMap */)
+	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil /* labelMap */)
 	a.NoError(err)
 
 	// Expecting project to have 1 database.
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Equal(1, len(databases))
 	database := databases[0]
-	a.Equal(instance.ID, database.Instance.ID)
+	a.Equal(instanceUID, database.Instance.ID)
 
 	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "migration statement sheet",
 		Statement:  migrationStatement,
 		Visibility: api.ProjectSheet,
@@ -319,17 +351,19 @@ func TestExternalApprovalFeishu_AssigneeCanBeFound(t *testing.T) {
 	})
 	a.NoError(err)
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
-		AssigneeID:    dba.ID,
+		AssigneeID:    dbaUserUID,
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
 
 	for {
-		review, err := ctl.getReview(fmt.Sprintf("projects/%d/reviews/%d", issue.ProjectID, issue.ID))
+		review, err := ctl.reviewServiceClient.GetReview(ctx, &v1pb.GetReviewRequest{
+			Name: fmt.Sprintf("projects/%d/reviews/%d", issue.ProjectID, issue.ID),
+		})
 		a.NoError(err)
 		if review.ApprovalFindingDone {
 			break
@@ -359,7 +393,7 @@ func TestExternalApprovalFeishu_AssigneeCanBeFound(t *testing.T) {
 	ctl.feishuProvider.ApprovePendingApprovals()
 
 	// Waiting ApplicationRunner to approves the issue.
-	status, err := ctl.waitIssuePipelineWithNoApproval(issue.ID)
+	status, err := ctl.waitIssuePipelineWithNoApproval(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 }

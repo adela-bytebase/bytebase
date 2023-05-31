@@ -1,11 +1,10 @@
 import { hasFeature, useCurrentUserIamPolicy } from "@/store";
-import type { Database, Instance, Principal } from "@/types";
-import { hasWorkspacePermission } from "./role";
+import type { Database, Instance } from "@/types";
+import { hasWorkspacePermissionV1 } from "./role";
 import { Policy, PolicyType } from "@/types/proto/v1/org_policy_service";
-import { State } from "@/types/proto/v1/common";
-import { EnvironmentTier } from "@/types/proto/v1/environment_service";
+import { User } from "@/types/proto/v1/auth_service";
 
-export const isInstanceAccessible = (instance: Instance, user: Principal) => {
+export const isInstanceAccessible = (instance: Instance, user: User) => {
   if (!hasFeature("bb.feature.access-control")) {
     // The current plan doesn't have access control feature.
     // Fallback to true.
@@ -13,9 +12,9 @@ export const isInstanceAccessible = (instance: Instance, user: Principal) => {
   }
 
   if (
-    hasWorkspacePermission(
+    hasWorkspacePermissionV1(
       "bb.permission.workspace.manage-access-control",
-      user.role
+      user.userRole
     )
   ) {
     // The current user has the super privilege to access all databases.
@@ -25,7 +24,7 @@ export const isInstanceAccessible = (instance: Instance, user: Principal) => {
 
   // See if the instance is in a production environment
   const { environment } = instance;
-  if (environment.tier === EnvironmentTier.UNPROTECTED) {
+  if (environment.tier === "UNPROTECTED") {
     return true;
   }
 
@@ -35,18 +34,12 @@ export const isInstanceAccessible = (instance: Instance, user: Principal) => {
 export const isDatabaseAccessible = (
   database: Database,
   policyList: Policy[],
-  user: Principal
+  user: User
 ) => {
-  if (!hasFeature("bb.feature.access-control")) {
-    // The current plan doesn't have access control feature.
-    // Fallback to true.
-    return true;
-  }
-
   if (
-    hasWorkspacePermission(
+    hasWorkspacePermissionV1(
       "bb.permission.workspace.manage-access-control",
-      user.role
+      user.userRole
     )
   ) {
     // The current user has the super privilege to access all databases.
@@ -54,23 +47,24 @@ export const isDatabaseAccessible = (
     return true;
   }
 
-  const { environment } = database.instance;
-  if (environment.tier === EnvironmentTier.UNPROTECTED) {
-    return true;
+  if (hasFeature("bb.feature.access-control")) {
+    const { environment } = database.instance;
+    if (environment.tier === "PROTECTED") {
+      const policy = policyList.find((policy) => {
+        const { type, resourceUid, enforce } = policy;
+        return (
+          type === PolicyType.ACCESS_CONTROL &&
+          resourceUid === `${database.id}` &&
+          enforce
+        );
+      });
+      if (policy) {
+        // The database is in the allowed list
+        return true;
+      }
+    }
   }
 
-  const policy = policyList.find((policy) => {
-    const { type, resourceUid, state } = policy;
-    return (
-      type === PolicyType.ACCESS_CONTROL &&
-      resourceUid === `${database.id}` &&
-      state === State.ACTIVE
-    );
-  });
-  if (policy) {
-    // The database is in the allowed list
-    return true;
-  }
   const currentUserIamPolicy = useCurrentUserIamPolicy();
   if (currentUserIamPolicy.allowToQueryDatabase(database)) {
     return true;

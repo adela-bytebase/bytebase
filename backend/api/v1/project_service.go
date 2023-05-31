@@ -3,16 +3,21 @@ package v1
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/cel-go/cel"
 	"github.com/gosimple/slug"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/bytebase/bytebase/backend/common/log"
+	"github.com/bytebase/bytebase/backend/component/activity"
 	webhookPlugin "github.com/bytebase/bytebase/backend/plugin/webhook"
 
 	"github.com/bytebase/bytebase/backend/common"
@@ -24,13 +29,15 @@ import (
 // ProjectService implements the project service.
 type ProjectService struct {
 	v1pb.UnimplementedProjectServiceServer
-	store *store.Store
+	store           *store.Store
+	activityManager *activity.Manager
 }
 
 // NewProjectService creates a new ProjectService.
-func NewProjectService(store *store.Store) *ProjectService {
+func NewProjectService(store *store.Store, activityManager *activity.Manager) *ProjectService {
 	return &ProjectService{
-		store: store,
+		store:           store,
+		activityManager: activityManager,
 	}
 }
 
@@ -110,24 +117,15 @@ func (s *ProjectService) UpdateProject(ctx context.Context, request *v1pb.Update
 		case "key":
 			patch.Key = &request.Project.Key
 		case "workflow":
-			workflow, err := convertToProjectWorkflowType(request.Project.Workflow)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, err.Error())
-			}
+			workflow := convertToProjectWorkflowType(request.Project.Workflow)
 			patch.Workflow = &workflow
 		case "tenant_mode":
-			tenantMode, err := convertToProjectTenantMode(request.Project.TenantMode)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, err.Error())
-			}
+			tenantMode := convertToProjectTenantMode(request.Project.TenantMode)
 			patch.TenantMode = &tenantMode
 		case "db_name_template":
 			patch.DBNameTemplate = &request.Project.DbNameTemplate
 		case "schema_change":
-			schemaChange, err := convertToProjectSchemaChangeType(request.Project.SchemaChange)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, err.Error())
-			}
+			schemaChange := convertToProjectSchemaChangeType(request.Project.SchemaChange)
 			patch.SchemaChangeType = &schemaChange
 		}
 	}
@@ -308,12 +306,54 @@ func (s *ProjectService) SetIamPolicy(ctx context.Context, request *v1pb.SetIamP
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
+	oldPolicy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{UID: &project.UID})
+	if err != nil {
+		return nil, err
+	}
+	remove, add, err := store.GetIAMPolicyDiff(oldPolicy, policy)
+	if err != nil {
+		return nil, err
+	}
+	s.CreateIAMPolicyUpdateActivity(ctx, remove, add, project, creatorUID)
+
 	iamPolicy, err := s.store.SetProjectIAMPolicy(ctx, policy, creatorUID, project.UID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
 	return convertToIamPolicy(iamPolicy), nil
+}
+
+// CreateIAMPolicyUpdateActivity creates project IAM policy change activities.
+func (s *ProjectService) CreateIAMPolicyUpdateActivity(ctx context.Context, remove, add *store.IAMPolicyMessage, project *store.ProjectMessage, creatorUID int) {
+	var activities []*api.ActivityCreate
+	for _, binding := range remove.Bindings {
+		for _, member := range binding.Members {
+			activities = append(activities, &api.ActivityCreate{
+				CreatorID:   creatorUID,
+				ContainerID: project.UID,
+				Type:        api.ActivityProjectMemberDelete,
+				Level:       api.ActivityInfo,
+				Comment:     fmt.Sprintf("Revoked %s from %s (%s).", binding.Role, member.Name, member.Email),
+			})
+		}
+	}
+	for _, binding := range add.Bindings {
+		for _, member := range binding.Members {
+			activities = append(activities, &api.ActivityCreate{
+				CreatorID:   creatorUID,
+				ContainerID: project.UID,
+				Type:        api.ActivityProjectMemberCreate,
+				Level:       api.ActivityInfo,
+				Comment:     fmt.Sprintf("Granted %s to %s (%s).", member.Name, member.Email, binding.Role),
+			})
+		}
+	}
+	for _, a := range activities {
+		if _, err := s.activityManager.CreateActivity(ctx, a, &activity.Metadata{}); err != nil {
+			log.Warn("Failed to create project activity", zap.Error(err))
+		}
+	}
 }
 
 // GetDeploymentConfig returns the deployment config for a project.
@@ -590,13 +630,642 @@ func (s *ProjectService) TestWebhook(ctx context.Context, request *v1pb.TestWebh
 			Link:         fmt.Sprintf("%s/project/%s/webhook/%s", setting.ExternalUrl, fmt.Sprintf("%s-%d", slug.Make(project.Title), project.UID), fmt.Sprintf("%s-%d", slug.Make(webhook.Title), webhook.ID)),
 			CreatorID:    api.SystemBotID,
 			CreatorName:  "Bytebase",
-			CreatorEmail: "support@bytebase.com",
+			CreatorEmail: api.SystemBotEmail,
 			CreatedTs:    time.Now().Unix(),
 			Project:      &webhookPlugin.Project{Name: project.Title},
 		},
 	)
 
 	return &v1pb.TestWebhookResponse{Error: err.Error()}, nil
+}
+
+// CreateDatabaseGroup creates a database group.
+func (s *ProjectService) CreateDatabaseGroup(ctx context.Context, request *v1pb.CreateDatabaseGroupRequest) (*v1pb.DatabaseGroup, error) {
+	projectResourceID, err := getProjectID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", request.Parent)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", request.Parent)
+	}
+
+	if !isValidResourceID(request.DatabaseGroupId) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid database group id %q", request.DatabaseGroupId)
+	}
+	if request.DatabaseGroup.DatabasePlaceholder == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "database group database placeholder is required")
+	}
+	if request.DatabaseGroup.DatabaseExpr == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "database group database expression is required")
+	}
+
+	storeDatabaseGroup := &store.DatabaseGroupMessage{
+		ResourceID:  request.DatabaseGroupId,
+		ProjectUID:  project.UID,
+		Placeholder: request.DatabaseGroup.DatabasePlaceholder,
+		Expression:  request.DatabaseGroup.DatabaseExpr,
+	}
+	if request.ValidateOnly {
+		return s.convertStoreToAPIDatabaseGroupFull(ctx, storeDatabaseGroup, projectResourceID)
+	}
+
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	databaseGroup, err := s.store.CreateDatabaseGroup(ctx, principalID, storeDatabaseGroup)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	return convertStoreToAPIDatabaseGroupBasic(databaseGroup, projectResourceID), nil
+}
+
+// UpdateDatabaseGroup updates a database group.
+func (s *ProjectService) UpdateDatabaseGroup(ctx context.Context, request *v1pb.UpdateDatabaseGroupRequest) (*v1pb.DatabaseGroup, error) {
+	projectResourceID, databaseGroupResourceID, err := getProjectIDDatabaseGroupID(request.DatabaseGroup.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	existedDatabaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+		ResourceID: &databaseGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if existedDatabaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseGroupResourceID)
+	}
+
+	var updateDatabaseGroup store.UpdateDatabaseGroupMessage
+	for _, path := range request.UpdateMask.Paths {
+		switch path {
+		case "database_placeholder":
+			if request.DatabaseGroup.DatabasePlaceholder == "" {
+				return nil, status.Errorf(codes.InvalidArgument, "database group database placeholder is required")
+			}
+			updateDatabaseGroup.Placeholder = &request.DatabaseGroup.DatabasePlaceholder
+		case "database_expr":
+			if request.DatabaseGroup.DatabaseExpr == nil {
+				return nil, status.Errorf(codes.InvalidArgument, "database group expr is required")
+			}
+			updateDatabaseGroup.Expression = request.DatabaseGroup.DatabaseExpr
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, "unsupported path: %q", path)
+		}
+	}
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	databaseGroup, err := s.store.UpdateDatabaseGroup(ctx, principalID, existedDatabaseGroup.UID, &updateDatabaseGroup)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	return convertStoreToAPIDatabaseGroupBasic(databaseGroup, projectResourceID), nil
+}
+
+// DeleteDatabaseGroup deletes a database group.
+func (s *ProjectService) DeleteDatabaseGroup(ctx context.Context, request *v1pb.DeleteDatabaseGroupRequest) (*emptypb.Empty, error) {
+	projectResourceID, databaseGroupResourceID, err := getProjectIDDatabaseGroupID(request.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	existedDatabaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+		ResourceID: &databaseGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if existedDatabaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseGroupResourceID)
+	}
+
+	err = s.store.DeleteDatabaseGroup(ctx, existedDatabaseGroup.UID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	return &emptypb.Empty{}, nil
+}
+
+// ListDatabaseGroups lists database groups.
+func (s *ProjectService) ListDatabaseGroups(ctx context.Context, request *v1pb.ListDatabaseGroupsRequest) (*v1pb.ListDatabaseGroupsResponse, error) {
+	projectResourceID, err := getProjectID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	databaseGroups, err := s.store.ListDatabaseGroups(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	var apiDatabaseGroups []*v1pb.DatabaseGroup
+	for _, databaseGroup := range databaseGroups {
+		apiDatabaseGroups = append(apiDatabaseGroups, convertStoreToAPIDatabaseGroupBasic(databaseGroup, projectResourceID))
+	}
+	return &v1pb.ListDatabaseGroupsResponse{
+		DatabaseGroups: apiDatabaseGroups,
+	}, nil
+}
+
+// GetDatabaseGroup gets a database group.
+func (s *ProjectService) GetDatabaseGroup(ctx context.Context, request *v1pb.GetDatabaseGroupRequest) (*v1pb.DatabaseGroup, error) {
+	projectResourceID, databaseGroupResourceID, err := getProjectIDDatabaseGroupID(request.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	databaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+		ResourceID: &databaseGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if databaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseGroupResourceID)
+	}
+	if request.View == v1pb.DatabaseGroupView_DATABASE_GROUP_VIEW_BASIC || request.View == v1pb.DatabaseGroupView_DATABASE_GROUP_VIEW_UNSPECIFIED {
+		return convertStoreToAPIDatabaseGroupBasic(databaseGroup, projectResourceID), nil
+	}
+	return s.convertStoreToAPIDatabaseGroupFull(ctx, databaseGroup, projectResourceID)
+}
+
+// CreateSchemaGroup creates a database group.
+func (s *ProjectService) CreateSchemaGroup(ctx context.Context, request *v1pb.CreateSchemaGroupRequest) (*v1pb.SchemaGroup, error) {
+	projectResourceID, databaseGroupResourceID, err := getProjectIDDatabaseGroupID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", request.Parent)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", request.Parent)
+	}
+	databaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ResourceID: &databaseGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if databaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseGroupResourceID)
+	}
+
+	if !isValidResourceID(request.SchemaGroupId) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid schema group id %q", request.SchemaGroupId)
+	}
+	if request.SchemaGroup.TablePlaceholder == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "schema group table placeholder is required")
+	}
+	if request.SchemaGroup.TableExpr == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "schema group table expression is required")
+	}
+
+	storeSchemaGroup := &store.SchemaGroupMessage{
+		ResourceID:       request.SchemaGroupId,
+		DatabaseGroupUID: databaseGroup.UID,
+		Placeholder:      request.SchemaGroup.TablePlaceholder,
+		Expression:       request.SchemaGroup.TableExpr,
+	}
+	if request.ValidateOnly {
+		return s.convertStoreToAPISchemaGroupFull(ctx, storeSchemaGroup, databaseGroup, projectResourceID)
+	}
+
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	schemaGroup, err := s.store.CreateSchemaGroup(ctx, principalID, storeSchemaGroup)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	return convertStoreToAPISchemaGroupBasic(schemaGroup, projectResourceID, databaseGroupResourceID), nil
+}
+
+// UpdateSchemaGroup updates a schema group.
+func (s *ProjectService) UpdateSchemaGroup(ctx context.Context, request *v1pb.UpdateSchemaGroupRequest) (*v1pb.SchemaGroup, error) {
+	projectResourceID, databaseGroupResourceID, schemaGroupResourceID, err := getProjectIDDatabaseGroupIDSchemaGroupID(request.SchemaGroup.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	databaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+		ResourceID: &databaseGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if databaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseGroupResourceID)
+	}
+	existedSchemaGroup, err := s.store.GetSchemaGroup(ctx, &store.FindSchemaGroupMessage{
+		DatabaseGroupUID: &databaseGroup.UID,
+		ResourceID:       &schemaGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if existedSchemaGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "schema group %q not found", schemaGroupResourceID)
+	}
+
+	var updateSchemaGroup store.UpdateSchemaGroupMessage
+	for _, path := range request.UpdateMask.Paths {
+		switch path {
+		case "table_placeholder":
+			if request.SchemaGroup.TablePlaceholder == "" {
+				return nil, status.Errorf(codes.InvalidArgument, "schema group table placeholder is required")
+			}
+			updateSchemaGroup.Placeholder = &request.SchemaGroup.TablePlaceholder
+		case "table_expr":
+			if request.SchemaGroup.TableExpr == nil {
+				return nil, status.Errorf(codes.InvalidArgument, "schema group table expr is required")
+			}
+			updateSchemaGroup.Expression = request.SchemaGroup.TableExpr
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, "unsupported path: %q", path)
+		}
+	}
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	schemaGroup, err := s.store.UpdateSchemaGroup(ctx, principalID, existedSchemaGroup.UID, &updateSchemaGroup)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	return convertStoreToAPISchemaGroupBasic(schemaGroup, projectResourceID, databaseGroupResourceID), nil
+}
+
+// DeleteSchemaGroup deletes a schema group.
+func (s *ProjectService) DeleteSchemaGroup(ctx context.Context, request *v1pb.DeleteSchemaGroupRequest) (*emptypb.Empty, error) {
+	projectResourceID, databaseGroupResourceID, schemaGroupResourceID, err := getProjectIDDatabaseGroupIDSchemaGroupID(request.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	databaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+		ResourceID: &databaseGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if databaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseGroupResourceID)
+	}
+	existedSchemaGroup, err := s.store.GetSchemaGroup(ctx, &store.FindSchemaGroupMessage{
+		DatabaseGroupUID: &databaseGroup.UID,
+		ResourceID:       &schemaGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if existedSchemaGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "schema group %q not found", schemaGroupResourceID)
+	}
+
+	err = s.store.DeleteSchemaGroup(ctx, existedSchemaGroup.UID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	return &emptypb.Empty{}, nil
+}
+
+// ListSchemaGroups lists database groups.
+func (s *ProjectService) ListSchemaGroups(ctx context.Context, request *v1pb.ListSchemaGroupsRequest) (*v1pb.ListSchemaGroupsResponse, error) {
+	projectResourceID, databaseResourceID, err := getProjectIDDatabaseGroupID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	databaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+		ResourceID: &databaseResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if databaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseResourceID)
+	}
+
+	schemaGroups, err := s.store.ListSchemaGroups(ctx, &store.FindSchemaGroupMessage{
+		DatabaseGroupUID: &databaseGroup.UID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	var apiSchemaGroups []*v1pb.SchemaGroup
+	for _, schemaGroup := range schemaGroups {
+		apiSchemaGroups = append(apiSchemaGroups, convertStoreToAPISchemaGroupBasic(schemaGroup, projectResourceID, databaseGroup.ResourceID))
+	}
+	return &v1pb.ListSchemaGroupsResponse{
+		SchemaGroups: apiSchemaGroups,
+	}, nil
+}
+
+// GetSchemaGroup gets a database group.
+func (s *ProjectService) GetSchemaGroup(ctx context.Context, request *v1pb.GetSchemaGroupRequest) (*v1pb.SchemaGroup, error) {
+	projectResourceID, databaseGroupResourceID, schemaGroupResourceID, err := getProjectIDDatabaseGroupIDSchemaGroupID(request.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectResourceID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "project %q has been deleted", projectResourceID)
+	}
+	databaseGroup, err := s.store.GetDatabaseGroup(ctx, &store.FindDatabaseGroupMessage{
+		ProjectUID: &project.UID,
+		ResourceID: &databaseGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if databaseGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "database group %q not found", databaseGroupResourceID)
+	}
+	schemaGroup, err := s.store.GetSchemaGroup(ctx, &store.FindSchemaGroupMessage{
+		DatabaseGroupUID: &databaseGroup.UID,
+		ResourceID:       &schemaGroupResourceID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if schemaGroup == nil {
+		return nil, status.Errorf(codes.NotFound, "schema group %q not found", schemaGroupResourceID)
+	}
+	if request.View == v1pb.SchemaGroupView_SCHEMA_GROUP_VIEW_BASIC || request.View == v1pb.SchemaGroupView_SCHEMA_GROUP_VIEW_UNSPECIFIED {
+		return convertStoreToAPISchemaGroupBasic(schemaGroup, projectResourceID, databaseGroupResourceID), nil
+	}
+	return s.convertStoreToAPISchemaGroupFull(ctx, schemaGroup, databaseGroup, projectResourceID)
+}
+
+func (s *ProjectService) convertStoreToAPIDatabaseGroupFull(ctx context.Context, databaseGroup *store.DatabaseGroupMessage, projectResourceID string) (*v1pb.DatabaseGroup, error) {
+	matches, unmatches, err := s.getMatchesAndUnmatchesDatabases(ctx, databaseGroup, projectResourceID)
+	if err != nil {
+		return nil, err
+	}
+	ret := &v1pb.DatabaseGroup{
+		Name:                fmt.Sprintf("%s%s/%s%s", projectNamePrefix, projectResourceID, databaseGroupNamePrefix, databaseGroup.ResourceID),
+		DatabasePlaceholder: databaseGroup.Placeholder,
+		DatabaseExpr:        databaseGroup.Expression,
+	}
+	for _, database := range matches {
+		ret.MatchedDatabases = append(ret.MatchedDatabases, &v1pb.DatabaseGroup_Database{
+			Name: fmt.Sprintf("%s%s/%s%s", instanceNamePrefix, database.InstanceID, databaseIDPrefix, database.DatabaseName),
+		})
+	}
+	for _, database := range unmatches {
+		ret.UnmatchedDatabases = append(ret.UnmatchedDatabases, &v1pb.DatabaseGroup_Database{
+			Name: fmt.Sprintf("%s%s/%s%s", instanceNamePrefix, database.InstanceID, databaseIDPrefix, database.DatabaseName),
+		})
+	}
+	return ret, nil
+}
+
+func (s *ProjectService) getMatchesAndUnmatchesDatabases(ctx context.Context, databaseGroup *store.DatabaseGroupMessage, projectResourceID string) ([]*store.DatabaseMessage, []*store.DatabaseMessage, error) {
+	databases, err := s.store.ListDatabases(ctx, &store.FindDatabaseMessage{
+		ProjectID: &projectResourceID,
+	})
+	if err != nil {
+		return nil, nil, status.Errorf(codes.Internal, err.Error())
+	}
+	e, err := cel.NewEnv(
+		cel.Variable("resource", cel.MapType(cel.StringType, cel.AnyType)),
+	)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.Internal, err.Error())
+	}
+	ast, issues := e.Parse(databaseGroup.Expression.Expression)
+	if issues != nil && issues.Err() != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, issues.Err().Error())
+	}
+	prog, err := e.Program(ast)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	var matches []*store.DatabaseMessage
+	var unmatches []*store.DatabaseMessage
+
+	for _, database := range databases {
+		res, _, err := prog.ContextEval(ctx, map[string]any{
+			"resource": map[string]any{
+				"database_name":    database.DatabaseName,
+				"environment_name": fmt.Sprintf("%s%s", environmentNamePrefix, database.EnvironmentID),
+			},
+		})
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, err.Error())
+		}
+
+		val, err := res.ConvertToNative(reflect.TypeOf(false))
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "expect bool result")
+		}
+		if boolVal, ok := val.(bool); ok && boolVal {
+			matches = append(matches, database)
+		} else {
+			unmatches = append(unmatches, database)
+		}
+	}
+	return matches, unmatches, nil
+}
+
+func convertStoreToAPIDatabaseGroupBasic(databaseGroup *store.DatabaseGroupMessage, projectResourceID string) *v1pb.DatabaseGroup {
+	return &v1pb.DatabaseGroup{
+		Name:                fmt.Sprintf("%s%s/%s%s", projectNamePrefix, projectResourceID, databaseGroupNamePrefix, databaseGroup.ResourceID),
+		DatabasePlaceholder: databaseGroup.Placeholder,
+		DatabaseExpr:        databaseGroup.Expression,
+	}
+}
+
+func (s *ProjectService) convertStoreToAPISchemaGroupFull(ctx context.Context, schemaGroup *store.SchemaGroupMessage, databaseGroup *store.DatabaseGroupMessage, projectResourceID string) (*v1pb.SchemaGroup, error) {
+	matches, unmatches, err := s.getMatchesAndUnmatchesTables(ctx, schemaGroup, databaseGroup, projectResourceID)
+	if err != nil {
+		return nil, err
+	}
+	ret := &v1pb.SchemaGroup{
+		Name:             fmt.Sprintf("%s%s/%s%s/%s%s", projectNamePrefix, projectResourceID, databaseGroupNamePrefix, databaseGroup.ResourceID, schemaGroupNamePrefix, schemaGroup.ResourceID),
+		TablePlaceholder: schemaGroup.Placeholder,
+		TableExpr:        schemaGroup.Expression,
+		MatchedTables:    matches,
+		UnmatchedTables:  unmatches,
+	}
+	return ret, nil
+}
+
+func (s *ProjectService) getMatchesAndUnmatchesTables(ctx context.Context, schemaGroup *store.SchemaGroupMessage, databaseGroup *store.DatabaseGroupMessage, projectResourceID string) ([]*v1pb.SchemaGroup_Table, []*v1pb.SchemaGroup_Table, error) {
+	matchesDatabases, _, err := s.getMatchesAndUnmatchesDatabases(ctx, databaseGroup, projectResourceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	e, err := cel.NewEnv(
+		cel.Variable("resource", cel.MapType(cel.StringType, cel.AnyType)),
+	)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.Internal, err.Error())
+	}
+	ast, issues := e.Parse(schemaGroup.Expression.Expression)
+	if issues != nil && issues.Err() != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, issues.Err().Error())
+	}
+	prog, err := e.Program(ast)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	var matches []*v1pb.SchemaGroup_Table
+	var unmatches []*v1pb.SchemaGroup_Table
+
+	for _, matchesDatabase := range matchesDatabases {
+		dbSchema, err := s.store.GetDBSchema(ctx, matchesDatabase.UID)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, err.Error())
+		}
+		if dbSchema == nil {
+			return nil, nil, status.Errorf(codes.Internal, "database %q schema not found", matchesDatabase.DatabaseName)
+		}
+		if dbSchema.Schema == nil {
+			return nil, nil, status.Errorf(codes.Internal, "database %q schema is empty", matchesDatabase.DatabaseName)
+		}
+		for _, schema := range dbSchema.Metadata.Schemas {
+			for _, table := range schema.Tables {
+				res, _, err := prog.ContextEval(ctx, map[string]any{
+					"resource": map[string]any{
+						"table_name": table.Name,
+					},
+				})
+				if err != nil {
+					return nil, nil, status.Errorf(codes.Internal, err.Error())
+				}
+
+				val, err := res.ConvertToNative(reflect.TypeOf(false))
+				if err != nil {
+					return nil, nil, status.Errorf(codes.Internal, "expect bool result")
+				}
+
+				schemaGroupTable := &v1pb.SchemaGroup_Table{
+					Database: fmt.Sprintf("%s%s/%s%s", instanceNamePrefix, matchesDatabase.InstanceID, databaseIDPrefix, matchesDatabase.DatabaseName),
+					Schema:   schema.Name,
+					Table:    table.Name,
+				}
+
+				if boolVal, ok := val.(bool); ok && boolVal {
+					matches = append(matches, schemaGroupTable)
+				} else {
+					unmatches = append(unmatches, schemaGroupTable)
+				}
+			}
+		}
+	}
+	return matches, unmatches, nil
+}
+
+func convertStoreToAPISchemaGroupBasic(schemaGroup *store.SchemaGroupMessage, projectResourceID, databaseGroupResourceID string) *v1pb.SchemaGroup {
+	return &v1pb.SchemaGroup{
+		Name:             fmt.Sprintf("%s%s/%s%s/%s%s", projectNamePrefix, projectResourceID, databaseGroupNamePrefix, databaseGroupResourceID, schemaGroupNamePrefix, schemaGroup.ResourceID),
+		TablePlaceholder: schemaGroup.Placeholder,
+		TableExpr:        schemaGroup.Expression,
+	}
 }
 
 func convertToStoreProjectWebhookMessage(webhook *v1pb.Webhook) (*store.ProjectWebhookMessage, error) {
@@ -841,7 +1510,7 @@ func convertToIamPolicy(iamPolicy *store.IAMPolicyMessage) *v1pb.IamPolicy {
 	for _, binding := range iamPolicy.Bindings {
 		var members []string
 		for _, member := range binding.Members {
-			members = append(members, getUserIdentifier(member.Email))
+			members = append(members, fmt.Sprintf("user:%s", member.Email))
 		}
 		bindings = append(bindings, &v1pb.Binding{
 			Role:      convertToProjectRole(binding.Role),
@@ -864,7 +1533,7 @@ func (s *ProjectService) convertToIAMPolicyMessage(ctx context.Context, iamPolic
 			return nil, status.Errorf(codes.InvalidArgument, err.Error())
 		}
 		for _, member := range binding.Members {
-			email := getUserEmailFromIdentifier(member)
+			email := strings.TrimPrefix(member, "user:")
 			user, err := s.store.GetUser(ctx, &store.FindUserMessage{
 				Email:       &email,
 				ShowDeleted: true,
@@ -887,12 +1556,6 @@ func (s *ProjectService) convertToIAMPolicyMessage(ctx context.Context, iamPolic
 	return &store.IAMPolicyMessage{
 		Bindings: bindings,
 	}, nil
-}
-
-// getUserIdentifier returns the user identifier.
-// See more details in project_service.proto.
-func getUserIdentifier(email string) string {
-	return "user:" + email
 }
 
 func convertToProjectRole(role api.Role) string {
@@ -968,78 +1631,57 @@ func convertToProject(projectMessage *store.ProjectMessage) *v1pb.Project {
 	}
 }
 
-func convertToProjectWorkflowType(workflow v1pb.Workflow) (api.ProjectWorkflowType, error) {
-	var w api.ProjectWorkflowType
+func convertToProjectWorkflowType(workflow v1pb.Workflow) api.ProjectWorkflowType {
 	switch workflow {
 	case v1pb.Workflow_UI:
-		w = api.UIWorkflow
+		return api.UIWorkflow
 	case v1pb.Workflow_VCS:
-		w = api.VCSWorkflow
+		return api.VCSWorkflow
 	default:
-		return w, errors.Errorf("invalid workflow %v", workflow)
+		// Default is UI workflow.
+		return api.UIWorkflow
 	}
-	return w, nil
 }
 
-func convertToProjectVisibility(visibility v1pb.Visibility) (api.ProjectVisibility, error) {
-	var v api.ProjectVisibility
+func convertToProjectVisibility(visibility v1pb.Visibility) api.ProjectVisibility {
 	switch visibility {
 	case v1pb.Visibility_VISIBILITY_PRIVATE:
-		v = api.Private
+		return api.Private
 	case v1pb.Visibility_VISIBILITY_PUBLIC:
-		v = api.Public
+		return api.Public
 	default:
-		return v, errors.Errorf("invalid visibility %v", visibility)
+		// Default is public.
+		return api.Public
 	}
-	return v, nil
 }
 
-func convertToProjectTenantMode(tenantMode v1pb.TenantMode) (api.ProjectTenantMode, error) {
-	var t api.ProjectTenantMode
+func convertToProjectTenantMode(tenantMode v1pb.TenantMode) api.ProjectTenantMode {
 	switch tenantMode {
 	case v1pb.TenantMode_TENANT_MODE_DISABLED:
-		t = api.TenantModeDisabled
+		return api.TenantModeDisabled
 	case v1pb.TenantMode_TENANT_MODE_ENABLED:
-		t = api.TenantModeTenant
+		return api.TenantModeTenant
 	default:
-		return t, errors.Errorf("invalid tenant mode %v", tenantMode)
+		return api.TenantModeDisabled
 	}
-	return t, nil
 }
 
-func convertToProjectSchemaChangeType(schemaChange v1pb.SchemaChange) (api.ProjectSchemaChangeType, error) {
-	var s api.ProjectSchemaChangeType
+func convertToProjectSchemaChangeType(schemaChange v1pb.SchemaChange) api.ProjectSchemaChangeType {
 	switch schemaChange {
 	case v1pb.SchemaChange_DDL:
-		s = api.ProjectSchemaChangeTypeDDL
+		return api.ProjectSchemaChangeTypeDDL
 	case v1pb.SchemaChange_SDL:
-		s = api.ProjectSchemaChangeTypeSDL
+		return api.ProjectSchemaChangeTypeSDL
 	default:
-		return s, errors.Errorf("invalid schema change type %v", schemaChange)
+		return api.ProjectSchemaChangeTypeDDL
 	}
-	return s, nil
 }
 
 func convertToProjectMessage(resourceID string, project *v1pb.Project) (*store.ProjectMessage, error) {
-	workflow, err := convertToProjectWorkflowType(project.Workflow)
-	if err != nil {
-		return nil, err
-	}
-
-	visibility, err := convertToProjectVisibility(project.Visibility)
-	if err != nil {
-		return nil, err
-	}
-
-	tenantMode, err := convertToProjectTenantMode(project.TenantMode)
-	if err != nil {
-		return nil, err
-	}
-
-	schemaChange, err := convertToProjectSchemaChangeType(project.SchemaChange)
-	if err != nil {
-		return nil, err
-	}
+	workflow := convertToProjectWorkflowType(project.Workflow)
+	visibility := convertToProjectVisibility(project.Visibility)
+	tenantMode := convertToProjectTenantMode(project.TenantMode)
+	schemaChange := convertToProjectSchemaChangeType(project.SchemaChange)
 
 	return &store.ProjectMessage{
 		ResourceID:       resourceID,
@@ -1203,10 +1845,6 @@ func validateIAMPolicy(policy *v1pb.IamPolicy, roles []*v1pb.Role) error {
 		return errors.Errorf("IAM Policy is required")
 	}
 	return validateBindings(policy.Bindings, roles)
-}
-
-func getUserEmailFromIdentifier(ident string) string {
-	return strings.TrimPrefix(ident, "user:")
 }
 
 func validateBindings(bindings []*v1pb.Binding, roles []*v1pb.Role) error {

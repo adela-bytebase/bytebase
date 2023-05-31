@@ -54,7 +54,6 @@
     "bookmarks": "书签",
     "quick-action": "快捷操作",
     "archive": "归档",
-    "quickstart": "快速入门",
     "logout": "登出",
     "close": "关闭",
     "latest": "最新",
@@ -243,7 +242,13 @@
     "collapse": "收起",
     "select": "选择",
     "optional": "可选",
-    "reason": "理由"
+    "reason": "理由",
+    "date": {
+      "days": "{days} 天",
+      "months": "{months} 月",
+      "years": "{years} 年"
+    },
+    "expiration": "过期时间"
   },
   "error-page": {
     "go-back-home": "回到主页"
@@ -357,7 +362,7 @@
   "intro": {
     "doc": "文档",
     "issue": "工单",
-    "quickstart": "快速入门"
+    "quickstart": "新手任务"
   },
   "bbkit": {
     "common": {
@@ -520,6 +525,10 @@
           "self": "External URL",
           "description": "用户或回调能访问到的 Bytebase URL，必须以 http:// 或 https:// 开头。{viewDoc}"
         },
+        "gitops-webhook-url": {
+          "self": "GitOps Webhook URL",
+          "description": "用于 GitOps 中第三方服务向 Bytebase 发送 Webhook 的 URL。"
+        },
         "config-updated": "配置已更新",
         "plugin": {
           "openai": {
@@ -558,10 +567,10 @@
       "description": "配置邮件信息可以让用户接收到数据库相关报告的电子邮件，如慢查询周报。",
       "field": {
         "smtp-server-host": "SMTP 服务器主机",
-        "from": "发送自",
+        "from": "发件人地址",
         "smtp-username": "SMTP 用户名",
         "smtp-password": "SMTP 密码",
-        "send-test-email-to": "发送测试邮件给",
+        "send-test-email-to": "收件人测试地址",
         "authentication-method": "验证方式",
         "encryption": "加密方式",
         "smtp-server-port": "SMTP 服务器端口",
@@ -639,6 +648,7 @@
     "n-similar-activities": "({count} 个相似的活动)"
   },
   "issue": {
+    "my-issues": "我的工单",
     "waiting-approval": "等待批准",
     "waiting-rollout": "等待发布",
     "opened-by-at": "{id} 由 {creator} 开启于 {time}",
@@ -685,6 +695,7 @@
       "progress": "进度",
       "updated": "更新于",
       "approver": "审批人",
+      "creator": "创建人",
       "assignee": "发布人"
     },
     "stage-select": {
@@ -947,6 +958,8 @@
     "production-environment": "生产环境"
   },
   "quick-start": {
+    "self": "新手任务",
+    "guide": "可点击步骤进行尝试",
     "view-an-issue": "查看工单",
     "visit-project": "@:common.visit@:common.projects",
     "visit-instance": "@:common.visit@:common.instances",
@@ -956,8 +969,8 @@
     "use-kbar": "使用 kbar ({shortcut})",
     "query-data": "查询数据",
     "notice": {
-      "title": "快速入门导览已关闭",
-      "desc": "您稍后仍可以从右上角的菜单中再次打开快速入门导览"
+      "title": "新手任务已关闭",
+      "desc": "您稍后仍可以从右上角的菜单中再次打开新手任务"
     }
   },
   "auth": {
@@ -1235,7 +1248,11 @@
     },
     "transfer": {
       "source-project": "源项目",
-      "target-project": "目标项目"
+      "target-project": "目标项目",
+      "errors": {
+        "select-target-project": "选择目标项目",
+        "select-at-least-one-database": "至少选择一个数据库"
+      }
     }
   },
   "repository": {
@@ -1257,7 +1274,7 @@
     "sql-review-ci-enable": "开启 SQL 审核 CI",
     "sql-review-ci-enable-gitlab": "基于 GitLab CI 开启 SQL 审核",
     "sql-review-ci-enable-github": "基于 GitHub Action 开启 SQL 审核",
-    "sql-review-ci-description": "Bytebase 会发起{pr}为您的代码仓库配置 SQL 审核 CI。配置完成后，在每一个{pr}中，SQL 审核策略将应用于任何匹配上「{pathTemplate}」的文件修改。",
+    "sql-review-ci-description": "Bytebase 会发起 {pr} 为您的代码仓库配置 SQL 审核 CI。在每一个 {pr} 中，任何匹配上「{pathTemplate}」的文件修改将被赋予对应环境的 SQL 审核策略。",
     "sql-review-ci-setup": "配置 SQL 审核 CI",
     "sql-review-ci-setup-failed": "SQL 审核 CI 创建失败",
     "sql-review-ci-setup-pr": "查看{pr}",
@@ -1431,6 +1448,7 @@
       "select-schema-change-type-sdl": "声明式 - 面向终态的 Schema 描述，如 CREATE TABLE",
       "schema-path-template-sdl-description": "Schema 文件描述了完整的数据库结构。",
       "members": {
+        "edit": "编辑成员 - {member}",
         "view-by-principals": "按用户查看",
         "view-by-roles": "按角色查看",
         "cannot-remove-last-owner": "不能移除项目的最后一个所有者",
@@ -1835,6 +1853,7 @@
     "trial-for-plan": "您可以开启{plan}的 {days} 天免费试用 - 无需任何信用卡或预付费",
     "trial-for-days": "您可以开启 {days} 天的免费试用 - 无需任何信用卡或预付费",
     "upgrade-trial": "您可以直接将现有的试用升级到这个版本",
+    "upgrade-now": "现在升级",
     "update": {
       "success": {
         "title": "证书更新成功",
@@ -1844,6 +1863,12 @@
         "title": "证书更新失败",
         "description": "请检查证书是否有效"
       }
+    },
+    "plan-features": "{plan}功能",
+    "overuse-warning": "{neededPlan}在{currentPlan}将会受限，请尽快升级以确保正常使用。",
+    "overuse-modal": {
+      "description": "您正在使用当前「{plan}」不包含的功能。立即升级避免影响使用。",
+      "instance-count-exceeds": "实例数量 {count} 超出了限制 {limit}"
     },
     "features": {
       "bb-feature-task-schedule-time": {
@@ -1992,13 +2017,17 @@
     "actions": {
       "sync-from-vcs": "从 VCS 同步 SQL 脚本"
     },
+    "notifications": {
+      "duplicate-success": "已成功拷贝至“我的工作表”"
+    },
     "hint-tips": {
       "confirm-to-sync-sheet": "确定要同步工作表?",
       "confirm-to-delete-this-sheet": "确定删除这条工作表?",
       "confirm-to-duplicate-sheet": "确定要复制这条工作表?"
     },
     "linked-issue": "关联工单",
-    "from-sheet-warning": "这个工作表来自工单 {issue}。它是只读的且只显示了部分内容。"
+    "from-issue-warning": "这个工作表来自工单 {issue}，处于只读模式。{oversize}",
+    "content-oversize-warning": "因工作表较长，仅展示部分内容。"
   },
   "engine": {
     "mysql": "MySQL",
@@ -2477,6 +2506,13 @@
     },
     "querier": {
       "description": "系统定义的项目数据查询者角色"
+    },
+    "select-role": "选择角色"
+  },
+  "database-group": {
+    "factor": {
+      "resource_database_name": "数据库名",
+      "resource_table_name": "表名"
     }
   }
 }

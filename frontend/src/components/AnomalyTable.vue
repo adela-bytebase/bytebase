@@ -52,7 +52,7 @@
   </BBTable>
   <BBModal
     v-if="schemaDriftDetail"
-    :title="`'${schemaDriftDetail.database.name}' schema drift - ${schemaDriftDetail.payload.version} vs Actual`"
+    :title="`'${schemaDriftDetail.database.databaseName}' schema drift - ${schemaDriftDetail.payload.version} vs Actual`"
     @close="dismissModal"
   >
     <div class="space-y-4">
@@ -87,8 +87,8 @@ import {
   AnomalyInstanceConnectionPayload,
   AnomalyType,
 } from "../types";
-import { databaseSlug, humanizeTs, instanceSlug } from "../utils";
-import { useDatabaseStore, useInstanceStore } from "@/store";
+import { databaseV1Slug, instanceV1Slug, humanizeTs } from "../utils";
+import { useDatabaseV1Store, useInstanceV1Store } from "@/store";
 import { useEnvironmentV1Store } from "@/store";
 
 type Action = {
@@ -169,7 +169,7 @@ export default defineComponent({
           const payload =
             anomaly.payload as AnomalyDatabaseBackupPolicyViolationPayload;
           const environment = useEnvironmentV1Store().getEnvironmentByUID(
-            payload.environmentId
+            String(payload.environmentId)
           );
           return `'${environment.title}' environment requires ${payload.expectedSchedule} auto-backup.`;
         }
@@ -200,15 +200,15 @@ export default defineComponent({
     const action = (anomaly: Anomaly): Action => {
       switch (anomaly.type) {
         case "bb.anomaly.instance.connection": {
-          const instance = useInstanceStore().getInstanceById(
-            anomaly.instanceId!
+          const instance = useInstanceV1Store().getInstanceByUID(
+            String(anomaly.instanceId!)
           );
           return {
             onClick: () => {
               router.push({
                 name: "workspace.instance.detail",
                 params: {
-                  instanceSlug: instanceSlug(instance),
+                  instanceSlug: instanceV1Slug(instance),
                 },
               });
             },
@@ -216,15 +216,15 @@ export default defineComponent({
           };
         }
         case "bb.anomaly.instance.migration-schema": {
-          const instance = useInstanceStore().getInstanceById(
-            anomaly.instanceId!
+          const instance = useInstanceV1Store().getInstanceByUID(
+            String(anomaly.instanceId!)
           );
           return {
             onClick: () => {
               router.push({
                 name: "workspace.instance.detail",
                 params: {
-                  instanceSlug: instanceSlug(instance),
+                  instanceSlug: instanceV1Slug(instance),
                 },
               });
             },
@@ -232,15 +232,15 @@ export default defineComponent({
           };
         }
         case "bb.anomaly.database.backup.policy-violation": {
-          const database = useDatabaseStore().getDatabaseById(
-            anomaly.databaseId!
+          const database = useDatabaseV1Store().getDatabaseByUID(
+            String(anomaly.databaseId!)
           );
           return {
             onClick: () => {
               router.push({
                 name: "workspace.database.detail",
                 params: {
-                  databaseSlug: databaseSlug(database),
+                  databaseSlug: databaseV1Slug(database),
                 },
                 hash: "#backup-and-restore",
               });
@@ -249,15 +249,15 @@ export default defineComponent({
           };
         }
         case "bb.anomaly.database.backup.missing": {
-          const database = useDatabaseStore().getDatabaseById(
-            anomaly.databaseId!
+          const database = useDatabaseV1Store().getDatabaseByUID(
+            String(anomaly.databaseId!)
           );
           return {
             onClick: () => {
               router.push({
                 name: "workspace.database.detail",
                 params: {
-                  databaseSlug: databaseSlug(database),
+                  databaseSlug: databaseV1Slug(database),
                 },
                 hash: "#backup-and-restore",
               });
@@ -266,15 +266,15 @@ export default defineComponent({
           };
         }
         case "bb.anomaly.database.connection": {
-          const instance = useInstanceStore().getInstanceById(
-            anomaly.instanceId!
+          const instance = useInstanceV1Store().getInstanceByUID(
+            String(anomaly.instanceId!)
           );
           return {
             onClick: () => {
               router.push({
                 name: "workspace.instance.detail",
                 params: {
-                  instanceSlug: instanceSlug(instance),
+                  instanceSlug: instanceV1Slug(instance),
                 },
               });
             },
@@ -286,7 +286,9 @@ export default defineComponent({
             onClick: () => {
               state.selectedAnomaly = anomaly;
               state.showModal = true;
-              useDatabaseStore().getOrFetchDatabaseById(anomaly.databaseId!);
+              useDatabaseV1Store().getOrFetchDatabaseByUID(
+                String(anomaly.databaseId!)
+              );
             },
             title: t("anomaly.action.view-diff"),
           };
@@ -297,8 +299,8 @@ export default defineComponent({
       if (state.showModal && state.selectedAnomaly) {
         const anomaly = state.selectedAnomaly;
         const payload = anomaly.payload as AnomalyDatabaseSchemaDriftPayload;
-        const database = useDatabaseStore().getDatabaseById(
-          anomaly.databaseId!
+        const database = useDatabaseV1Store().getDatabaseByUID(
+          String(anomaly.databaseId!)
         );
         return { anomaly, payload, database };
       }

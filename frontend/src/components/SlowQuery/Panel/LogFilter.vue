@@ -10,7 +10,7 @@
         <EnvironmentTabFilter
           v-if="filterTypes.includes('environment')"
           class="flex-1"
-          :environment="params.environment?.id ?? UNKNOWN_ID"
+          :environment="params.environment?.uid ?? String(UNKNOWN_ID)"
           :include-all="true"
           :disabled="loading"
           @update:environment="changeEnvironmentId"
@@ -26,7 +26,7 @@
       <NInputGroup class="flex-1">
         <ProjectSelect
           v-if="filterTypes.includes('project')"
-          :project="params.project?.id ?? UNKNOWN_ID"
+          :project="params.project?.uid ?? String(UNKNOWN_ID)"
           :include-default-project="canVisitDefaultProject"
           :include-all="true"
           :disabled="loading"
@@ -34,8 +34,8 @@
         />
         <InstanceSelect
           v-if="filterTypes.includes('instance')"
-          :instance="params.instance?.id ?? UNKNOWN_ID"
-          :environment="params.environment?.id"
+          :instance="params.instance?.uid ?? String(UNKNOWN_ID)"
+          :environment="params.environment?.uid"
           :include-all="true"
           :filter="instanceFilter"
           :disabled="loading"
@@ -43,12 +43,12 @@
         />
         <DatabaseSelect
           v-if="filterTypes.includes('database')"
-          :database="params.database?.id ?? UNKNOWN_ID"
-          :environment="params.environment?.id"
-          :instance="params.instance?.id"
-          :project="params.project?.id"
+          :database="params.database?.uid ?? String(UNKNOWN_ID)"
+          :environment="params.environment?.uid"
+          :instance="params.instance?.uid"
+          :project="params.project?.uid"
           :include-all="true"
-          :filter="(db) => instanceFilter(db.instance)"
+          :filter="(db) => instanceFilter(db.instanceEntity)"
           :disabled="loading"
           @update:database="changeDatabaseId"
         />
@@ -95,23 +95,16 @@ import { computed } from "vue";
 import { NDatePicker, NInputGroup } from "naive-ui";
 import dayjs from "dayjs";
 
+import { UNKNOWN_ID } from "@/types";
 import {
-  type DatabaseId,
-  type EnvironmentId,
-  type InstanceId,
-  type ProjectId,
-  UNKNOWN_ID,
-  Instance,
-} from "@/types";
-import {
-  useCurrentUser,
-  useDatabaseStore,
-  useEnvironmentStore,
-  useInstanceStore,
-  useProjectStore,
+  useCurrentUserV1,
+  useDatabaseV1Store,
+  useEnvironmentV1Store,
+  useInstanceV1Store,
+  useProjectV1Store,
   useSlowQueryPolicyList,
 } from "@/store";
-import { hasWorkspacePermission, instanceSupportSlowQuery } from "@/utils";
+import { hasWorkspacePermissionV1, instanceV1SupportSlowQuery } from "@/utils";
 import type { FilterType, SlowQueryFilterParams } from "./types";
 import {
   ProjectSelect,
@@ -119,6 +112,7 @@ import {
   EnvironmentTabFilter,
   DatabaseSelect,
 } from "@/components/v2";
+import { Instance } from "@/types/proto/v1/instance_service";
 
 const props = defineProps<{
   params: SlowQueryFilterParams;
@@ -130,39 +124,39 @@ const emit = defineEmits<{
   (event: "update:params", params: SlowQueryFilterParams): void;
 }>();
 
-const currentUser = useCurrentUser();
+const currentUserV1 = useCurrentUserV1();
 const { list: policyList, ready } = useSlowQueryPolicyList();
 
 const canVisitDefaultProject = computed(() => {
-  return hasWorkspacePermission(
+  return hasWorkspacePermissionV1(
     "bb.permission.workspace.manage-database",
-    currentUser.value.role
+    currentUserV1.value.userRole
   );
 });
 
-const changeEnvironmentId = (id: EnvironmentId) => {
-  const environment = useEnvironmentStore().getEnvironmentById(id);
+const changeEnvironmentId = (id: string) => {
+  const environment = useEnvironmentV1Store().getEnvironmentByUID(id);
   update({ environment });
 };
-const changeInstanceId = (id: InstanceId | undefined) => {
-  if (id && id !== UNKNOWN_ID) {
-    const instance = useInstanceStore().getInstanceById(id ?? UNKNOWN_ID);
+const changeInstanceId = (uid: string | undefined) => {
+  if (uid && uid !== String(UNKNOWN_ID)) {
+    const instance = useInstanceV1Store().getInstanceByUID(uid);
     update({ instance });
     return;
   }
   update({ instance: undefined });
 };
-const changeDatabaseId = (id: DatabaseId | undefined) => {
-  if (id && id !== UNKNOWN_ID) {
-    const database = useDatabaseStore().getDatabaseById(id ?? UNKNOWN_ID);
+const changeDatabaseId = (uid: string | undefined) => {
+  if (uid && uid !== String(UNKNOWN_ID)) {
+    const database = useDatabaseV1Store().getDatabaseByUID(uid);
     update({ database });
     return;
   }
   update({ database: undefined });
 };
-const changeProjectId = (id: ProjectId | undefined) => {
-  if (id && id !== UNKNOWN_ID) {
-    const project = useProjectStore().getProjectById(id);
+const changeProjectId = (id: string | undefined) => {
+  if (id && id !== String(UNKNOWN_ID)) {
+    const project = useProjectV1Store().getProjectByUID(id);
     update({ project });
     return;
   }
@@ -204,16 +198,16 @@ const update = (params: Partial<SlowQueryFilterParams>) => {
 };
 
 const instanceFilter = (instance: Instance) => {
-  if (!instanceSupportSlowQuery(instance)) {
+  if (!instanceV1SupportSlowQuery(instance)) {
     return false;
   }
   const policy = policyList.value.find(
-    (policy) => policy.resourceUid == instance.id
+    (policy) => policy.resourceUid === instance.uid
   );
   if (!policy) {
     return false;
   }
-  return policy.slowQueryPolicy?.active;
+  return !!policy.slowQueryPolicy?.active;
 };
 
 const isDateDisabled = (date: number) => {

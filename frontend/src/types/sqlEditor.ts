@@ -1,6 +1,7 @@
 import type * as monaco from "monaco-editor";
 import { InstanceId, DatabaseId, ActivityId, EngineType } from "../types";
 import { Principal } from "./principal";
+import { Engine } from "./proto/v1/common";
 
 export type EditorModel = monaco.editor.ITextModel;
 export type EditorPosition = monaco.Position;
@@ -15,8 +16,18 @@ export const EngineTypesUsingSQL = [
   "SNOWFLAKE",
   "TIDB",
   "SPANNER",
+  "OCEANBASE",
 ] as const;
 export type SQLDialect = typeof EngineTypesUsingSQL[number];
+export const EngineToSQLDialectMap = new Map<Engine, SQLDialect>([
+  [Engine.MYSQL, "MYSQL"],
+  [Engine.CLICKHOUSE, "CLICKHOUSE"],
+  [Engine.POSTGRES, "POSTGRES"],
+  [Engine.SNOWFLAKE, "SNOWFLAKE"],
+  [Engine.TIDB, "TIDB"],
+  [Engine.SPANNER, "SPANNER"],
+  [Engine.OCEANBASE, "OCEANBASE"],
+]);
 
 export const languageOfEngine = (engine?: EngineType | "unknown"): Language => {
   if (engine === "MONGODB") {
@@ -29,12 +40,29 @@ export const languageOfEngine = (engine?: EngineType | "unknown"): Language => {
   return "sql";
 };
 
+export const languageOfEngineV1 = (engine?: Engine): Language => {
+  if (engine === Engine.MONGODB) {
+    return "javascript";
+  }
+  if (engine === Engine.REDIS) {
+    return "redis";
+  }
+
+  return "sql";
+};
+
 export const dialectOfEngine = (engine = "unknown"): SQLDialect => {
   if (EngineTypesUsingSQL.includes(engine as any)) {
     return engine as SQLDialect;
   }
   // Fallback to MYSQL otherwise
   return "MYSQL";
+};
+
+export const dialectOfEngineV1 = (
+  engine: Engine = Engine.UNRECOGNIZED
+): SQLDialect => {
+  return EngineToSQLDialectMap.get(engine) ?? "MYSQL";
 };
 
 export enum SortText {

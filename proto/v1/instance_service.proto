@@ -122,6 +122,9 @@ message CreateInstanceRequest {
   // This value should be 4-63 characters, and valid characters
   // are /[a-z][0-9]-/.
   string instance_id = 2;
+
+  // Validate only also tests the data source connection.
+  bool validate_only = 3;
 }
 
 message UpdateInstanceRequest {
@@ -157,7 +160,10 @@ message AddDataSourceRequest {
 
   // Identified by type.
   // Only READ_ONLY data source can be added.
-  DataSource data_sources = 2 [(google.api.field_behavior) = REQUIRED];
+  DataSource data_source = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Validate only also tests the data source connection.
+  bool validate_only = 3;
 }
 
 message RemoveDataSourceRequest {
@@ -167,7 +173,7 @@ message RemoveDataSourceRequest {
 
   // Identified by type.
   // Only READ_ONLY data source can be removed.
-  DataSource data_sources = 2 [(google.api.field_behavior) = REQUIRED];
+  DataSource data_source = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message UpdateDataSourceRequest {
@@ -176,10 +182,13 @@ message UpdateDataSourceRequest {
   string instance = 1 [(google.api.field_behavior) = REQUIRED];
 
   // Identified by type.
-  DataSource data_sources = 2 [(google.api.field_behavior) = REQUIRED];
+  DataSource data_source = 2 [(google.api.field_behavior) = REQUIRED];
 
   // The list of fields to update.
   google.protobuf.FieldMask update_mask = 3;
+
+  // Validate only also tests the data source connection.
+  bool validate_only = 4;
 }
 
 message SyncSlowQueriesRequest {
@@ -202,13 +211,15 @@ message Instance {
 
   Engine engine = 5;
 
-  string external_link = 6;
+  string engine_version = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 
-  repeated DataSource data_sources = 7;
+  string external_link = 7;
+
+  repeated DataSource data_sources = 8;
 
   // The environment resource.
   // Format: environments/prod where prod is the environment resource ID.
-  string environment = 8;
+  string environment = 9;
 }
 
 message DataSource {

@@ -60,24 +60,23 @@ import type {
   CoreTabInfo,
   DatabaseId,
   InstanceId,
-  SheetId,
 } from "@/types";
 import { ConnectionTreeState, TabMode, UNKNOWN_ID } from "@/types";
 import {
   isConnectableAtom,
   useConnectionTreeStore,
-  useCurrentUser,
-  useDatabaseStore,
+  useCurrentUserV1,
+  useDatabaseV1Store,
   useIsLoggedIn,
   useTabStore,
 } from "@/store";
 import {
   emptyConnection,
   getDefaultTabNameFromConnection,
-  hasWorkspacePermission,
-  instanceHasAlterSchema,
-  instanceHasReadonlyMode,
+  hasWorkspacePermissionV1,
+  instanceV1HasReadonlyMode,
   instanceOfConnectionAtom,
+  instanceV1HasAlterSchema,
   isDescendantOf,
   isSimilarTab,
 } from "@/utils";
@@ -107,11 +106,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const databaseStore = useDatabaseStore();
+const databaseStore = useDatabaseV1Store();
 const connectionTreeStore = useConnectionTreeStore();
 const tabStore = useTabStore();
 const isLoggedIn = useIsLoggedIn();
-const currentUser = useCurrentUser();
+const currentUserV1 = useCurrentUserV1();
 
 const mounted = useMounted();
 const showDropdown = ref(false);
@@ -137,7 +136,7 @@ const dropdownOptions = computed((): DropdownOptionWithConnectionAtom[] => {
     const items: DropdownOptionWithConnectionAtom[] = [];
     if (isConnectableAtom(atom)) {
       const instance = instanceOfConnectionAtom(atom);
-      if (instance && instanceHasReadonlyMode(instance)) {
+      if (instance && instanceV1HasReadonlyMode(instance)) {
         items.push({
           key: "connect",
           label: t("sql-editor.connect"),
@@ -153,8 +152,8 @@ const dropdownOptions = computed((): DropdownOptionWithConnectionAtom[] => {
       }
     }
     if (atom.type === "database") {
-      const database = databaseStore.getDatabaseById(atom.id);
-      if (instanceHasAlterSchema(database.instance)) {
+      const database = databaseStore.getDatabaseByUID(atom.id);
+      if (instanceV1HasAlterSchema(database.instanceEntity)) {
         items.push({
           key: "alter-schema",
           label: t("database.alter-schema"),
@@ -169,19 +168,19 @@ const dropdownOptions = computed((): DropdownOptionWithConnectionAtom[] => {
 // Highlight the current tab's connection node.
 const selectedKeys = computed(() => {
   const { instanceId, databaseId } = tabStore.currentTab.connection;
-  if (databaseId !== UNKNOWN_ID) {
+  if (databaseId !== String(UNKNOWN_ID)) {
     return [`database-${databaseId}`];
   }
-  if (instanceId !== UNKNOWN_ID) {
+  if (instanceId !== String(UNKNOWN_ID)) {
     return [`instance-${instanceId}`];
   }
   return [];
 });
 
 const allowAdmin = computed(() =>
-  hasWorkspacePermission(
+  hasWorkspacePermissionV1(
     "bb.permission.workspace.admin-sql-editor",
-    currentUser.value.role
+    currentUserV1.value.userRole
   )
 );
 
@@ -189,8 +188,8 @@ const treeData = computed(() => connectionTreeStore.tree.data);
 
 const setConnection = (
   option: ConnectionAtom,
-  extra: { sheetId?: SheetId; mode: TabMode } = {
-    sheetId: undefined,
+  extra: { sheetName?: string; mode: TabMode } = {
+    sheetName: undefined,
     mode: TabMode.ReadOnly,
   }
 ) => {
@@ -225,9 +224,9 @@ const setConnection = (
       conn.instanceId = option.id;
     } else if (option.type === "database") {
       // If selected item is database node
-      const database = databaseStore.getDatabaseById(option.id);
-      conn.instanceId = database.instance.id;
-      conn.databaseId = database.id;
+      const database = databaseStore.getDatabaseByUID(option.id);
+      conn.instanceId = database.instanceEntity.uid;
+      conn.databaseId = database.uid;
     }
 
     connect();
@@ -362,12 +361,12 @@ watch(
       return;
     }
 
-    if (instanceId !== UNKNOWN_ID) {
+    if (instanceId !== String(UNKNOWN_ID)) {
       maybeExpandKey(`instance-${instanceId}`);
     }
-    if (databaseId !== UNKNOWN_ID) {
-      const db = databaseStore.getDatabaseById(databaseId);
-      const projectId = db.project.id;
+    if (databaseId !== String(UNKNOWN_ID)) {
+      const db = databaseStore.getDatabaseByUID(databaseId);
+      const projectId = db.projectEntity.uid;
       maybeExpandKey(`project-${projectId}`);
     }
 

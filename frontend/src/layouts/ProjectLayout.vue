@@ -40,23 +40,25 @@
 </template>
 
 <script lang="ts">
-import { computed, defineComponent, reactive, watch } from "vue";
+import { computed, defineComponent, nextTick, reactive, watch } from "vue";
 import { useRouter } from "vue-router";
 import { startCase } from "lodash-es";
 
 import {
   idFromSlug,
-  hasWorkspacePermission,
-  hasPermissionInProject,
+  hasWorkspacePermissionV1,
+  hasPermissionInProjectV1,
+  isDev,
 } from "../utils";
 import ArchiveBanner from "../components/ArchiveBanner.vue";
 import { BBTabFilterItem } from "../bbkit/types";
 import { useI18n } from "vue-i18n";
 import { Project, DEFAULT_PROJECT_ID } from "../types";
 import {
-  useCurrentUser,
   useCurrentUserIamPolicy,
-  useProjectStore,
+  useCurrentUserV1,
+  useLegacyProjectStore,
+  useProjectV1Store,
 } from "@/store";
 
 type ProjectTabItem = {
@@ -87,11 +89,17 @@ export default defineComponent({
     const router = useRouter();
     const { t } = useI18n();
 
-    const currentUser = useCurrentUser();
-    const projectStore = useProjectStore();
+    const currentUserV1 = useCurrentUserV1();
+    const legacyProjectStore = useLegacyProjectStore();
+    const projectV1Store = useProjectV1Store();
 
     const project = computed((): Project => {
-      return projectStore.getProjectById(idFromSlug(props.projectSlug));
+      return legacyProjectStore.getProjectById(idFromSlug(props.projectSlug));
+    });
+    const projectV1 = computed(() => {
+      return projectV1Store.getProjectByUID(
+        String(idFromSlug(props.projectSlug))
+      );
     });
     const currentUserIamPolicy = useCurrentUserIamPolicy();
 
@@ -126,6 +134,11 @@ export default defineComponent({
       const list: (ProjectTabItem | null)[] = [
         { name: t("common.overview"), hash: "overview" },
         { name: t("common.databases"), hash: "databases" },
+
+        // TODO(steven): remove this after we release the feature.
+        isDev() && isTenantProject.value
+          ? { name: "Database groups", hash: "database-groups" }
+          : null,
 
         isTenantProject.value
           ? null // Hide "Change History" tab for tenant projects
@@ -173,18 +186,18 @@ export default defineComponent({
       }
 
       if (
-        hasWorkspacePermission(
+        hasWorkspacePermissionV1(
           "bb.permission.workspace.manage-project",
-          currentUser.value.role
+          currentUserV1.value.userRole
         )
       ) {
         return true;
       }
 
       if (
-        hasPermissionInProject(
-          project.value,
-          currentUser.value,
+        hasPermissionInProjectV1(
+          projectV1.value.iamPolicy,
+          currentUserV1.value,
           "bb.permission.project.manage-general"
         )
       ) {
@@ -224,9 +237,11 @@ export default defineComponent({
     };
 
     watch(
-      () => router.currentRoute.value.hash,
+      () => [router.currentRoute.value.hash],
       () => {
-        selectProjectTabOnHash();
+        nextTick(() => {
+          selectProjectTabOnHash();
+        });
       },
       {
         immediate: true,

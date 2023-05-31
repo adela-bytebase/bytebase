@@ -1,12 +1,14 @@
 <template>
   <div
     v-if="showQuickstart"
-    class="py-2 px-4 w-full flex-shrink-0 border-t border-block-border hidden lg:block"
+    class="py-2 px-4 w-full flex-shrink-0 border-t border-block-border hidden lg:block bg-yellow-50"
   >
     <p
       class="text-sm font-medium text-gray-900 flex items-center justify-between"
     >
-      <span>🎈 {{ $t("common.quickstart") }}</span>
+      <span
+        >🎈 {{ $t("quick-start.self") }} - {{ $t("quick-start.guide") }}</span
+      >
 
       <button class="btn-icon" @click.prevent="() => hideQuickstart()">
         <heroicons-solid:x class="w-4 h-4" />
@@ -54,8 +56,15 @@
               />
             </template>
             <template v-else-if="isTaskActive(index)">
-              <span class="absolute h-4 w-4 rounded-full bg-blue-200"></span>
-              <span class="relative block w-2 h-2 bg-info rounded-full"></span>
+              <span class="relative flex h-3 w-3">
+                <span
+                  class="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"
+                  style="animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite"
+                ></span>
+                <span
+                  class="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"
+                ></span>
+              </span>
             </template>
             <template v-else>
               <div
@@ -118,12 +127,12 @@ import { useI18n } from "vue-i18n";
 import { storeToRefs } from "pinia";
 import { useKBarHandler, useKBarEventOnce } from "@bytebase/vue-kbar";
 
-import { hasWorkspacePermission } from "@/utils";
+import { hasWorkspacePermissionV1 } from "@/utils";
 import {
   pushNotification,
-  useActuatorStore,
-  useCurrentUser,
-  useSubscriptionStore,
+  useActuatorV1Store,
+  useCurrentUserV1,
+  useSubscriptionV1Store,
   useUIStateStore,
 } from "@/store";
 import { PlanType } from "@/types/proto/v1/subscription_service";
@@ -135,13 +144,13 @@ type IntroItem = {
   click?: () => void;
 };
 
-const actuatorStore = useActuatorStore();
+const actuatorStore = useActuatorV1Store();
 const uiStateStore = useUIStateStore();
-const subscriptionStore = useSubscriptionStore();
+const subscriptionStore = useSubscriptionV1Store();
 const { t } = useI18n();
 const kbarHandler = useKBarHandler();
 
-const currentUser = useCurrentUser();
+const currentUserV1 = useCurrentUserV1();
 const { isDemo } = storeToRefs(actuatorStore);
 
 const show = computed(() => {
@@ -170,7 +179,7 @@ const introList = computed(() => {
     },
     {
       name: computed(() => t("quick-start.query-data")),
-      link: "/sql-editor/sheet/sample-sheet-101",
+      link: "/sql-editor/sheet/project-sample-101",
       done: computed(() => uiStateStore.getIntroStateByKey("data.query")),
     },
     {
@@ -181,9 +190,9 @@ const introList = computed(() => {
   ];
 
   if (
-    hasWorkspacePermission(
+    hasWorkspacePermissionV1(
       "bb.permission.workspace.manage-environment",
-      currentUser.value.role
+      currentUserV1.value.userRole
     )
   ) {
     introList.push({
@@ -196,9 +205,9 @@ const introList = computed(() => {
   }
 
   if (
-    hasWorkspacePermission(
+    hasWorkspacePermissionV1(
       "bb.permission.workspace.manage-instance",
-      currentUser.value.role
+      currentUserV1.value.userRole
     )
   ) {
     introList.push({
@@ -215,9 +224,9 @@ const introList = computed(() => {
   });
 
   if (
-    hasWorkspacePermission(
+    hasWorkspacePermissionV1(
       "bb.permission.workspace.manage-member",
-      currentUser.value.role
+      currentUserV1.value.userRole
     )
   ) {
     introList.push({

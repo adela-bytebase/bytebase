@@ -20,6 +20,7 @@ import (
 	"github.com/bytebase/bytebase/backend/plugin/advisor/db"
 	database "github.com/bytebase/bytebase/backend/plugin/db"
 	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
 var (
@@ -248,6 +249,11 @@ func (*MockDriver) Execute(_ context.Context, _ string, _ bool) (int64, error) {
 	return 0, nil
 }
 
+// QueryConn2 queries a SQL statement in a given connection.
+func (*MockDriver) QueryConn2(_ context.Context, _ *sql.Conn, _ string, _ *database.QueryContext) ([]*v1pb.QueryResult, error) {
+	return nil, nil
+}
+
 // QueryConn implements the Driver interface.
 func (*MockDriver) QueryConn(_ context.Context, _ *sql.Conn, statement string, _ *database.QueryContext) ([]any, error) {
 	switch statement {
@@ -377,6 +383,7 @@ func SetDefaultSQLReviewRulePayload(ruleTp SQLReviewRuleType) (string, error) {
 		SchemaRuleStatementAddCheckNotValid,
 		SchemaRuleStatementDisallowAddNotNull,
 		SchemaRuleIndexTypeNoBlob,
+		SchemaRuleIdentifierNoKeyword,
 		SchemaRuleTableNameNoKeyword:
 	case SchemaRuleTableDropNamingConvention:
 		payload, err = json.Marshal(NamingRulePayload{
@@ -468,6 +475,10 @@ func SetDefaultSQLReviewRulePayload(ruleTp SQLReviewRuleType) (string, error) {
 	case SchemaRuleIndexPrimaryKeyTypeAllowlist:
 		payload, err = json.Marshal(StringArrayTypeRulePayload{
 			List: []string{"serial", "bigserial", "int", "bigint"},
+		})
+	case SchemaRuleIdentifierCase:
+		payload, err = json.Marshal(NamingCaseRulePayload{
+			Upper: true,
 		})
 	default:
 		return "", errors.Errorf("unknown SQL review type for default payload: %s", ruleTp)

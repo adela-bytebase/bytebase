@@ -32,66 +32,68 @@
         </h3>
       </div>
 
-      <div
-        v-if="quickAction === 'quickaction.bb.database.create'"
-        class="flex flex-col items-center w-24"
-        data-label="bb-quick-action-new-db"
-      >
-        <button class="btn-icon-primary p-3" @click.prevent="createDatabase">
-          <heroicons-outline:database class="w-5 h-5" />
-        </button>
-        <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+      <template v-if="shouldShowAlterDatabaseEntries">
+        <div
+          v-if="quickAction === 'quickaction.bb.database.create'"
+          class="flex flex-col items-center w-24"
+          data-label="bb-quick-action-new-db"
         >
-          {{ $t("quick-action.new-db") }}
-        </h3>
-      </div>
+          <button class="btn-icon-primary p-3" @click.prevent="createDatabase">
+            <heroicons-outline:database class="w-5 h-5" />
+          </button>
+          <h3
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          >
+            {{ $t("quick-action.new-db") }}
+          </h3>
+        </div>
 
-      <div
-        v-if="quickAction === 'quickaction.bb.database.request'"
-        class="flex flex-col items-center w-24"
-      >
-        <button class="btn-icon-primary p-3" @click.prevent="requestDatabase">
-          <heroicons-outline:database class="w-5 h-5" />
-        </button>
-        <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+        <div
+          v-if="quickAction === 'quickaction.bb.database.request'"
+          class="flex flex-col items-center w-24"
         >
-          {{ $t("quick-action.request-db") }}
-        </h3>
-      </div>
+          <button class="btn-icon-primary p-3" @click.prevent="requestDatabase">
+            <heroicons-outline:database class="w-5 h-5" />
+          </button>
+          <h3
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          >
+            {{ $t("quick-action.request-db") }}
+          </h3>
+        </div>
 
-      <div
-        v-if="quickAction === 'quickaction.bb.database.schema.update'"
-        class="flex flex-col items-center w-24"
-      >
-        <button
-          class="btn-icon-primary p-3"
-          data-label="bb-alter-schema-button"
-          @click.prevent="alterSchema"
+        <div
+          v-if="quickAction === 'quickaction.bb.database.schema.update'"
+          class="flex flex-col items-center w-24"
         >
-          <heroicons-outline:pencil-alt class="w-5 h-5" />
-        </button>
-        <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
-        >
-          {{ $t("database.alter-schema") }}
-        </h3>
-      </div>
+          <button
+            class="btn-icon-primary p-3"
+            data-label="bb-alter-schema-button"
+            @click.prevent="alterSchema"
+          >
+            <heroicons-outline:pencil-alt class="w-5 h-5" />
+          </button>
+          <h3
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          >
+            {{ $t("database.alter-schema") }}
+          </h3>
+        </div>
 
-      <div
-        v-if="quickAction === 'quickaction.bb.database.data.update'"
-        class="flex flex-col items-center w-24"
-      >
-        <button class="btn-icon-primary p-3" @click.prevent="changeData">
-          <heroicons-outline:pencil class="w-5 h-5" />
-        </button>
-        <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+        <div
+          v-if="quickAction === 'quickaction.bb.database.data.update'"
+          class="flex flex-col items-center w-24"
         >
-          {{ $t("database.change-data") }}
-        </h3>
-      </div>
+          <button class="btn-icon-primary p-3" @click.prevent="changeData">
+            <heroicons-outline:pencil class="w-5 h-5" />
+          </button>
+          <h3
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          >
+            {{ $t("database.change-data") }}
+          </h3>
+        </div>
+      </template>
 
       <div
         v-if="isDev() && quickAction === 'quickaction.bb.database.troubleshoot'"
@@ -235,7 +237,7 @@
     <template
       v-else-if="state.quickActionType == 'quickaction.bb.instance.create'"
     >
-      <InstanceForm @dismiss="state.showModal = false" />
+      <InstanceForm :modal="true" @dismiss="state.showModal = false" />
     </template>
     <template
       v-else-if="
@@ -306,16 +308,18 @@ import { kebabCase } from "lodash-es";
 import { reactive, PropType, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { ProjectId, QuickActionType } from "../types";
+import { QuickActionType } from "../types";
 import { idFromSlug, isDev } from "../utils";
 import {
   useCommandStore,
-  useInstanceStore,
+  useCurrentUserIamPolicy,
+  useInstanceV1Store,
+  useProjectV1ListByCurrentUser,
   useRouterStore,
-  useSubscriptionStore,
+  useSubscriptionV1Store,
 } from "@/store";
 import ProjectCreate from "../components/ProjectCreate.vue";
-import InstanceForm from "../components/InstanceForm.vue";
+import InstanceForm from "../components/InstanceForm/";
 import AlterSchemaPrepForm from "./AlterSchemaPrepForm/";
 import CreateDatabasePrepForm from "../components/CreateDatabasePrepForm.vue";
 import RequestDatabasePrepForm from "../components/RequestDatabasePrepForm.vue";
@@ -343,7 +347,8 @@ const router = useRouter();
 const route = useRoute();
 const routerStore = useRouterStore();
 const commandStore = useCommandStore();
-const subscriptionStore = useSubscriptionStore();
+const subscriptionStore = useSubscriptionV1Store();
+
 const hasCustomRoleFeature = computed(() => {
   return subscriptionStore.hasFeature("bb.feature.custom-role");
 });
@@ -357,12 +362,23 @@ const state = reactive<LocalState>({
   quickActionType: "quickaction.bb.instance.create",
 });
 
-const projectId = computed((): ProjectId | undefined => {
+const projectId = computed((): string | undefined => {
   if (router.currentRoute.value.name == "workspace.project.detail") {
     const parts = router.currentRoute.value.path.split("/");
-    return idFromSlug(parts[parts.length - 1]);
+    return String(idFromSlug(parts[parts.length - 1]));
   }
   return undefined;
+});
+
+// Only show alter schema and change data if the user has permission to alter schema of at least one project.
+const shouldShowAlterDatabaseEntries = computed(() => {
+  const { projectList } = useProjectV1ListByCurrentUser();
+  const currentUserIamPolicy = useCurrentUserIamPolicy();
+  return projectList.value
+    .map((project) => {
+      return currentUserIamPolicy.allowToChangeDatabaseOfProject(project.name);
+    })
+    .includes(true);
 });
 
 watch(route, () => {
@@ -391,7 +407,7 @@ const transferOutDatabase = () => {
 };
 
 const createInstance = () => {
-  const instanceList = useInstanceStore().getInstanceList();
+  const instanceList = useInstanceV1Store().instanceList;
   if (subscriptionStore.instanceCount <= instanceList.length) {
     state.featureName = "bb.feature.instance-count";
     state.showFeatureModal = true;

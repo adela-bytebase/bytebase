@@ -3,7 +3,9 @@ import {
   UNKNOWN_ID,
   Instance,
   Database,
+  Project,
   Environment,
+  SheetId,
 } from "@/types";
 
 export const userNamePrefix = "users/";
@@ -13,6 +15,10 @@ export const instanceNamePrefix = "instances/";
 export const databaseNamePrefix = "databases/";
 export const idpNamePrefix = "idps/";
 export const policyNamePrefix = "policies/";
+export const settingNamePrefix = "settings/";
+export const sheetNamePrefix = "sheets/";
+export const databaseGroupNamePrefix = "databaseGroups/";
+export const schemaGroupNamePrefix = "schemaGroups/";
 
 export const getNameParentTokens = (
   name: string,
@@ -42,13 +48,68 @@ export const getUserId = (name: string): number => {
   return userId;
 };
 
+export const getProjectAndSheetId = (name: string): string[] => {
+  const tokens = getNameParentTokens(name, [
+    projectNamePrefix,
+    sheetNamePrefix,
+  ]);
+
+  if (tokens.length != 2) {
+    return ["", ""];
+  }
+
+  return tokens;
+};
+
+export const getInstanceAndDatabaseId = (name: string): string[] => {
+  const tokens = getNameParentTokens(name, [
+    instanceNamePrefix,
+    databaseNamePrefix,
+  ]);
+
+  if (tokens.length != 2) {
+    return ["", ""];
+  }
+
+  return tokens;
+};
+
 export const getUserEmailFromIdentifier = (identifier: string): string => {
-  return identifier.replace(/^user:/, "");
+  return identifier.replace(/^(user:|users\/)/, "");
 };
 
 export const getIdentityProviderResourceId = (name: string): ResourceId => {
   const tokens = getNameParentTokens(name, [idpNamePrefix]);
   return tokens[0];
+};
+
+export const getProjectNameAndDatabaseGroupName = (name: string): string[] => {
+  const tokens = getNameParentTokens(name, [
+    projectNamePrefix,
+    databaseGroupNamePrefix,
+  ]);
+
+  if (tokens.length !== 2) {
+    return ["", ""];
+  }
+
+  return tokens;
+};
+
+export const getProjectNameAndDatabaseGroupNameAndSchemaGroupName = (
+  name: string
+): string[] => {
+  const tokens = getNameParentTokens(name, [
+    projectNamePrefix,
+    databaseGroupNamePrefix,
+    schemaGroupNamePrefix,
+  ]);
+
+  if (tokens.length !== 3) {
+    return ["", "", ""];
+  }
+
+  return tokens;
 };
 
 export const getEnvironmentPathByLegacyEnvironment = (
@@ -65,4 +126,20 @@ export const getDatabasePathByLegacyDatabase = (database: Database): string => {
   return `${getInstancePathByLegacyInstance(
     database.instance
   )}/${databaseNamePrefix}${database.name}`;
+};
+
+export const getProjectPathByLegacyProject = (project: Project): string => {
+  return `${projectNamePrefix}${project.resourceId}`;
+};
+
+export const getSheetPathByLegacyProject = (
+  project: Project,
+  sheetId: SheetId
+): string => {
+  if (sheetId === UNKNOWN_ID) {
+    return "";
+  }
+  return `${getProjectPathByLegacyProject(
+    project
+  )}/${sheetNamePrefix}${sheetId}`;
 };

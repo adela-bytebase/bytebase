@@ -15,6 +15,7 @@ import (
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	"github.com/bytebase/bytebase/backend/resources/mysql"
 	"github.com/bytebase/bytebase/backend/tests/fake"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 
 	ghostsql "github.com/github/gh-ost/go/sql"
 	_ "github.com/go-sql-driver/mysql"
@@ -71,7 +72,7 @@ func TestGhostSchemaUpdate(t *testing.T) {
 	ctx := context.Background()
 	ctl := &controller{}
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:            dataDir,
 		vcsProviderCreator: fake.NewGitLab,
 	})
@@ -97,56 +98,53 @@ func TestGhostSchemaUpdate(t *testing.T) {
 	_, err = mysqlDB.Exec("GRANT ALTER, ALTER ROUTINE, CREATE, CREATE ROUTINE, CREATE VIEW, DELETE, DROP, EVENT, EXECUTE, INDEX, INSERT, PROCESS, REFERENCES, SELECT, SHOW DATABASES, SHOW VIEW, TRIGGER, UPDATE, USAGE, REPLICATION CLIENT, REPLICATION SLAVE, LOCK TABLES, RELOAD ON *.* to bytebase")
 	a.NoError(err)
 
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "Test Ghost Project",
-		Key:        "TestGhostSchemaUpdate",
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
-	instance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID:    generateRandomString("instance", 10),
-		EnvironmentID: prodEnvironment.ID,
-		Name:          "mysqlInstance",
-		Engine:        db.MySQL,
-		Host:          "127.0.0.1",
-		Port:          strconv.Itoa(mysqlPort),
-		Username:      "bytebase",
-		Password:      "bytebase",
+	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: generateRandomString("instance", 10),
+		Instance: &v1pb.Instance{
+			Title:       "mysqlInstance",
+			Engine:      v1pb.Engine_MYSQL,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: "127.0.0.1", Port: strconv.Itoa(mysqlPort), Username: "bytebase", Password: "bytebase"}},
+		},
 	})
+	a.NoError(err)
+	instanceUID, err := strconv.Atoi(instance.Uid)
 	a.NoError(err)
 
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Zero(len(databases))
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		InstanceID: &instance.ID,
+		InstanceID: &instanceUID,
 	})
 	a.NoError(err)
 	a.Zero(len(databases))
 
-	err = ctl.createDatabase(project, instance, databaseName, "", nil)
+	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil)
 	a.NoError(err)
 
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 
 	a.NoError(err)
 	a.Equal(1, len(databases))
 
 	database := databases[0]
-	a.Equal(instance.ID, database.Instance.ID)
+	a.Equal(instanceUID, database.Instance.ID)
 
 	sheet1, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "mysql migration statement sheet 1",
 		Statement:  mysqlMigrationStatement,
 		Visibility: api.ProjectSheet,
@@ -167,7 +165,7 @@ func TestGhostSchemaUpdate(t *testing.T) {
 	a.NoError(err)
 	// Create an issue updating database schema.
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
@@ -175,7 +173,7 @@ func TestGhostSchemaUpdate(t *testing.T) {
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
-	status, err := ctl.waitIssuePipeline(issue.ID)
+	status, err := ctl.waitIssuePipeline(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -184,7 +182,7 @@ func TestGhostSchemaUpdate(t *testing.T) {
 	a.Equal(mysqlBookSchema1, result)
 
 	sheet2, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "migration statement sheet 2",
 		Statement:  mysqlGhostMigrationStatement,
 		Visibility: api.ProjectSheet,
@@ -204,7 +202,7 @@ func TestGhostSchemaUpdate(t *testing.T) {
 	})
 	a.NoError(err)
 	issue, err = ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdateGhost,
 		Description:   fmt.Sprintf("This updates the schema of database %q using gh-ost", databaseName),
@@ -213,7 +211,7 @@ func TestGhostSchemaUpdate(t *testing.T) {
 	})
 	a.NoError(err)
 
-	status, err = ctl.waitIssuePipeline(issue.ID)
+	status, err = ctl.waitIssuePipeline(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -230,7 +228,7 @@ func TestGhostTenant(t *testing.T) {
 	ctx := context.Background()
 	ctl := &controller{}
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:            dataDir,
 		vcsProviderCreator: fake.NewGitLab,
 	})
@@ -240,38 +238,32 @@ func TestGhostTenant(t *testing.T) {
 	a.NoError(err)
 
 	// Create a project.
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "Test Project",
-		Key:        "TestTenantGhost",
-		TenantMode: api.TenantModeTenant,
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
+	testEnvironment, _, err := ctl.getEnvironment(ctx, "test")
 	a.NoError(err)
-	testEnvironment, err := findEnvironment(environments, "Test")
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	// Provision instances.
-	var testInstances []*api.Instance
-	var prodInstances []*api.Instance
+	var testInstances []*v1pb.Instance
+	var prodInstances []*v1pb.Instance
 	for i := 0; i < testTenantNumber; i++ {
 		port, err := getMySQLInstanceForGhostTest(t)
 		a.NoError(err)
 		// Add the provisioned instances.
-		instance, err := ctl.addInstance((api.InstanceCreate{
-			ResourceID:    generateRandomString("instance", 10),
-			EnvironmentID: testEnvironment.ID,
-			Name:          fmt.Sprintf("%s-%d", testInstanceName, i),
-			Engine:        db.MySQL,
-			Host:          "127.0.0.1",
-			Port:          strconv.Itoa(port),
-			Username:      "bytebase",
-			Password:      "bytebase",
-		}))
+		instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+			InstanceId: generateRandomString("instance", 10),
+			Instance: &v1pb.Instance{
+				Title:       fmt.Sprintf("%s-%d", testInstanceName, i),
+				Engine:      v1pb.Engine_MYSQL,
+				Environment: testEnvironment.Name,
+				DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: "127.0.0.1", Port: strconv.Itoa(port), Username: "bytebase", Password: "bytebase"}},
+			},
+		})
 		a.NoError(err)
 		testInstances = append(testInstances, instance)
 	}
@@ -279,16 +271,15 @@ func TestGhostTenant(t *testing.T) {
 		port, err := getMySQLInstanceForGhostTest(t)
 		a.NoError(err)
 		// Add the provisioned instances.
-		instance, err := ctl.addInstance((api.InstanceCreate{
-			ResourceID:    generateRandomString("instance", 10),
-			EnvironmentID: prodEnvironment.ID,
-			Name:          fmt.Sprintf("%s-%d", prodInstanceName, i),
-			Engine:        db.MySQL,
-			Host:          "127.0.0.1",
-			Port:          strconv.Itoa(port),
-			Username:      "bytebase",
-			Password:      "bytebase",
-		}))
+		instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+			InstanceId: generateRandomString("instance", 10),
+			Instance: &v1pb.Instance{
+				Title:       fmt.Sprintf("%s-%d", testInstanceName, i),
+				Engine:      v1pb.Engine_MYSQL,
+				Environment: prodEnvironment.Name,
+				DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: "127.0.0.1", Port: strconv.Itoa(port), Username: "bytebase", Password: "bytebase"}},
+			},
+		})
 		a.NoError(err)
 		prodInstances = append(prodInstances, instance)
 	}
@@ -296,7 +287,7 @@ func TestGhostTenant(t *testing.T) {
 	// Create deployment configuration.
 	_, err = ctl.upsertDeploymentConfig(
 		api.DeploymentConfigUpsert{
-			ProjectID: project.ID,
+			ProjectID: projectUID,
 		},
 		deploymentSchedule,
 	)
@@ -304,33 +295,37 @@ func TestGhostTenant(t *testing.T) {
 
 	// Create issues that create databases.
 	for i, testInstance := range testInstances {
-		err := ctl.createDatabase(project, testInstance, databaseName, "", map[string]string{api.TenantLabelKey: fmt.Sprintf("tenant%d", i)})
+		err := ctl.createDatabase(ctx, projectUID, testInstance, databaseName, "", map[string]string{api.TenantLabelKey: fmt.Sprintf("tenant%d", i)})
 		a.NoError(err)
 	}
 	for i, prodInstance := range prodInstances {
-		err := ctl.createDatabase(project, prodInstance, databaseName, "", map[string]string{api.TenantLabelKey: fmt.Sprintf("tenant%d", i)})
+		err := ctl.createDatabase(ctx, projectUID, prodInstance, databaseName, "", map[string]string{api.TenantLabelKey: fmt.Sprintf("tenant%d", i)})
 		a.NoError(err)
 	}
 
 	// Getting databases for each environment.
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 
 	var testDatabases []*api.Database
 	var prodDatabases []*api.Database
 	for _, testInstance := range testInstances {
+		testInstanceUID, err := strconv.Atoi(testInstance.Uid)
+		a.NoError(err)
 		for _, database := range databases {
-			if database.Instance.ID == testInstance.ID {
+			if database.Instance.ID == testInstanceUID {
 				testDatabases = append(testDatabases, database)
 				break
 			}
 		}
 	}
 	for _, prodInstance := range prodInstances {
+		prodInstanceUID, err := strconv.Atoi(prodInstance.Uid)
+		a.NoError(err)
 		for _, database := range databases {
-			if database.Instance.ID == prodInstance.ID {
+			if database.Instance.ID == prodInstanceUID {
 				prodDatabases = append(prodDatabases, database)
 				break
 			}
@@ -340,7 +335,7 @@ func TestGhostTenant(t *testing.T) {
 	a.Equal(prodTenantNumber, len(prodDatabases))
 
 	sheet1, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "migration statement sheet 1",
 		Statement:  mysqlMigrationStatement,
 		Visibility: api.ProjectSheet,
@@ -360,7 +355,7 @@ func TestGhostTenant(t *testing.T) {
 	})
 	a.NoError(err)
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
@@ -368,7 +363,7 @@ func TestGhostTenant(t *testing.T) {
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
-	status, err := ctl.waitIssuePipeline(issue.ID)
+	status, err := ctl.waitIssuePipeline(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
@@ -385,7 +380,7 @@ func TestGhostTenant(t *testing.T) {
 	}
 
 	sheet2, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "migration statement sheet 2",
 		Statement:  mysqlGhostMigrationStatement,
 		Visibility: api.ProjectSheet,
@@ -406,7 +401,7 @@ func TestGhostTenant(t *testing.T) {
 	})
 	a.NoError(err)
 	issue, err = ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("update schema for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdateGhost,
 		Description:   fmt.Sprintf("This updates the schema of database %q.", databaseName),
@@ -414,7 +409,7 @@ func TestGhostTenant(t *testing.T) {
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
-	status, err = ctl.waitIssuePipeline(issue.ID)
+	status, err = ctl.waitIssuePipeline(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 

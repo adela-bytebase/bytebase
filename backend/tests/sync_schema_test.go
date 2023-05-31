@@ -13,6 +13,7 @@ import (
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 	parser "github.com/bytebase/bytebase/backend/plugin/parser/sql"
+	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 
 	"github.com/bytebase/bytebase/backend/resources/postgres"
 	"github.com/bytebase/bytebase/backend/tests/fake"
@@ -49,7 +50,7 @@ DROP SCHEMA "schema_a";
 	ctx := context.Background()
 	ctl := &controller{}
 	dataDir := t.TempDir()
-	err := ctl.StartServerWithExternalPg(ctx, &config{
+	ctx, err := ctl.StartServerWithExternalPg(ctx, &config{
 		dataDir:            dataDir,
 		vcsProviderCreator: fake.NewGitLab,
 	})
@@ -78,50 +79,47 @@ DROP SCHEMA "schema_a";
 	a.NoError(err)
 
 	// Create a project.
-	project, err := ctl.createProject(api.ProjectCreate{
-		ResourceID: generateRandomString("project", 10),
-		Name:       "Test sync schema Project",
-		Key:        "TestSyncSchemaProject",
-	})
+	project, err := ctl.createProject(ctx)
+	a.NoError(err)
+	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	environments, err := ctl.getEnvironments()
-	a.NoError(err)
-	prodEnvironment, err := findEnvironment(environments, "Prod")
+	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
-	instance, err := ctl.addInstance(api.InstanceCreate{
-		ResourceID:    generateRandomString("instance", 10),
-		EnvironmentID: prodEnvironment.ID,
-		Name:          "pgTestSyncSchema",
-		Engine:        db.Postgres,
-		Host:          "/tmp",
-		Port:          strconv.Itoa(pgPort),
-		Username:      "bytebase",
-		Password:      "bytebase",
+	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
+		InstanceId: generateRandomString("instance", 10),
+		Instance: &v1pb.Instance{
+			Title:       "pgTestSyncSchema",
+			Engine:      v1pb.Engine_POSTGRES,
+			Environment: prodEnvironment.Name,
+			DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: "/tmp", Port: strconv.Itoa(pgPort), Username: "bytebase", Password: "bytebase"}},
+		},
 	})
+	a.NoError(err)
+	instanceUID, err := strconv.Atoi(instance.Uid)
 	a.NoError(err)
 
 	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Nil(databases)
 
-	err = ctl.createDatabase(project, instance, databaseName, "bytebase", nil)
+	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "bytebase", nil)
 	a.NoError(err)
 
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 	})
 	a.NoError(err)
 	a.Equal(1, len(databases))
 
 	database := databases[0]
-	a.Equal(instance.ID, database.Instance.ID)
+	a.Equal(instanceUID, database.Instance.ID)
 
 	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  project.ID,
+		ProjectID:  projectUID,
 		Name:       "create schema",
 		Statement:  createSchema,
 		Visibility: api.ProjectSheet,
@@ -142,7 +140,7 @@ DROP SCHEMA "schema_a";
 	})
 	a.NoError(err)
 	issue, err := ctl.createIssue(api.IssueCreate{
-		ProjectID:     project.ID,
+		ProjectID:     projectUID,
 		Name:          fmt.Sprintf("Create sequence for database %q", databaseName),
 		Type:          api.IssueDatabaseSchemaUpdate,
 		Description:   fmt.Sprintf("Create sequence of database %q.", databaseName),
@@ -150,11 +148,11 @@ DROP SCHEMA "schema_a";
 		CreateContext: string(createContext),
 	})
 	a.NoError(err)
-	status, err := ctl.waitIssuePipeline(issue.ID)
+	status, err := ctl.waitIssuePipeline(ctx, issue.ID)
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
-	history, err := ctl.getInstanceMigrationHistory(instance.ID, db.MigrationHistoryFind{
+	history, err := ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{
 		Database: &database.Name,
 	})
 	a.NoError(err)
@@ -163,19 +161,19 @@ DROP SCHEMA "schema_a";
 	a.Equal(1, len(history))
 	latest := history[0]
 
-	err = ctl.createDatabase(project, instance, newDatabaseName, "bytebase", nil)
+	err = ctl.createDatabase(ctx, projectUID, instance, newDatabaseName, "bytebase", nil)
 	a.NoError(err)
 
 	dbName := newDatabaseName
 	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &project.ID,
+		ProjectID: &projectUID,
 		Name:      &dbName,
 	})
 	a.NoError(err)
 	a.Equal(1, len(databases))
 
 	newDatabase := databases[0]
-	a.Equal(instance.ID, database.Instance.ID)
+	a.Equal(instanceUID, database.Instance.ID)
 
 	newDatabaseSchema, err := ctl.getLatestSchemaDump(newDatabase.ID)
 	a.NoError(err)

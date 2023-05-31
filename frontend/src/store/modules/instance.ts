@@ -6,11 +6,9 @@ import {
   empty,
   EMPTY_ID,
   Environment,
-  EnvironmentId,
   Instance,
   InstanceCreate,
   InstanceId,
-  InstanceMigration,
   InstancePatch,
   InstanceState,
   InstanceUserId,
@@ -21,14 +19,12 @@ import {
   ResourceIdentifier,
   ResourceObject,
   RowStatus,
-  SQLResultSet,
   unknown,
   UNKNOWN_ID,
 } from "@/types";
 import { InstanceUser } from "@/types/InstanceUser";
-import { useEnvironmentStore } from "./environment";
+import { useLegacyEnvironmentStore } from "./environment";
 import { useDataSourceStore } from "./dataSource";
-import { useSQLStore } from "./sql";
 
 function convert(
   instance: ResourceObject,
@@ -59,7 +55,7 @@ function convert(
     dataSourceList: [],
   };
 
-  const environmentStore = useEnvironmentStore();
+  const legacyEnvironmentStore = useLegacyEnvironmentStore();
   const dataSourceStore = useDataSourceStore();
   for (const item of includedList || []) {
     if (
@@ -67,7 +63,7 @@ function convert(
       (instance.relationships!.environment.data as ResourceIdentifier).id ==
         item.id
     ) {
-      environment = environmentStore.convert(item, includedList);
+      environment = legacyEnvironmentStore.convert(item, includedList);
     }
 
     if (
@@ -143,12 +139,12 @@ export const useInstanceStore = defineStore("instance", {
       });
     },
     getInstanceListByEnvironmentId(
-      environmentId: EnvironmentId,
+      environmentId: string,
       rowStatusList?: RowStatus[]
     ): Instance[] {
       const list = this.getInstanceList(rowStatusList);
       return list.filter((item: Instance) => {
-        return item.environment.id == environmentId;
+        return String(item.environment.id) === environmentId;
       });
     },
     getInstanceById(instanceId: InstanceId): Instance {
@@ -341,29 +337,6 @@ export const useInstanceStore = defineStore("instance", {
       });
       return instanceUserList;
     },
-    async checkMigrationSetup(
-      instanceId: InstanceId
-    ): Promise<InstanceMigration> {
-      const data = (
-        await axios.get(`/api/instance/${instanceId}/migration/status`, {
-          timeout: INSTANCE_OPERATION_TIMEOUT,
-        })
-      ).data.data;
-
-      return {
-        status: data.attributes.status,
-        error: data.attributes.error,
-      };
-    },
-    async createMigrationSetup(instanceId: InstanceId): Promise<SQLResultSet> {
-      const res = (
-        await axios.post(`/api/instance/${instanceId}/migration`, undefined, {
-          timeout: INSTANCE_OPERATION_TIMEOUT,
-        })
-      ).data;
-
-      return useSQLStore().convert(res.data) as SQLResultSet;
-    },
     async fetchMigrationHistoryById({
       instanceId,
       migrationHistoryId,
@@ -455,17 +428,6 @@ export const useInstanceStore = defineStore("instance", {
       });
 
       return historyList;
-    },
-    async getSamplePostgresInstance() {
-      const data = (
-        await axios.get<{
-          host: string;
-          port: number;
-          username: string;
-        }>("/api/instance/sample-pg")
-      ).data;
-
-      return data;
     },
   },
 });

@@ -1,20 +1,10 @@
-import { RemovableRef } from "@vueuse/core";
-import {
-  EnvironmentId,
-  MigrationHistoryId,
-  Policy,
-  PolicyType,
-  QueryHistory,
-  Sheet,
-  OnboardingGuideType,
-} from ".";
+import { MigrationHistoryId, QueryHistory, OnboardingGuideType } from ".";
 import { Activity } from "./activity";
 import { Backup, BackupSetting } from "./backup";
 import { Bookmark } from "./bookmark";
 import { Command } from "./common";
 import { Database } from "./database";
 import { DataSource } from "./dataSource";
-import { Environment } from "./environment";
 import {
   CommandId,
   DatabaseId,
@@ -24,42 +14,23 @@ import {
   PrincipalId,
   ProjectId,
   VCSId,
-  SheetId,
 } from "./id";
 import { Inbox, InboxSummary } from "./inbox";
 import { Instance, MigrationHistory } from "./instance";
 import { InstanceUser } from "./InstanceUser";
 import { Issue } from "./issue";
 import { IssueSubscriber } from "./issueSubscriber";
-import { Member } from "./member";
 import { Notification } from "./notification";
 import { Principal } from "./principal";
 import { Project } from "./project";
 import { Repository } from "./repository";
-import { Setting, SettingName } from "./setting";
 import { VCS } from "./vcs";
 import { Label } from "./label";
-import { ReleaseInfo } from "./actuator";
-import type { DebugLog } from "@/types/debug";
 import type { AuditLog } from "@/types/auditLog";
 import { DatabaseMetadata } from "./proto/store/database";
-import { ActuatorInfo } from "@/types/proto/v1/actuator_service";
-
-export interface ActuatorState {
-  serverInfo?: ActuatorInfo;
-  releaseInfo: RemovableRef<ReleaseInfo>;
-}
 
 export interface AuditLogState {
   auditLogList: AuditLog[];
-}
-
-export interface SettingState {
-  settingByName: Map<SettingName, Setting>;
-}
-
-export interface MemberState {
-  memberList: Member[];
 }
 
 export interface PrincipalState {
@@ -98,16 +69,8 @@ export interface StageState {}
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface TaskState {}
 
-export interface PolicyState {
-  policyMapByEnvironmentId: Map<EnvironmentId, Map<PolicyType, Policy>>;
-}
-
 export interface ProjectState {
   projectById: Map<ProjectId, Project>;
-}
-
-export interface EnvironmentState {
-  environmentList: Environment[];
 }
 
 export interface InstanceState {
@@ -127,10 +90,10 @@ export interface DatabaseState {
   // In those cases, we will iterate through this map and compute the list on the fly.
   // We save it by instance because database belongs to instance and saving this way
   // follows that hierarchy.
-  databaseListByInstanceId: Map<InstanceId, Database[]>;
+  databaseListByInstanceId: Map<string, Database[]>;
   // Used exclusively for project panel, we do this to avoid interference from databaseListByInstanceId
   // where updating databaseListByInstanceId will cause reloading project related UI due to reactivity
-  databaseListByProjectId: Map<ProjectId, Database[]>;
+  databaseListByProjectId: Map<string, Database[]>;
 }
 
 export interface DBSchemaState {
@@ -180,16 +143,8 @@ export interface SQLEditorState {
   isShowExecutingHint: boolean;
 }
 
-export interface SheetState {
-  sheetList: Sheet[];
-  sheetById: Map<SheetId, Sheet>;
-}
-
 export interface DebugState {
   isDebug: boolean;
-}
-export interface DebugLogState {
-  debugLogList: DebugLog[];
 }
 
 export interface OnboardingGuideState {

@@ -4,15 +4,14 @@ import {
   IssueCreate,
   IssueType,
   Pipeline,
-  Principal,
-  Project,
   SYSTEM_BOT_ID,
 } from "@/types";
 import { useIssueLogic } from ".";
 import {
-  hasWorkspacePermission,
   isDatabaseRelatedIssueType,
-  isOwnerOfProject,
+  isOwnerOfProjectV1,
+  hasWorkspacePermissionV1,
+  extractUserUID,
 } from "@/utils";
 import {
   Policy,
@@ -26,6 +25,8 @@ import {
   defaultApprovalStrategy,
 } from "@/store/modules/v1/policy";
 import { useEnvironmentV1Store } from "@/store";
+import { IamPolicy, Project } from "@/types/proto/v1/project_service";
+import { User } from "@/types/proto/v1/auth_service";
 
 export const useCurrentRollOutPolicyForActiveEnvironment = () => {
   const { create, issue, activeStageOfPipeline } = useIssueLogic();
@@ -39,14 +40,10 @@ export const useCurrentRollOutPolicyForActiveEnvironment = () => {
   }
 
   const activeEnvironment = computed(() => {
-    if (create.value) {
-      // When creating an issue, activeEnvironmentId is the first stage's environmentId
-      const stage = (issue.value as IssueCreate).pipeline!.stageList[0];
-      return useEnvironmentV1Store().getEnvironmentByUID(stage.environmentId);
-    }
-
-    const stage = activeStageOfPipeline(issue.value.pipeline as Pipeline);
-    return useEnvironmentV1Store().getEnvironmentByUID(stage.environment.id);
+    const environmentId = create.value
+      ? (issue.value as IssueCreate).pipeline!.stageList[0].environmentId
+      : activeStageOfPipeline(issue.value.pipeline as Pipeline).environment.id;
+    return useEnvironmentV1Store().getEnvironmentByUID(String(environmentId));
   });
 
   const activeEnvironmentApprovalPolicy = usePolicyByParentAndType(
@@ -58,7 +55,6 @@ export const useCurrentRollOutPolicyForActiveEnvironment = () => {
 
   return computed(() => {
     const policy = activeEnvironmentApprovalPolicy.value;
-    console.log("policy", policy);
     return extractRollOutPolicyValue(policy, issue.value.type);
   });
 };
@@ -107,14 +103,15 @@ export const extractRollOutPolicyValue = (
 };
 
 export const allowUserToBeAssignee = (
-  user: Principal,
+  user: User,
   project: Project,
+  projectIamPolicy: IamPolicy,
   policy: ApprovalStrategy,
   assigneeGroup: ApprovalGroup | undefined
 ): boolean => {
-  const hasWorkspaceIssueManagementPermission = hasWorkspacePermission(
+  const hasWorkspaceIssueManagementPermission = hasWorkspacePermissionV1(
     "bb.permission.workspace.manage-issue",
-    user.role
+    user.userRole
   );
 
   if (policy === ApprovalStrategy.AUTOMATIC) {
@@ -129,26 +126,31 @@ export const allowUserToBeAssignee = (
 
   if (assigneeGroup === ApprovalGroup.APPROVAL_GROUP_PROJECT_OWNER) {
     // Project owner
-    return isOwnerOfProject(project, user);
+    return isOwnerOfProjectV1(projectIamPolicy, user);
   }
 
   console.assert(false, "should never reach this line");
   return false;
 };
 
-export const allowUserToChangeAssignee = (user: Principal, issue: Issue) => {
+export const allowUserToChangeAssignee = (user: User, issue: Issue) => {
   if (issue.status !== "OPEN") {
     return false;
   }
   if (
-    hasWorkspacePermission("bb.permission.workspace.manage-issue", user.role)
+    hasWorkspacePermissionV1(
+      "bb.permission.workspace.manage-issue",
+      user.userRole
+    )
   ) {
     return true;
   }
-  if (issue.assignee.id === SYSTEM_BOT_ID) {
-    return user.id === issue.creator.id;
+
+  const userUID = extractUserUID(user.name);
+  if (String(issue.assignee.id) === String(SYSTEM_BOT_ID)) {
+    return userUID === String(issue.creator.id);
   }
-  return user.id === issue.assignee.id;
+  return userUID === String(issue.assignee.id);
 };
 
 export const allowProjectOwnerToApprove = (

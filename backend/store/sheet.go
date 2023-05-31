@@ -319,7 +319,7 @@ func createSheetImpl(ctx context.Context, tx *Tx, create *api.SheetCreate) (*she
 			payload
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		RETURNING id, row_status, creator_id, created_ts, updater_id, updated_ts, project_id, database_id, name, LEFT(statement, %d), visibility, source, type, payload, octet_length(statement)
+		RETURNING id, row_status, creator_id, created_ts, updater_id, updated_ts, project_id, database_id, name, LEFT(statement, %d), visibility, source, type, payload, LENGTH(statement)
 	`, common.MaxSheetSize)
 	var sheetRaw sheetRaw
 	databaseID := sql.NullInt32{}
@@ -396,7 +396,7 @@ func patchSheetImpl(ctx context.Context, tx *Tx, patch *api.SheetPatch) (*sheetR
 		UPDATE sheet
 		SET `+strings.Join(set, ", ")+`
 		WHERE id = $%d
-		RETURNING id, row_status, creator_id, created_ts, updater_id, updated_ts, project_id, database_id, name, LEFT(statement, %d), visibility, source, type, payload, octet_length(statement)
+		RETURNING id, row_status, creator_id, created_ts, updater_id, updated_ts, project_id, database_id, name, LEFT(statement, %d), visibility, source, type, payload, LENGTH(statement)
 	`, len(args), common.MaxSheetSize),
 		args...,
 	).Scan(
@@ -452,13 +452,17 @@ func findSheetImpl(ctx context.Context, tx *Tx, find *api.SheetFind) ([]*sheetRa
 	}
 
 	// Domain fields
-	if v := find.Visibility; v != nil {
-		where, args = append(where, fmt.Sprintf("visibility = $%d", len(args)+1)), append(args, *v)
+	visibilitiesWhere := []string{}
+	for _, v := range find.Visibilities {
+		visibilitiesWhere, args = append(visibilitiesWhere, fmt.Sprintf("visibility = $%d", len(args)+1)), append(args, v)
+	}
+	if len(visibilitiesWhere) > 0 {
+		where = append(where, fmt.Sprintf("(%s)", strings.Join(visibilitiesWhere, " OR ")))
 	}
 	if v := find.PrincipalID; v != nil {
 		where, args = append(where, fmt.Sprintf("project_id IN (SELECT project_id FROM project_member WHERE principal_id = $%d)", len(args)+1)), append(args, *v)
 	}
-	if v := find.OrganizerPrincipalID; v != nil {
+	if v := find.OrganizerPrincipalIDStarred; v != nil {
 		// For now, we only need the starred sheets.
 		where, args = append(where, fmt.Sprintf("id IN (SELECT sheet_id FROM sheet_organizer WHERE principal_id = $%d AND starred = true)", len(args)+1)), append(args, *v)
 	}
@@ -489,7 +493,7 @@ func findSheetImpl(ctx context.Context, tx *Tx, find *api.SheetFind) ([]*sheetRa
 			source,
 			type,
 			payload,
-			octet_length(statement)
+			LENGTH(statement)
 		FROM sheet
 		WHERE %s`, statementField, strings.Join(where, " AND ")),
 		args...,
@@ -547,11 +551,14 @@ func deleteSheet(ctx context.Context, tx *Tx, delete *api.SheetDelete) error {
 
 // SheetMessage is the message for a sheet.
 type SheetMessage struct {
-	Project *ProjectMessage
+	ProjectUID int
 	// The DatabaseID is optional.
 	// If not NULL, the sheet ProjectID should always be equal to the id of the database related project.
 	// A project must remove all linked sheets for a particular database before that database can be transferred to a different project.
 	DatabaseID *int
+
+	CreatorID int
+	UpdaterID int
 
 	Name       string
 	Statement  string
@@ -563,20 +570,15 @@ type SheetMessage struct {
 	// Output only fields
 	UID         int
 	Size        int64
-	Creator     *UserMessage
 	CreatedTime time.Time
-	Updater     *UserMessage
 	UpdatedTime time.Time
 	Starred     bool
 	Pinned      bool
 
 	// Internal fields
-	rowStatus  api.RowStatus
-	creatorID  int
-	createdTs  int64
-	updaterID  int
-	updatedTs  int64
-	projectUID int
+	rowStatus api.RowStatus
+	createdTs int64
+	updatedTs int64
 }
 
 // GetSheetStatementByID gets the statement of a sheet by ID.
@@ -601,15 +603,15 @@ func (s *Store) GetSheetStatementByID(ctx context.Context, id int) (string, erro
 }
 
 func (s *Store) composeSheetMessage(ctx context.Context, sheetMessage *SheetMessage) (*api.Sheet, error) {
-	creator, err := s.GetPrincipalByID(ctx, sheetMessage.creatorID)
+	creator, err := s.GetPrincipalByID(ctx, sheetMessage.CreatorID)
 	if err != nil {
 		return nil, err
 	}
-	updater, err := s.GetPrincipalByID(ctx, sheetMessage.updaterID)
+	updater, err := s.GetPrincipalByID(ctx, sheetMessage.UpdaterID)
 	if err != nil {
 		return nil, err
 	}
-	project, err := s.GetProjectByID(ctx, sheetMessage.projectUID)
+	project, err := s.GetProjectByID(ctx, sheetMessage.ProjectUID)
 	if err != nil {
 		return nil, err
 	}
@@ -618,14 +620,14 @@ func (s *Store) composeSheetMessage(ctx context.Context, sheetMessage *SheetMess
 		ID: sheetMessage.UID,
 
 		RowStatus: sheetMessage.rowStatus,
-		CreatorID: sheetMessage.creatorID,
+		CreatorID: sheetMessage.CreatorID,
 		Creator:   creator,
 		CreatedTs: sheetMessage.createdTs,
-		UpdaterID: sheetMessage.updaterID,
+		UpdaterID: sheetMessage.UpdaterID,
 		Updater:   updater,
 		UpdatedTs: sheetMessage.updatedTs,
 
-		ProjectID: sheetMessage.projectUID,
+		ProjectID: sheetMessage.ProjectUID,
 		Project:   project,
 
 		DatabaseID: sheetMessage.DatabaseID,
@@ -636,7 +638,6 @@ func (s *Store) composeSheetMessage(ctx context.Context, sheetMessage *SheetMess
 		Visibility: sheetMessage.Visibility,
 		Source:     sheetMessage.Source,
 		Type:       sheetMessage.Type,
-		Payload:    sheetMessage.Payload,
 		Starred:    sheetMessage.Starred,
 		Pinned:     sheetMessage.Pinned,
 
@@ -719,6 +720,9 @@ func (s *Store) ListSheetsV2(ctx context.Context, find *api.SheetFind, currentPr
 	if v := find.CreatorID; v != nil {
 		where, args = append(where, fmt.Sprintf("sheet.creator_id = $%d", len(args)+1)), append(args, *v)
 	}
+	if v := find.ExcludedCreatorID; v != nil {
+		where, args = append(where, fmt.Sprintf("sheet.creator_id != $%d", len(args)+1)), append(args, *v)
+	}
 
 	// Related fields
 	if v := find.ProjectID; v != nil {
@@ -729,16 +733,23 @@ func (s *Store) ListSheetsV2(ctx context.Context, find *api.SheetFind, currentPr
 	}
 
 	// Domain fields
-	if v := find.Visibility; v != nil {
-		where, args = append(where, fmt.Sprintf("sheet.visibility = $%d", len(args)+1)), append(args, *v)
+	visibilitiesWhere := []string{}
+	for _, v := range find.Visibilities {
+		visibilitiesWhere, args = append(visibilitiesWhere, fmt.Sprintf("visibility = $%d", len(args)+1)), append(args, v)
+	}
+	if len(visibilitiesWhere) > 0 {
+		where = append(where, fmt.Sprintf("(%s)", strings.Join(visibilitiesWhere, " OR ")))
 	}
 	if v := find.PrincipalID; v != nil {
 		where, args = append(where, fmt.Sprintf("sheet.project_id IN (SELECT project_id FROM project_member WHERE principal_id = $%d)", len(args)+1)), append(args, *v)
 	}
-	if v := find.OrganizerPrincipalID; v != nil {
-		// For now, we only need the starred sheets.
+	if v := find.OrganizerPrincipalIDStarred; v != nil {
 		where, args = append(where, fmt.Sprintf("sheet.id IN (SELECT sheet_id FROM sheet_organizer WHERE principal_id = $%d AND starred = true)", len(args)+1)), append(args, *v)
 	}
+	if v := find.OrganizerPrincipalIDNotStarred; v != nil {
+		where, args = append(where, fmt.Sprintf("sheet.id IN (SELECT sheet_id FROM sheet_organizer WHERE principal_id = $%d AND starred = false)", len(args)+1)), append(args, *v)
+	}
+
 	if v := find.Source; v != nil {
 		where, args = append(where, fmt.Sprintf("sheet.source = $%d", len(args)+1)), append(args, *v)
 	}
@@ -772,7 +783,7 @@ func (s *Store) ListSheetsV2(ctx context.Context, find *api.SheetFind, currentPr
 			sheet.source,
 			sheet.type,
 			sheet.payload,
-			octet_length(sheet.statement),
+			LENGTH(sheet.statement),
 			COALESCE(sheet_organizer.starred, FALSE),
 			COALESCE(sheet_organizer.pinned, FALSE)
 		FROM sheet
@@ -791,11 +802,11 @@ func (s *Store) ListSheetsV2(ctx context.Context, find *api.SheetFind, currentPr
 		if err := rows.Scan(
 			&sheet.UID,
 			&sheet.rowStatus,
-			&sheet.creatorID,
+			&sheet.CreatorID,
 			&sheet.createdTs,
-			&sheet.updaterID,
+			&sheet.UpdaterID,
 			&sheet.updatedTs,
-			&sheet.projectUID,
+			&sheet.ProjectUID,
 			&sheet.DatabaseID,
 			&sheet.Name,
 			&sheet.Statement,
@@ -820,26 +831,162 @@ func (s *Store) ListSheetsV2(ctx context.Context, find *api.SheetFind, currentPr
 	}
 
 	for _, sheet := range sheets {
-		project, err := s.GetProjectV2(ctx, &FindProjectMessage{UID: &sheet.projectUID})
-		if err != nil {
-			return nil, err
-		}
-		sheet.Project = project
-
-		creator, err := s.GetUserByID(ctx, sheet.creatorID)
-		if err != nil {
-			return nil, err
-		}
-		sheet.Creator = creator
-
-		updater, err := s.GetUserByID(ctx, sheet.updaterID)
-		if err != nil {
-			return nil, err
-		}
-		sheet.Updater = updater
 		sheet.CreatedTime = time.Unix(sheet.createdTs, 0)
 		sheet.UpdatedTime = time.Unix(sheet.updatedTs, 0)
 	}
 
 	return sheets, nil
+}
+
+// CreateSheetV2 creates a new sheet.
+func (s *Store) CreateSheetV2(ctx context.Context, create *SheetMessage) (*SheetMessage, error) {
+	query := fmt.Sprintf(`
+		INSERT INTO sheet (
+			creator_id,
+			updater_id,
+			project_id,
+			database_id,
+			name,
+			statement,
+			visibility,
+			source,
+			type,
+			payload
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id, row_status, creator_id, created_ts, updater_id, updated_ts, project_id, database_id, name, LEFT(statement, %d), visibility, source, type, LENGTH(statement), payload
+	`, common.MaxSheetSize)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	databaseID := sql.NullInt32{}
+	var sheet SheetMessage
+
+	if err := tx.QueryRowContext(ctx, query,
+		create.CreatorID,
+		create.CreatorID,
+		create.ProjectUID,
+		create.DatabaseID,
+		create.Name,
+		create.Statement,
+		create.Visibility,
+		create.Source,
+		create.Type,
+		create.Payload,
+	).Scan(
+		&sheet.UID,
+		&sheet.rowStatus,
+		&sheet.CreatorID,
+		&sheet.createdTs,
+		&sheet.UpdaterID,
+		&sheet.updatedTs,
+		&sheet.ProjectUID,
+		&databaseID,
+		&sheet.Name,
+		&sheet.Statement,
+		&sheet.Visibility,
+		&sheet.Source,
+		&sheet.Type,
+		&sheet.Size,
+		&sheet.Payload,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, common.FormatDBErrorEmptyRowWithQuery(query)
+		}
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, errors.Wrapf(err, "failed to commit transaction")
+	}
+
+	if databaseID.Valid {
+		value := int(databaseID.Int32)
+		sheet.DatabaseID = &value
+	}
+	sheet.CreatedTime = time.Unix(sheet.createdTs, 0)
+	sheet.UpdatedTime = time.Unix(sheet.updatedTs, 0)
+
+	return &sheet, nil
+}
+
+// PatchSheetMessage is the message to patch a sheet.
+type PatchSheetMessage struct {
+	ID         int
+	UpdaterID  int
+	Name       *string
+	Statement  *string
+	Visibility *string
+	// TODO(zp): update the payload.
+	Payload *string
+}
+
+// PatchSheetV2 updates a sheet.
+func (s *Store) PatchSheetV2(ctx context.Context, patch *PatchSheetMessage) (*SheetMessage, error) {
+	set, args := []string{"updater_id = $1"}, []any{patch.UpdaterID}
+	if v := patch.Name; v != nil {
+		set, args = append(set, fmt.Sprintf("name = $%d", len(args)+1)), append(args, *v)
+	}
+	if v := patch.Statement; v != nil {
+		set, args = append(set, fmt.Sprintf("statement = $%d", len(args)+1)), append(args, *v)
+	}
+	if v := patch.Visibility; v != nil {
+		set, args = append(set, fmt.Sprintf("visibility = $%d", len(args)+1)), append(args, *v)
+	}
+	if v := patch.Payload; v != nil {
+		set, args = append(set, fmt.Sprintf("payload = $%d", len(args)+1)), append(args, *v)
+	}
+
+	args = append(args, patch.ID)
+
+	var sheet SheetMessage
+	databaseID := sql.NullInt32{}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to begin transaction")
+	}
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf(`
+		UPDATE sheet
+		SET `+strings.Join(set, ", ")+`
+		WHERE id = $%d
+		RETURNING id, row_status, creator_id, created_ts, updater_id, updated_ts, project_id, database_id, name, LEFT(statement, %d), visibility, source, type, payload, LENGTH(statement)
+	`, len(args), common.MaxSheetSize),
+		args...,
+	).Scan(
+		&sheet.UID,
+		&sheet.rowStatus,
+		&sheet.CreatorID,
+		&sheet.createdTs,
+		&sheet.UpdaterID,
+		&sheet.updatedTs,
+		&sheet.ProjectUID,
+		&databaseID,
+		&sheet.Name,
+		&sheet.Statement,
+		&sheet.Visibility,
+		&sheet.Source,
+		&sheet.Type,
+		&sheet.Payload,
+		&sheet.Size,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, &common.Error{Code: common.NotFound, Err: errors.Errorf("sheet ID not found: %d", patch.ID)}
+		}
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, errors.Wrapf(err, "failed to commit transaction")
+	}
+	s.sheetStatementCache.Invalidate(patch.ID)
+
+	if databaseID.Valid {
+		value := int(databaseID.Int32)
+		sheet.DatabaseID = &value
+	}
+	sheet.CreatedTime = time.Unix(sheet.createdTs, 0)
+	sheet.UpdatedTime = time.Unix(sheet.updatedTs, 0)
+	return &sheet, nil
 }

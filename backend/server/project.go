@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -34,52 +35,6 @@ const (
 )
 
 func (s *Server) registerProjectRoutes(g *echo.Group) {
-	g.POST("/project", func(c echo.Context) error {
-		ctx := c.Request().Context()
-		projectCreate := &api.ProjectCreate{}
-		if err := jsonapi.UnmarshalPayload(c.Request().Body, projectCreate); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "Malformed create project request").SetInternal(err)
-		}
-		if projectCreate.Key == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Project key cannot be empty")
-		}
-		if projectCreate.TenantMode == api.TenantModeTenant && !s.licenseService.IsFeatureEnabled(api.FeatureMultiTenancy) {
-			return echo.NewHTTPError(http.StatusForbidden, api.FeatureMultiTenancy.AccessErrorMessage())
-		}
-		if projectCreate.TenantMode == "" {
-			projectCreate.TenantMode = api.TenantModeDisabled
-		}
-		if err := api.ValidateProjectDBNameTemplate(projectCreate.DBNameTemplate); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Malformed create project request: %s", err.Error()))
-		}
-		if projectCreate.TenantMode != api.TenantModeTenant && projectCreate.DBNameTemplate != "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "database name template can only be set for tenant mode project")
-		}
-
-		creatorID := c.Get(getPrincipalIDContextKey()).(int)
-		project, err := s.store.CreateProjectV2(ctx, &store.ProjectMessage{
-			ResourceID:       projectCreate.ResourceID,
-			Title:            projectCreate.Name,
-			Key:              projectCreate.Key,
-			TenantMode:       projectCreate.TenantMode,
-			DBNameTemplate:   projectCreate.DBNameTemplate,
-			SchemaChangeType: projectCreate.SchemaChangeType,
-		}, creatorID)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create Project with ProjectCreate[%+v]", projectCreate)
-		}
-
-		composedProject, err := s.store.GetProjectByID(ctx, project.UID)
-		if err != nil {
-			return err
-		}
-		c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
-		if err := jsonapi.MarshalPayload(c.Response().Writer, composedProject); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to marshal create project response").SetInternal(err)
-		}
-		return nil
-	})
-
 	g.GET("/project", func(c echo.Context) error {
 		ctx := c.Request().Context()
 		projectFind := &api.ProjectFind{}
@@ -116,80 +71,6 @@ func (s *Server) registerProjectRoutes(g *echo.Group) {
 
 		c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
 		if err := jsonapi.MarshalPayload(c.Response().Writer, project); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to marshal project ID response: %v", id)).SetInternal(err)
-		}
-		return nil
-	})
-
-	g.PATCH("/project/:projectID", func(c echo.Context) error {
-		ctx := c.Request().Context()
-		id, err := strconv.Atoi(c.Param("projectID"))
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("ID is not a number: %s", c.Param("projectID"))).SetInternal(err)
-		}
-		project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{UID: &id})
-		if err != nil {
-			return err
-		}
-		if project == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Project %d not found", id))
-		}
-		projectPatch := &api.ProjectPatch{
-			ID:        id,
-			UpdaterID: c.Get(getPrincipalIDContextKey()).(int),
-		}
-		if err := jsonapi.UnmarshalPayload(c.Request().Body, projectPatch); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "Malformed patch project request").SetInternal(err)
-		}
-
-		if v := projectPatch.Key; v != nil && *v == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Project key cannot be empty")
-		}
-		if v := projectPatch.TenantMode; v != nil {
-			if api.ProjectTenantMode(*v) == api.TenantModeTenant && !s.licenseService.IsFeatureEnabled(api.FeatureMultiTenancy) {
-				return echo.NewHTTPError(http.StatusForbidden, api.FeatureMultiTenancy.AccessErrorMessage())
-			}
-		}
-		if v := projectPatch.DBNameTemplate; v != nil {
-			if err := api.ValidateProjectDBNameTemplate(*v); err != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Malformed patch project request: %s", err.Error()))
-			}
-		}
-
-		// Verify before archiving the project:
-		// 1. the project has no database.
-		// 2. the issue status of this project should be canceled or done.
-		if v := projectPatch.RowStatus; v != nil && *v == string(api.Archived) {
-			databases, err := s.store.ListDatabases(ctx, &store.FindDatabaseMessage{ProjectID: &project.ResourceID})
-			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, errors.Errorf("failed to find databases in the project %d", id)).SetInternal(err)
-			}
-			if len(databases) > 0 {
-				return echo.NewHTTPError(http.StatusBadRequest, "Please transfer all databases under the project before archiving the project.")
-			}
-
-			openIssues, err := s.store.ListIssueV2(ctx, &store.FindIssueMessage{ProjectUID: &id, StatusList: []api.IssueStatus{api.IssueOpen}})
-			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, errors.Errorf("failed to find issues in the project %d", id)).SetInternal(err)
-			}
-			if len(openIssues) > 0 {
-				return echo.NewHTTPError(http.StatusBadRequest, "Please resolve all the issues in it before archiving the project.")
-			}
-		}
-
-		composedProject, err := s.store.PatchProject(ctx, projectPatch)
-		if err != nil {
-			if common.ErrorCode(err) == common.NotFound {
-				return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("Project not found with ID %d", id))
-			}
-			if common.ErrorCode(err) == common.Conflict {
-				return echo.NewHTTPError(http.StatusConflict, errors.Cause(err).Error())
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to patch project with ID %v", id)).SetInternal(err)
-		}
-
-		c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSONCharsetUTF8)
-		if err := jsonapi.MarshalPayload(c.Response().Writer, composedProject); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to marshal project ID response: %v", id)).SetInternal(err)
 		}
 		return nil
@@ -310,7 +191,11 @@ func (s *Server) registerProjectRoutes(g *echo.Group) {
 			}
 			repositoryCreate.WebhookSecretToken = secretToken
 
-			webhookID, err := createVCSWebhook(ctx, vcs.Type, repositoryCreate.WebhookEndpointID, secretToken, repositoryCreate.AccessToken, vcs.InstanceURL, repositoryCreate.ExternalID, setting.ExternalUrl)
+			gitopsWebhookURL := setting.GitopsWebhookUrl
+			if gitopsWebhookURL == "" {
+				gitopsWebhookURL = setting.ExternalUrl
+			}
+			webhookID, err := createVCSWebhook(ctx, vcs.Type, repositoryCreate.WebhookEndpointID, secretToken, repositoryCreate.AccessToken, vcs.InstanceURL, repositoryCreate.ExternalID, gitopsWebhookURL)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Failed to create webhook for project ID: %v", repositoryCreate.ProjectID)).SetInternal(err)
 			}
@@ -1247,14 +1132,14 @@ func (s *Server) createOrUpdateVCSSQLReviewFileForGitLab(
 	)
 }
 
-func createVCSWebhook(ctx context.Context, vcsType vcsPlugin.Type, webhookEndpointID, secretToken, accessToken, instanceURL, externalRepoID, externalURL string) (string, error) {
+func createVCSWebhook(ctx context.Context, vcsType vcsPlugin.Type, webhookEndpointID, secretToken, accessToken, instanceURL, externalRepoID, gitopsWebhookURL string) (string, error) {
 	// Create a new webhook and retrieve the created webhook ID
 	var webhookCreatePayload []byte
 	var err error
 	switch vcsType {
 	case vcsPlugin.GitLab:
 		webhookCreate := gitlab.WebhookCreate{
-			URL:                   fmt.Sprintf("%s/hook/gitlab/%s", externalURL, webhookEndpointID),
+			URL:                   fmt.Sprintf("%s/hook/gitlab/%s", gitopsWebhookURL, webhookEndpointID),
 			SecretToken:           secretToken,
 			PushEvents:            true,
 			EnableSSLVerification: false, // TODO(tianzhou): This is set to false, be lax to not enable_ssl_verification
@@ -1266,7 +1151,7 @@ func createVCSWebhook(ctx context.Context, vcsType vcsPlugin.Type, webhookEndpoi
 	case vcsPlugin.GitHub:
 		webhookPost := github.WebhookCreateOrUpdate{
 			Config: github.WebhookConfig{
-				URL:         fmt.Sprintf("%s/hook/github/%s", externalURL, webhookEndpointID),
+				URL:         fmt.Sprintf("%s/hook/github/%s", gitopsWebhookURL, webhookEndpointID),
 				ContentType: "json",
 				Secret:      secretToken,
 				InsecureSSL: 1, // TODO: Allow user to specify this value through api.RepositoryCreate
@@ -1280,7 +1165,7 @@ func createVCSWebhook(ctx context.Context, vcsType vcsPlugin.Type, webhookEndpoi
 	case vcsPlugin.Bitbucket:
 		webhookPost := bitbucket.WebhookCreateOrUpdate{
 			Description: "Bytebase GitOps",
-			URL:         fmt.Sprintf("%s/hook/bitbucket/%s", externalURL, webhookEndpointID),
+			URL:         fmt.Sprintf("%s/hook/bitbucket/%s", gitopsWebhookURL, webhookEndpointID),
 			Active:      true,
 			Events:      []string{"repo:push"},
 		}
@@ -1343,4 +1228,50 @@ func isProjectOwnerOrDeveloper(principalID int, projectPolicy *store.IAMPolicyMe
 		}
 	}
 	return false
+}
+
+// SheetInfo represents the sheet related information from sheetPathTemplate.
+type SheetInfo struct {
+	EnvironmentID string
+	DatabaseName  string
+	SheetName     string
+}
+
+// parseSheetInfo matches sheetPath against sheetPathTemplate. If sheetPath matches, then it will derive SheetInfo from the sheetPath.
+// Both sheetPath and sheetPathTemplate are the full file path(including the base directory) of the repository.
+func parseSheetInfo(sheetPath string, sheetPathTemplate string) (*SheetInfo, error) {
+	placeholderList := []string{
+		"ENV_ID",
+		"DB_NAME",
+		"NAME",
+	}
+	sheetPathRegex := sheetPathTemplate
+	for _, placeholder := range placeholderList {
+		sheetPathRegex = strings.ReplaceAll(sheetPathRegex, fmt.Sprintf("{{%s}}", placeholder), fmt.Sprintf("(?P<%s>[a-zA-Z0-9\\+\\-\\=\\_\\#\\!\\$\\. ]+)", placeholder))
+	}
+	sheetRegex, err := regexp.Compile(fmt.Sprintf("^%s$", sheetPathRegex))
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid sheet path template %q", sheetPathTemplate)
+	}
+	if !sheetRegex.MatchString(sheetPath) {
+		return nil, errors.Errorf("sheet path %q does not match sheet path template %q", sheetPath, sheetPathTemplate)
+	}
+
+	matchList := sheetRegex.FindStringSubmatch(sheetPath)
+	sheetInfo := &SheetInfo{}
+	for _, placeholder := range placeholderList {
+		index := sheetRegex.SubexpIndex(placeholder)
+		if index >= 0 {
+			switch placeholder {
+			case "ENV_ID":
+				sheetInfo.EnvironmentID = matchList[index]
+			case "DB_NAME":
+				sheetInfo.DatabaseName = matchList[index]
+			case "NAME":
+				sheetInfo.SheetName = matchList[index]
+			}
+		}
+	}
+
+	return sheetInfo, nil
 }

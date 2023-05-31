@@ -53,25 +53,26 @@ import { computed, ref, watchEffect } from "vue";
 
 import {
   useConnectionTreeStore,
-  useCurrentUser,
-  useInstanceStore,
+  useCurrentUserV1,
+  useInstanceV1Store,
   useTabStore,
 } from "@/store";
 import DatabaseTree from "./DatabaseTree.vue";
 import QueryHistoryContainer from "./QueryHistoryContainer.vue";
 import SchemaPanel from "./SchemaPanel/";
 import { Splitpanes, Pane } from "splitpanes";
-import { ConnectionTreeMode, DatabaseId, UNKNOWN_ID } from "@/types";
-import { hasWorkspacePermission } from "@/utils";
+import { ConnectionTreeMode, UNKNOWN_ID } from "@/types";
+import { hasWorkspacePermissionV1 } from "@/utils";
+import { Engine } from "@/types/proto/v1/common";
 
 defineEmits<{
   (
     event: "alter-schema",
-    params: { databaseId: DatabaseId; schema: string; table: string }
+    params: { databaseId: string; schema: string; table: string }
   ): void;
 }>();
 
-const currentUser = useCurrentUser();
+const currentUserV1 = useCurrentUserV1();
 const tabStore = useTabStore();
 const connectionTreeStore = useConnectionTreeStore();
 const searchPattern = ref("");
@@ -83,19 +84,19 @@ const tab = ref<"projects" | "instances" | "history">(
 );
 
 const hasInstanceView = computed((): boolean => {
-  return hasWorkspacePermission(
+  return hasWorkspacePermissionV1(
     "bb.permission.workspace.manage-database",
-    currentUser.value.role
+    currentUserV1.value.userRole
   );
 });
 
 const showSchemaPanel = computed(() => {
   const conn = tabStore.currentTab.connection;
-  if (conn.databaseId === UNKNOWN_ID) {
+  if (conn.databaseId === String(UNKNOWN_ID)) {
     return false;
   }
-  const instance = useInstanceStore().getInstanceById(conn.instanceId);
-  if (instance.engine === "REDIS") {
+  const instance = useInstanceV1Store().getInstanceByUID(conn.instanceId);
+  if (instance.engine === Engine.REDIS) {
     return false;
   }
   return true;
