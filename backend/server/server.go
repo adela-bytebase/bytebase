@@ -135,8 +135,9 @@ const (
 	// webhookAPIPrefix is the API prefix for Bytebase webhook.
 	webhookAPIPrefix = "/hook"
 	// openAPIPrefix is the API prefix for Bytebase OpenAPI.
-	openAPIPrefix = "/v1"
-	maxStacksize  = 8 * 1024
+	openAPIPrefix          = "/v1"
+	maxStacksize           = 8 * 1024
+	gracefulShutdownPeriod = 10 * time.Second
 )
 
 // Server is the Bytebase server.
@@ -315,10 +316,16 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 			return nil, err
 		}
 		s.SchemaVersion = metadataVersion
+		if err := storeInstance.BackfillRiskExpression(ctx); err != nil {
+			return nil, err
+		}
+		if err := storeInstance.BackfillWorkspaceApprovalSetting(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	s.stateCfg = &state.State{
-		InstanceDatabaseSyncChan:       make(chan *api.Instance, 100),
+		InstanceDatabaseSyncChan:       make(chan *store.InstanceMessage, 100),
 		InstanceSlowQuerySyncChan:      make(chan *api.Instance, 100),
 		InstanceOutstandingConnections: make(map[int]int),
 	}
@@ -506,7 +513,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	s.registerOAuthRoutes(apiGroup)
 	s.registerProjectRoutes(apiGroup)
 	s.registerEnvironmentRoutes(apiGroup)
-	s.registerInstanceRoutes(apiGroup)
 	s.registerDatabaseRoutes(apiGroup)
 	s.registerIssueRoutes(apiGroup)
 	s.registerIssueSubscriberRoutes(apiGroup)
@@ -516,8 +522,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	s.registerInboxRoutes(apiGroup)
 	s.registerBookmarkRoutes(apiGroup)
 	s.registerSQLRoutes(apiGroup)
-	s.registerVCSRoutes(apiGroup)
-	s.registerSheetRoutes(apiGroup)
 	s.registerAnomalyRoutes(apiGroup)
 
 	// Register healthz endpoint.
@@ -537,8 +541,20 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		return status.Errorf(codes.Unknown, "error: %v", p)
 	}
 	recoveryUnaryInterceptor := recovery.UnaryServerInterceptor(recovery.WithRecoveryHandler(onPanic))
+	recoveryStreamInterceptor := recovery.StreamServerInterceptor(recovery.WithRecoveryHandler(onPanic))
 	s.grpcServer = grpc.NewServer(
-		grpc.ChainUnaryInterceptor(debugProvider.DebugInterceptor, authProvider.AuthenticationInterceptor, aclProvider.ACLInterceptor, recoveryUnaryInterceptor),
+		grpc.ChainUnaryInterceptor(
+			debugProvider.DebugInterceptor,
+			authProvider.AuthenticationInterceptor,
+			aclProvider.ACLInterceptor,
+			recoveryUnaryInterceptor,
+		),
+		grpc.ChainStreamInterceptor(
+			debugProvider.DebugStreamInterceptor,
+			authProvider.AuthenticationStreamInterceptor,
+			aclProvider.ACLStreamInterceptor,
+			recoveryStreamInterceptor,
+		),
 	)
 	v1pb.RegisterAuthServiceServer(s.grpcServer, v1.NewAuthService(s.store, s.secret, s.licenseService, s.MetricReporter, &profile,
 		func(ctx context.Context, user *store.UserMessage, firstEndUser bool) error {
@@ -568,15 +584,16 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.MetricReporter,
 		s.secret,
 		s.stateCfg,
-		s.dbFactory))
-	v1pb.RegisterProjectServiceServer(s.grpcServer, v1.NewProjectService(s.store, s.ActivityManager))
+		s.dbFactory,
+		s.SchemaSyncer))
+	v1pb.RegisterProjectServiceServer(s.grpcServer, v1.NewProjectService(s.store, s.ActivityManager, s.licenseService))
 	v1pb.RegisterDatabaseServiceServer(s.grpcServer, v1.NewDatabaseService(s.store, s.BackupRunner, s.licenseService))
 	v1pb.RegisterInstanceRoleServiceServer(s.grpcServer, v1.NewInstanceRoleService(s.store, s.dbFactory))
 	v1pb.RegisterOrgPolicyServiceServer(s.grpcServer, v1.NewOrgPolicyService(s.store, s.licenseService))
 	v1pb.RegisterIdentityProviderServiceServer(s.grpcServer, v1.NewIdentityProviderService(s.store, s.licenseService))
 	v1pb.RegisterSettingServiceServer(s.grpcServer, v1.NewSettingService(s.store, &s.profile, s.licenseService, s.stateCfg, s.feishuProvider))
 	v1pb.RegisterAnomalyServiceServer(s.grpcServer, v1.NewAnomalyService(s.store))
-	v1pb.RegisterSQLServiceServer(s.grpcServer, v1.NewSQLService())
+	v1pb.RegisterSQLServiceServer(s.grpcServer, v1.NewSQLService(s.store, s.SchemaSyncer, s.dbFactory, s.ActivityManager))
 	v1pb.RegisterExternalVersionControlServiceServer(s.grpcServer, v1.NewExternalVersionControlService(s.store))
 	v1pb.RegisterRiskServiceServer(s.grpcServer, v1.NewRiskService(s.store, s.licenseService))
 	v1pb.RegisterReviewServiceServer(s.grpcServer, v1.NewReviewService(s.store, s.ActivityManager, s.TaskScheduler, s.stateCfg))
@@ -887,7 +904,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.MetricReporter.Close()
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, gracefulShutdownPeriod)
 	defer cancel()
 
 	// Cancel the worker
@@ -902,7 +919,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
+		stopped := make(chan struct{})
+		go func() {
+			s.grpcServer.GracefulStop()
+			close(stopped)
+		}()
+
+		t := time.NewTimer(gracefulShutdownPeriod)
+		select {
+		case <-t.C:
+			s.grpcServer.Stop()
+		case <-stopped:
+			t.Stop()
+		}
 	}
 
 	// Wait for all runners to exit.

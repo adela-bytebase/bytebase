@@ -46,6 +46,20 @@
           >
             Configure
           </button>
+          <button
+            type="button"
+            class="btn-normal"
+            @click.prevent="createMigration('bb.issue.database.schema.update')"
+          >
+            Alter Schema
+          </button>
+          <button
+            type="button"
+            class="btn-normal"
+            @click.prevent="createMigration('bb.issue.database.data.update')"
+          >
+            Change Data
+          </button>
         </div>
       </div>
 
@@ -61,10 +75,10 @@
           />
         </div>
         <div class="col-span-2">
-          <p class="text-lg mb-2">Databases</p>
-          <MatchedDatabaseView
+          <MatchedTableView
             :project="project"
-            :environment-id="''"
+            :database-group-name="databaseGroupName"
+            :schema-group="schemaGroup"
             :expr="state.expr!"
           />
         </div>
@@ -93,7 +107,9 @@ import { convertCELStringToExpr } from "@/utils/databaseGroup/cel";
 import { ConditionGroupExpr } from "@/plugins/cel";
 import DatabaseGroupPanel from "@/components/DatabaseGroup/DatabaseGroupPanel.vue";
 import ExprEditor from "@/components/DatabaseGroup/common/ExprEditor";
-import MatchedDatabaseView from "@/components/DatabaseGroup/MatchedDatabaseView.vue";
+import MatchedTableView from "@/components/DatabaseGroup/MatchedTableView.vue";
+import { generateIssueRoute } from "@/utils/databaseGroup/issue";
+import { useRouter } from "vue-router";
 
 interface LocalState {
   isLoaded: boolean;
@@ -116,6 +132,7 @@ const props = defineProps({
   },
 });
 
+const router = useRouter();
 const projectStore = useProjectV1Store();
 const dbGroupStore = useDBGroupStore();
 const state = reactive<LocalState>({
@@ -133,10 +150,22 @@ const schemaGroup = computed(() => {
   );
 });
 
+const createMigration = (
+  type: "bb.issue.database.schema.update" | "bb.issue.database.data.update"
+) => {
+  if (!schemaGroup.value) {
+    return;
+  }
+  const issueRoute = generateIssueRoute(type, schemaGroup.value.databaseGroup, [
+    schemaGroup.value.name,
+  ]);
+  router.push(issueRoute);
+};
+
 watch(
   () => [props, schemaGroup.value],
   async () => {
-    const schemaGroup = await dbGroupStore.getOrFetchSchemaGroupById(
+    const schemaGroup = await dbGroupStore.getOrFetchSchemaGroupByName(
       `${projectNamePrefix}${props.projectName}/${databaseGroupNamePrefix}${props.databaseGroupName}/${schemaGroupNamePrefix}${props.schemaGroupName}`
     );
 

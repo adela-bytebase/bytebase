@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,10 +21,10 @@ import (
 )
 
 func TestSyncSchema(t *testing.T) {
+	databaseName := "sync_schema"
+	newDatabaseName := "sync_schema_new"
 	const (
-		databaseName    = "sync_schema"
-		newDatabaseName = "sync_schema_new"
-		createSchema    = `
+		createSchema = `
 			create schema schema_a;
 			create table schema_a.table_t1(c1 int, c2 int, c3 int);
 			create index idx_table_t1_c1_c2_c3 on schema_a.table_t1(c1, c2, c3);
@@ -84,7 +85,7 @@ DROP SCHEMA "schema_a";
 	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
@@ -97,35 +98,29 @@ DROP SCHEMA "schema_a";
 		},
 	})
 	a.NoError(err)
-	instanceUID, err := strconv.Atoi(instance.Uid)
-	a.NoError(err)
-
-	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
-	})
-	a.NoError(err)
-	a.Nil(databases)
 
 	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "bytebase", nil)
 	a.NoError(err)
 
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
+	database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+		Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName),
 	})
 	a.NoError(err)
-	a.Equal(1, len(databases))
+	databaseUID, err := strconv.Atoi(database.Uid)
+	a.NoError(err)
 
-	database := databases[0]
-	a.Equal(instanceUID, database.Instance.ID)
-
-	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  projectUID,
-		Name:       "create schema",
-		Statement:  createSchema,
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+	sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+		Parent: project.Name,
+		Sheet: &v1pb.Sheet{
+			Title:      "create schema",
+			Content:    []byte(createSchema),
+			Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+			Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+			Type:       v1pb.Sheet_TYPE_SQL,
+		},
 	})
+	a.NoError(err)
+	sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 	a.NoError(err)
 
 	// Create an issue that updates database schema.
@@ -133,8 +128,8 @@ DROP SCHEMA "schema_a";
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
-				DatabaseID:    database.ID,
-				SheetID:       sheet.ID,
+				DatabaseID:    databaseUID,
+				SheetID:       sheetUID,
 			},
 		},
 	})
@@ -152,30 +147,26 @@ DROP SCHEMA "schema_a";
 	a.NoError(err)
 	a.Equal(api.TaskDone, status)
 
-	history, err := ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{
-		Database: &database.Name,
+	resp, err := ctl.databaseServiceClient.ListChangeHistories(ctx, &v1pb.ListChangeHistoriesRequest{
+		Parent: database.Name,
 	})
 	a.NoError(err)
-
+	histories := resp.ChangeHistories
 	// history[0] is SchemaUpdate
-	a.Equal(1, len(history))
-	latest := history[0]
+	a.Equal(1, len(histories))
+	latest := histories[0]
 
 	err = ctl.createDatabase(ctx, projectUID, instance, newDatabaseName, "bytebase", nil)
 	a.NoError(err)
 
-	dbName := newDatabaseName
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
-		Name:      &dbName,
+	newDatabase, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+		Name: fmt.Sprintf("%s/databases/%s", instance.Name, newDatabaseName),
 	})
 	a.NoError(err)
-	a.Equal(1, len(databases))
+	newDatabaseUID, err := strconv.Atoi(newDatabase.Uid)
+	a.NoError(err)
 
-	newDatabase := databases[0]
-	a.Equal(instanceUID, database.Instance.ID)
-
-	newDatabaseSchema, err := ctl.getLatestSchemaDump(newDatabase.ID)
+	newDatabaseSchema, err := ctl.getLatestSchemaDump(newDatabaseUID)
 	a.NoError(err)
 
 	diff, err := ctl.getSchemaDiff(schemaDiffRequest{

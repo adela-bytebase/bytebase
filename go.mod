@@ -5,14 +5,14 @@ go 1.20
 require (
 	cloud.google.com/go/spanner v1.45.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.8.3
-	github.com/antlr/antlr4/runtime/Go/antlr/v4 v4.0.0-20230512164433-5d1fd1a340c9
+	github.com/antlr4-go/antlr/v4 v4.13.0
 	github.com/aws/aws-sdk-go-v2 v1.17.7
 	github.com/aws/aws-sdk-go-v2/config v1.18.19
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.18
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.11.60
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.31.1
 	github.com/blang/semver/v4 v4.0.0
-	github.com/bytebase/plsql-parser v0.0.0-20230524061712-9ad525245954
+	github.com/bytebase/plsql-parser v0.0.0-20230605065610-558b30eea9da
 	github.com/casbin/casbin/v2 v2.66.2
 	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/coreos/go-oidc v2.2.1+incompatible
@@ -38,6 +38,7 @@ require (
 	github.com/lib/pq v1.10.7
 	github.com/mattn/go-sqlite3 v1.14.16
 	github.com/microsoft/go-mssqldb v0.21.0
+	github.com/nyaruka/phonenumbers v1.1.7
 	github.com/paulmach/orb v0.9.0
 	github.com/pganalyze/pg_query_go/v2 v2.1.2
 	github.com/pingcap/tidb v1.1.0-beta.0.20220825063022-5263a0abda61
@@ -60,13 +61,14 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.7.0
-	golang.org/x/exp v0.0.0-20230515195305-f3d0a9c9a5cc
+	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 	golang.org/x/oauth2 v0.6.0
 	golang.org/x/sys v0.7.0
 	golang.org/x/text v0.9.0
 	google.golang.org/api v0.115.0
-	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1
-	google.golang.org/grpc v1.54.0
+	google.golang.org/genproto v0.0.0-20230530153820-e85fd2cbaebc
+	google.golang.org/genproto/googleapis/api v0.0.0-20230530153820-e85fd2cbaebc
+	google.golang.org/grpc v1.55.0
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -78,6 +80,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.1.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.0.0 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
+	github.com/antlr/antlr4/runtime/Go/antlr/v4 v4.0.0-20230305170008-8188dc5388df // indirect
 	github.com/apache/arrow/go/v12 v12.0.0 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
@@ -108,6 +111,7 @@ require (
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	golang.org/x/mod v0.9.0 // indirect
 	golang.org/x/term v0.6.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230526203410-71b5a4ffd15e // indirect
 )
 
 require (

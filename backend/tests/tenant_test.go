@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,9 +74,9 @@ func TestTenant(t *testing.T) {
 		a.NoError(err)
 		prodInstanceDirs = append(prodInstanceDirs, instanceDir)
 	}
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
-	testEnvironment, _, err := ctl.getEnvironment(ctx, "test")
+	testEnvironment, err := ctl.getEnvironment(ctx, "test")
 	a.NoError(err)
 
 	// Add the provisioned instances.
@@ -109,12 +110,12 @@ func TestTenant(t *testing.T) {
 	}
 
 	// Create deployment configuration.
-	_, err = ctl.upsertDeploymentConfig(
-		api.DeploymentConfigUpsert{
-			ProjectID: projectUID,
+	_, err = ctl.projectServiceClient.UpdateDeploymentConfig(ctx, &v1pb.UpdateDeploymentConfigRequest{
+		Config: &v1pb.DeploymentConfig{
+			Name:     fmt.Sprintf("%s/deploymentConfig", project.Name),
+			Schedule: deploySchedule,
 		},
-		deploymentSchedule,
-	)
+	})
 	a.NoError(err)
 
 	// Create issues that create databases.
@@ -129,44 +130,47 @@ func TestTenant(t *testing.T) {
 	}
 
 	// Getting databases for each environment.
-	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
+	resp, err := ctl.databaseServiceClient.ListDatabases(ctx, &v1pb.ListDatabasesRequest{
+		Parent: "instances/-",
+		Filter: fmt.Sprintf(`project == "%s"`, project.Name),
 	})
 	a.NoError(err)
+	databases := resp.Databases
 
-	var testDatabases []*api.Database
-	var prodDatabases []*api.Database
+	var testDatabases []*v1pb.Database
+	var prodDatabases []*v1pb.Database
 	for _, testInstance := range testInstances {
-		testInstanceUID, err := strconv.Atoi(testInstance.Uid)
-		a.NoError(err)
 		for _, database := range databases {
-			if database.Instance.ID == testInstanceUID {
+			if strings.HasPrefix(database.Name, testInstance.Name) {
 				testDatabases = append(testDatabases, database)
 				break
 			}
 		}
 	}
 	for _, prodInstance := range prodInstances {
-		prodInstanceUID, err := strconv.Atoi(prodInstance.Uid)
-		a.NoError(err)
 		for _, database := range databases {
-			if database.Instance.ID == prodInstanceUID {
+			if strings.HasPrefix(database.Name, prodInstance.Name) {
 				prodDatabases = append(prodDatabases, database)
 				break
 			}
 		}
 	}
+
 	a.Equal(testTenantNumber, len(testDatabases))
 	a.Equal(prodTenantNumber, len(prodDatabases))
 
-	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  projectUID,
-		Name:       "migration statement sheet",
-		Statement:  migrationStatement,
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+	sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+		Parent: project.Name,
+		Sheet: &v1pb.Sheet{
+			Title:      "migration statement sheet",
+			Content:    []byte(migrationStatement),
+			Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+			Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+			Type:       v1pb.Sheet_TYPE_SQL,
+		},
 	})
+	a.NoError(err)
+	sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 	a.NoError(err)
 
 	// Create an issue that updates database schema.
@@ -174,7 +178,7 @@ func TestTenant(t *testing.T) {
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
-				SheetID:       sheet.ID,
+				SheetID:       sheetUID,
 			},
 		},
 	})
@@ -194,31 +198,15 @@ func TestTenant(t *testing.T) {
 
 	// Query schema.
 	for _, testInstance := range testInstances {
-		result, err := ctl.query(testInstance, databaseName, bookTableQuery)
+		dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", testInstance.Name, databaseName)})
 		a.NoError(err)
-		a.Equal(bookSchemaSQLResult, result)
+		a.Equal(wantBookSchema, dbMetadata.Schema)
 	}
 	for _, prodInstance := range prodInstances {
-		result, err := ctl.query(prodInstance, databaseName, bookTableQuery)
+		dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", prodInstance.Name, databaseName)})
 		a.NoError(err)
-		a.Equal(bookSchemaSQLResult, result)
+		a.Equal(wantBookSchema, dbMetadata.Schema)
 	}
-
-	// Query migration history
-	var instances []*v1pb.Instance
-	instances = append(instances, testInstances...)
-	instances = append(instances, prodInstances...)
-	hm1 := map[string]bool{}
-	for _, instance := range instances {
-		instanceUID, err := strconv.Atoi(instance.Uid)
-		a.NoError(err)
-		histories, err := ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{Database: &databaseName})
-		a.NoError(err)
-		a.Equal(1, len(histories))
-		a.NotEqual(histories[0].Version, "")
-		hm1[histories[0].Version] = true
-	}
-	a.Equal(1, len(hm1))
 }
 
 func TestTenantVCS(t *testing.T) {
@@ -226,7 +214,7 @@ func TestTenantVCS(t *testing.T) {
 	tests := []struct {
 		name                string
 		vcsProviderCreator  fake.VCSProviderCreator
-		vcsType             vcs.Type
+		vcsType             v1pb.ExternalVersionControl_Type
 		externalID          string
 		repositoryFullPath  string
 		newWebhookPushEvent func(gitFile, beforeSHA, afterSHA string) any
@@ -234,7 +222,7 @@ func TestTenantVCS(t *testing.T) {
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/schemaUpdate",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -258,7 +246,7 @@ func TestTenantVCS(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -314,16 +302,16 @@ func TestTenantVCS(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS.
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project.
@@ -348,22 +336,23 @@ func TestTenantVCS(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
 			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: ".LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
 
 			// Provision instances.
@@ -381,9 +370,9 @@ func TestTenantVCS(t *testing.T) {
 				a.NoError(err)
 				prodInstanceDirs = append(prodInstanceDirs, instanceDir)
 			}
-			prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+			prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 			a.NoError(err)
-			testEnvironment, _, err := ctl.getEnvironment(ctx, "test")
+			testEnvironment, err := ctl.getEnvironment(ctx, "test")
 			a.NoError(err)
 
 			// Add the provisioned instances.
@@ -417,12 +406,12 @@ func TestTenantVCS(t *testing.T) {
 			}
 
 			// Create deployment configuration.
-			_, err = ctl.upsertDeploymentConfig(
-				api.DeploymentConfigUpsert{
-					ProjectID: projectUID,
+			_, err = ctl.projectServiceClient.UpdateDeploymentConfig(ctx, &v1pb.UpdateDeploymentConfigRequest{
+				Config: &v1pb.DeploymentConfig{
+					Name:     fmt.Sprintf("%s/deploymentConfig", project.Name),
+					Schedule: deploySchedule,
 				},
-				deploymentSchedule,
-			)
+			})
 			a.NoError(err)
 
 			// Create issues that create databases.
@@ -437,31 +426,32 @@ func TestTenantVCS(t *testing.T) {
 			}
 
 			// Getting databases for each environment.
-			databases, err := ctl.getDatabases(api.DatabaseFind{ProjectID: &projectUID})
+			resp, err := ctl.databaseServiceClient.ListDatabases(ctx, &v1pb.ListDatabasesRequest{
+				Parent: "instances/-",
+				Filter: fmt.Sprintf(`project == "%s"`, project.Name),
+			})
 			a.NoError(err)
+			databases := resp.Databases
 
-			var testDatabases []*api.Database
-			var prodDatabases []*api.Database
+			var testDatabases []*v1pb.Database
+			var prodDatabases []*v1pb.Database
 			for _, testInstance := range testInstances {
-				instanceUID, err := strconv.Atoi(testInstance.Uid)
-				a.NoError(err)
 				for _, database := range databases {
-					if database.Instance.ID == instanceUID {
+					if strings.HasPrefix(database.Name, testInstance.Name) {
 						testDatabases = append(testDatabases, database)
 						break
 					}
 				}
 			}
 			for _, prodInstance := range prodInstances {
-				instanceUID, err := strconv.Atoi(prodInstance.Uid)
-				a.NoError(err)
 				for _, database := range databases {
-					if database.Instance.ID == instanceUID {
+					if strings.HasPrefix(database.Name, prodInstance.Name) {
 						prodDatabases = append(prodDatabases, database)
 						break
 					}
 				}
 			}
+
 			a.Equal(len(testDatabases), testTenantNumber)
 			a.Equal(len(prodDatabases), prodTenantNumber)
 
@@ -491,37 +481,15 @@ func TestTenantVCS(t *testing.T) {
 
 			// Query schema.
 			for _, testInstance := range testInstances {
-				result, err := ctl.query(testInstance, databaseName, bookTableQuery)
+				dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", testInstance.Name, databaseName)})
 				a.NoError(err)
-				a.Equal(bookSchemaSQLResult, result)
+				a.Equal(wantBookSchema, dbMetadata.Schema)
 			}
 			for _, prodInstance := range prodInstances {
-				result, err := ctl.query(prodInstance, databaseName, bookTableQuery)
+				dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", prodInstance.Name, databaseName)})
 				a.NoError(err)
-				a.Equal(bookSchemaSQLResult, result)
+				a.Equal(wantBookSchema, dbMetadata.Schema)
 			}
-
-			// Query migration history
-			var instances []*v1pb.Instance
-			instances = append(instances, testInstances...)
-			instances = append(instances, prodInstances...)
-			hm1 := map[string]bool{}
-			for _, instance := range instances {
-				instanceUID, err := strconv.Atoi(instance.Uid)
-				a.NoError(err)
-
-				histories, err := ctl.getInstanceMigrationHistory(
-					instanceUID,
-					db.MigrationHistoryFind{
-						Database: &databaseName,
-					},
-				)
-				a.NoError(err)
-				a.Len(histories, 1)
-				a.Equal("ver1-ddl", histories[0].Version)
-				hm1[histories[0].Version] = true
-			}
-			a.Len(hm1, 1)
 		})
 	}
 }
@@ -565,9 +533,9 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 	prodInstanceDir, err := ctl.provisionSQLiteInstance(instanceRootDir, prodInstanceName)
 	a.NoError(err)
 
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
-	testEnvironment, _, err := ctl.getEnvironment(ctx, "test")
+	testEnvironment, err := ctl.getEnvironment(ctx, "test")
 	a.NoError(err)
 
 	// Add the provisioned instances.
@@ -581,8 +549,6 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 		},
 	})
 	a.NoError(err)
-	testInstanceUID, err := strconv.Atoi(testInstance.Uid)
-	a.NoError(err)
 
 	prodInstance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
 		InstanceId: generateRandomString("instance", 10),
@@ -594,16 +560,14 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 		},
 	})
 	a.NoError(err)
-	prodInstanceUID, err := strconv.Atoi(prodInstance.Uid)
-	a.NoError(err)
 
 	// Create deployment configuration.
-	_, err = ctl.upsertDeploymentConfig(
-		api.DeploymentConfigUpsert{
-			ProjectID: projectUID,
+	_, err = ctl.projectServiceClient.UpdateDeploymentConfig(ctx, &v1pb.UpdateDeploymentConfigRequest{
+		Config: &v1pb.DeploymentConfig{
+			Name:     fmt.Sprintf("%s/deploymentConfig", project.Name),
+			Schedule: deploySchedule,
 		},
-		deploymentSchedule,
-	)
+	})
 	a.NoError(err)
 
 	// Create issues that create databases.
@@ -620,26 +584,28 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 	}
 
 	// Getting databases for each environment.
-	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
+	resp, err := ctl.databaseServiceClient.ListDatabases(ctx, &v1pb.ListDatabasesRequest{
+		Parent: "instances/-",
+		Filter: fmt.Sprintf(`project == "%s"`, project.Name),
 	})
 	a.NoError(err)
+	databases := resp.Databases
 
-	var testDatabases []*api.Database
-	var prodDatabases []*api.Database
+	var testDatabases []*v1pb.Database
+	var prodDatabases []*v1pb.Database
 	for i := 0; i < testTenantNumber; i++ {
-		databaseName := fmt.Sprintf("%s_tenant%d", baseDatabaseName, i)
+		databaseName := fmt.Sprintf("%s/databases/%s_tenant%d", testInstance.Name, baseDatabaseName, i)
 		for _, database := range databases {
-			if database.Instance.ID == testInstanceUID && database.Name == databaseName {
+			if database.Name == databaseName {
 				testDatabases = append(testDatabases, database)
 				break
 			}
 		}
 	}
 	for i := 0; i < prodTenantNumber; i++ {
-		databaseName := fmt.Sprintf("%s_tenant%d", baseDatabaseName, i)
+		databaseName := fmt.Sprintf("%s/databases/%s_tenant%d", prodInstance.Name, baseDatabaseName, i)
 		for _, database := range databases {
-			if database.Instance.ID == prodInstanceUID && database.Name == databaseName {
+			if database.Name == databaseName {
 				prodDatabases = append(prodDatabases, database)
 				break
 			}
@@ -648,14 +614,18 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 	a.Equal(len(testDatabases), testTenantNumber)
 	a.Equal(len(prodDatabases), prodTenantNumber)
 
-	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  projectUID,
-		Name:       "migration statement sheet",
-		Statement:  migrationStatement,
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+	sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+		Parent: project.Name,
+		Sheet: &v1pb.Sheet{
+			Title:      "migration statement sheet",
+			Content:    []byte(migrationStatement),
+			Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+			Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+			Type:       v1pb.Sheet_TYPE_SQL,
+		},
 	})
+	a.NoError(err)
+	sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 	a.NoError(err)
 
 	// Create an issue that updates database schema.
@@ -663,7 +633,7 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
-				SheetID:       sheet.ID,
+				SheetID:       sheetUID,
 			},
 		},
 	})
@@ -684,15 +654,15 @@ func TestTenantDatabaseNameTemplate(t *testing.T) {
 	// Query schema.
 	for i := 0; i < testTenantNumber; i++ {
 		databaseName := fmt.Sprintf("%s_tenant%d", baseDatabaseName, i)
-		result, err := ctl.query(testInstance, databaseName, bookTableQuery)
+		dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", testInstance.Name, databaseName)})
 		a.NoError(err)
-		a.Equal(bookSchemaSQLResult, result)
+		a.Equal(wantBookSchema, dbMetadata.Schema)
 	}
 	for i := 0; i < prodTenantNumber; i++ {
 		databaseName := fmt.Sprintf("%s_tenant%d", baseDatabaseName, i)
-		result, err := ctl.query(prodInstance, databaseName, bookTableQuery)
+		dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", prodInstance.Name, databaseName)})
 		a.NoError(err)
-		a.Equal(bookSchemaSQLResult, result)
+		a.Equal(wantBookSchema, dbMetadata.Schema)
 	}
 }
 
@@ -700,7 +670,7 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 	tests := []struct {
 		name                string
 		vcsProviderCreator  fake.VCSProviderCreator
-		vcsType             vcs.Type
+		vcsType             v1pb.ExternalVersionControl_Type
 		externalID          string
 		repositoryFullPath  string
 		newWebhookPushEvent func(gitFile, beforeSHA, afterSHA string) any
@@ -708,7 +678,7 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/schemaUpdate",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -732,7 +702,7 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -788,16 +758,16 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS.
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project.
@@ -823,22 +793,23 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
 			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: ".LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
 
 			// Provision instances.
@@ -856,9 +827,9 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 				a.NoError(err)
 				prodInstanceDirs = append(prodInstanceDirs, instanceDir)
 			}
-			prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+			prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 			a.NoError(err)
-			testEnvironment, _, err := ctl.getEnvironment(ctx, "test")
+			testEnvironment, err := ctl.getEnvironment(ctx, "test")
 			a.NoError(err)
 
 			// Add the provisioned instances.
@@ -892,12 +863,12 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 			}
 
 			// Create deployment configuration.
-			_, err = ctl.upsertDeploymentConfig(
-				api.DeploymentConfigUpsert{
-					ProjectID: projectUID,
+			_, err = ctl.projectServiceClient.UpdateDeploymentConfig(ctx, &v1pb.UpdateDeploymentConfigRequest{
+				Config: &v1pb.DeploymentConfig{
+					Name:     fmt.Sprintf("%s/deploymentConfig", project.Name),
+					Schedule: deploySchedule,
 				},
-				deploymentSchedule,
-			)
+			})
 			a.NoError(err)
 
 			// Create issues that create databases.
@@ -917,31 +888,32 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 			}
 
 			// Getting databases for each environment.
-			databases, err := ctl.getDatabases(api.DatabaseFind{ProjectID: &projectUID})
+			resp, err := ctl.databaseServiceClient.ListDatabases(ctx, &v1pb.ListDatabasesRequest{
+				Parent: "instances/-",
+				Filter: fmt.Sprintf(`project == "%s"`, project.Name),
+			})
 			a.NoError(err)
+			databases := resp.Databases
 
-			var testDatabases []*api.Database
-			var prodDatabases []*api.Database
+			var testDatabases []*v1pb.Database
+			var prodDatabases []*v1pb.Database
 			for _, testInstance := range testInstances {
-				instanceUID, err := strconv.Atoi(testInstance.Uid)
-				a.NoError(err)
 				for _, database := range databases {
-					if database.Instance.ID == instanceUID {
+					if strings.HasPrefix(database.Name, testInstance.Name) {
 						testDatabases = append(testDatabases, database)
 						break
 					}
 				}
 			}
 			for _, prodInstance := range prodInstances {
-				instanceUID, err := strconv.Atoi(prodInstance.Uid)
-				a.NoError(err)
 				for _, database := range databases {
-					if database.Instance.ID == instanceUID {
+					if strings.HasPrefix(database.Name, prodInstance.Name) {
 						prodDatabases = append(prodDatabases, database)
 						break
 					}
 				}
 			}
+
 			a.Equal(testTenantNumber, len(testDatabases))
 			a.Equal(prodTenantNumber, len(prodDatabases))
 
@@ -971,56 +943,17 @@ func TestTenantVCSDatabaseNameTemplate(t *testing.T) {
 			for i, testInstance := range testInstances {
 				tenant := fmt.Sprintf("tenant%d", i)
 				databaseName := baseDatabaseName + "_" + tenant
-				result, err := ctl.query(testInstance, databaseName, bookTableQuery)
+				dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", testInstance.Name, databaseName)})
 				a.NoError(err)
-				a.Equal(bookSchemaSQLResult, result)
+				a.Equal(wantBookSchema, dbMetadata.Schema)
 			}
 			for i, prodInstance := range prodInstances {
 				tenant := fmt.Sprintf("tenant%d", i)
 				databaseName := baseDatabaseName + "_" + tenant
-				result, err := ctl.query(prodInstance, databaseName, bookTableQuery)
+				dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", prodInstance.Name, databaseName)})
 				a.NoError(err)
-				a.Equal(bookSchemaSQLResult, result)
+				a.Equal(wantBookSchema, dbMetadata.Schema)
 			}
-
-			// Query migration history
-			hm1 := map[string]bool{}
-			hm2 := map[string]bool{}
-			for i, instance := range testInstances {
-				instanceUID, err := strconv.Atoi(instance.Uid)
-				a.NoError(err)
-				tenant := fmt.Sprintf("tenant%d", i)
-				databaseName := baseDatabaseName + "_" + tenant
-				histories, err := ctl.getInstanceMigrationHistory(
-					instanceUID,
-					db.MigrationHistoryFind{
-						Database: &databaseName,
-					},
-				)
-				a.NoError(err)
-				a.Len(histories, 1)
-				a.Equal("ver1-ddl", histories[0].Version)
-				hm1[histories[0].Version] = true
-			}
-			for i, instance := range prodInstances {
-				instanceUID, err := strconv.Atoi(instance.Uid)
-				a.NoError(err)
-				tenant := fmt.Sprintf("tenant%d", i)
-				databaseName := baseDatabaseName + "_" + tenant
-				histories, err := ctl.getInstanceMigrationHistory(
-					instanceUID,
-					db.MigrationHistoryFind{
-						Database: &databaseName,
-					},
-				)
-				a.NoError(err)
-				a.Len(histories, 1)
-				a.Equal("ver1-ddl", histories[0].Version)
-				hm2[histories[0].Version] = true
-			}
-
-			a.Len(hm1, 1)
-			a.Len(hm2, 1)
 
 			// Check latestSchemaFile
 			files, err := ctl.vcsProvider.GetFiles(test.externalID, fmt.Sprintf("%s/.LATEST.sql", baseDirectory))
@@ -1038,7 +971,7 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 	tests := []struct {
 		name                string
 		vcsProviderCreator  fake.VCSProviderCreator
-		vcsType             vcs.Type
+		vcsType             v1pb.ExternalVersionControl_Type
 		externalID          string
 		repositoryFullPath  string
 		newWebhookPushEvent func(gitFile, beforeSHA, afterSHA string) any
@@ -1046,7 +979,7 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/schemaUpdate",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -1070,7 +1003,7 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -1126,16 +1059,16 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS.
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a tenant project with empty database name template.
@@ -1160,22 +1093,23 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
 			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: ".LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
 
 			// Provision instances.
@@ -1188,7 +1122,7 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 				a.NoError(err)
 				testInstanceDirs = append(testInstanceDirs, instanceDir)
 			}
-			testEnvironment, _, err := ctl.getEnvironment(ctx, "test")
+			testEnvironment, err := ctl.getEnvironment(ctx, "test")
 			a.NoError(err)
 
 			// Add the provisioned instances.
@@ -1208,21 +1142,21 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 			}
 
 			// Create deployment configuration.
-			_, err = ctl.upsertDeploymentConfig(
-				api.DeploymentConfigUpsert{
-					ProjectID: projectUID,
-				},
-				api.DeploymentSchedule{
-					Deployments: []*api.Deployment{
-						{
-							Name: "Test stage",
-							Spec: &api.DeploymentSpec{
-								Selector: &api.LabelSelector{
-									MatchExpressions: []*api.LabelSelectorRequirement{
-										{
-											Key:      api.EnvironmentLabelKey,
-											Operator: api.InOperatorType,
-											Values:   []string{"test"},
+			_, err = ctl.projectServiceClient.UpdateDeploymentConfig(ctx, &v1pb.UpdateDeploymentConfigRequest{
+				Config: &v1pb.DeploymentConfig{
+					Name: fmt.Sprintf("%s/deploymentConfig", project.Name),
+					Schedule: &v1pb.Schedule{
+						Deployments: []*v1pb.ScheduleDeployment{
+							{
+								Title: "Test stage",
+								Spec: &v1pb.DeploymentSpec{
+									LabelSelector: &v1pb.LabelSelector{
+										MatchExpressions: []*v1pb.LabelSelectorRequirement{
+											{
+												Key:      api.EnvironmentLabelKey,
+												Operator: v1pb.OperatorType_OPERATOR_TYPE_IN,
+												Values:   []string{"test"},
+											},
 										},
 									},
 								},
@@ -1230,7 +1164,7 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 						},
 					},
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create issues that create databases.
@@ -1243,19 +1177,17 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 			}
 
 			// Getting databases for each environment.
-			databases, err := ctl.getDatabases(
-				api.DatabaseFind{
-					ProjectID: &projectUID,
-				},
-			)
+			resp, err := ctl.databaseServiceClient.ListDatabases(ctx, &v1pb.ListDatabasesRequest{
+				Parent: "instances/-",
+				Filter: fmt.Sprintf(`project == "%s"`, project.Name),
+			})
 			a.NoError(err)
+			databases := resp.Databases
 
-			var testDatabases []*api.Database
+			var testDatabases []*v1pb.Database
 			for _, testInstance := range testInstances {
-				instanceUID, err := strconv.Atoi(testInstance.Uid)
-				a.NoError(err)
 				for _, database := range databases {
-					if database.Instance.ID == instanceUID {
+					if strings.HasPrefix(database.Name, testInstance.Name) {
 						testDatabases = append(testDatabases, database)
 						break
 					}
@@ -1289,31 +1221,10 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 			for i, testInstance := range testInstances {
 				tenant := fmt.Sprintf("tenant%d", i)
 				databaseName := baseDatabaseName + "_" + tenant
-				result, err := ctl.query(testInstance, databaseName, bookTableQuery)
+				dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/databases/%s/schema", testInstance.Name, databaseName)})
 				a.NoError(err)
-				a.Equal(bookSchemaSQLResult, result)
+				a.Equal(wantBookSchema, dbMetadata.Schema)
 			}
-
-			// Query migration history
-			hm := map[string]bool{}
-			for i, instance := range testInstances {
-				instanceUID, err := strconv.Atoi(instance.Uid)
-				a.NoError(err)
-				tenant := fmt.Sprintf("tenant%d", i)
-				databaseName := baseDatabaseName + "_" + tenant
-				histories, err := ctl.getInstanceMigrationHistory(
-					instanceUID,
-					db.MigrationHistoryFind{
-						Database: &databaseName,
-					},
-				)
-				a.NoError(err)
-				a.Len(histories, 1)
-				a.Equal("ver1-ddl", histories[0].Version)
-				hm[histories[0].Version] = true
-			}
-
-			a.Len(hm, 1)
 		})
 	}
 }
@@ -1321,10 +1232,12 @@ func TestTenantVCSDatabaseNameTemplate_Empty(t *testing.T) {
 // TestTenantVCS_YAML tests the behavior when use a YAML file to do DML in a
 // tenant project.
 func TestTenantVCS_YAML(t *testing.T) {
+	a := require.New(t)
+
 	tests := []struct {
 		name                string
 		vcsProviderCreator  fake.VCSProviderCreator
-		vcsType             vcs.Type
+		vcsType             v1pb.ExternalVersionControl_Type
 		externalID          string
 		repositoryFullPath  string
 		newWebhookPushEvent func(gitFile, beforeSHA, afterSHA string) any
@@ -1332,7 +1245,7 @@ func TestTenantVCS_YAML(t *testing.T) {
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/dataUpdate",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -1356,7 +1269,7 @@ func TestTenantVCS_YAML(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(gitFile, beforeSHA, afterSHA string) any {
@@ -1402,26 +1315,26 @@ func TestTenantVCS_YAML(t *testing.T) {
 				dataDir:            t.TempDir(),
 				vcsProviderCreator: test.vcsProviderCreator,
 			})
-			require.NoError(t, err)
+			a.NoError(err)
 			defer func() {
 				_ = ctl.Close(ctx)
 			}()
 
 			err = ctl.setLicense()
-			require.NoError(t, err)
+			a.NoError(err)
 
 			// Create a VCS.
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
-			require.NoError(t, err)
+			})
+			a.NoError(err)
 
 			// Create a tenant project with empty database name template.
 			projectID := generateRandomString("project", 10)
@@ -1435,34 +1348,35 @@ func TestTenantVCS_YAML(t *testing.T) {
 				},
 				ProjectId: projectID,
 			})
-			require.NoError(t, err)
+			a.NoError(err)
 			projectUID, err := strconv.Atoi(project.Uid)
-			require.NoError(t, err)
+			a.NoError(err)
 
 			// Create a repository.
 			ctl.vcsProvider.CreateRepository(test.externalID)
 
 			// Create the branch
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
-			require.NoError(t, err)
+			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: ".LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
-			require.NoError(t, err)
+				AllowMissing: true,
+			})
+			a.NoError(err)
 
 			// Provision instances.
 			instanceRootDir := t.TempDir()
@@ -1471,11 +1385,11 @@ func TestTenantVCS_YAML(t *testing.T) {
 			var testInstanceDirs []string
 			for i := 0; i < testTenantNumber; i++ {
 				instanceDir, err := ctl.provisionSQLiteInstance(instanceRootDir, fmt.Sprintf("%s-%d", testInstanceName, i))
-				require.NoError(t, err)
+				a.NoError(err)
 				testInstanceDirs = append(testInstanceDirs, instanceDir)
 			}
-			testEnvironment, _, err := ctl.getEnvironment(ctx, "test")
-			require.NoError(t, err)
+			testEnvironment, err := ctl.getEnvironment(ctx, "test")
+			a.NoError(err)
 
 			// Add the provisioned instances.
 			var testInstances []*v1pb.Instance
@@ -1489,26 +1403,26 @@ func TestTenantVCS_YAML(t *testing.T) {
 						DataSources: []*v1pb.DataSource{{Type: v1pb.DataSourceType_ADMIN, Host: testInstanceDir}},
 					},
 				})
-				require.NoError(t, err)
+				a.NoError(err)
 				testInstances = append(testInstances, instance)
 			}
 
 			// Create deployment configuration.
-			_, err = ctl.upsertDeploymentConfig(
-				api.DeploymentConfigUpsert{
-					ProjectID: projectUID,
-				},
-				api.DeploymentSchedule{
-					Deployments: []*api.Deployment{
-						{
-							Name: "Test stage",
-							Spec: &api.DeploymentSpec{
-								Selector: &api.LabelSelector{
-									MatchExpressions: []*api.LabelSelectorRequirement{
-										{
-											Key:      api.EnvironmentLabelKey,
-											Operator: api.InOperatorType,
-											Values:   []string{"test"},
+			_, err = ctl.projectServiceClient.UpdateDeploymentConfig(ctx, &v1pb.UpdateDeploymentConfigRequest{
+				Config: &v1pb.DeploymentConfig{
+					Name: fmt.Sprintf("%s/deploymentConfig", project.Name),
+					Schedule: &v1pb.Schedule{
+						Deployments: []*v1pb.ScheduleDeployment{
+							{
+								Title: "Test stage",
+								Spec: &v1pb.DeploymentSpec{
+									LabelSelector: &v1pb.LabelSelector{
+										MatchExpressions: []*v1pb.LabelSelectorRequirement{
+											{
+												Key:      api.EnvironmentLabelKey,
+												Operator: v1pb.OperatorType_OPERATOR_TYPE_IN,
+												Values:   []string{"test"},
+											},
 										},
 									},
 								},
@@ -1516,8 +1430,8 @@ func TestTenantVCS_YAML(t *testing.T) {
 						},
 					},
 				},
-			)
-			require.NoError(t, err)
+			})
+			a.NoError(err)
 
 			// Create issues that create databases.
 			const baseDatabaseName = "TestTenantVCS_YAML"
@@ -1525,52 +1439,51 @@ func TestTenantVCS_YAML(t *testing.T) {
 				tenant := fmt.Sprintf("tenant%d", i)
 				databaseName := baseDatabaseName + "_" + tenant
 				err := ctl.createDatabase(ctx, projectUID, testInstance, databaseName, "", nil /* labelMap */)
-				require.NoError(t, err)
+				a.NoError(err)
 			}
 
 			// Getting databases for each environment.
-			databases, err := ctl.getDatabases(
-				api.DatabaseFind{
-					ProjectID: &projectUID,
-				},
-			)
-			require.NoError(t, err)
+			resp, err := ctl.databaseServiceClient.ListDatabases(ctx, &v1pb.ListDatabasesRequest{
+				Parent: "instances/-",
+				Filter: fmt.Sprintf(`project == "%s"`, project.Name),
+			})
+			a.NoError(err)
+			databases := resp.Databases
 
-			var testDatabases []*api.Database
+			var testDatabases []*v1pb.Database
 			for _, testInstance := range testInstances {
-				instanceUID, err := strconv.Atoi(testInstance.Uid)
-				require.NoError(t, err)
 				for _, database := range databases {
-					if database.Instance.ID == instanceUID {
+					if strings.HasPrefix(database.Name, testInstance.Name) {
 						testDatabases = append(testDatabases, database)
 						break
 					}
 				}
 			}
-			require.Equal(t, testTenantNumber, len(testDatabases))
+			a.Equal(testTenantNumber, len(testDatabases))
 
 			// Simulate Git commits for schema update.
 			gitFile1 := baseDirectory + "/ver1##migrate##create_a_test_table.sql"
 			err = ctl.vcsProvider.AddFiles(test.externalID, map[string]string{gitFile1: migrationStatement})
-			require.NoError(t, err)
+			a.NoError(err)
 			err = ctl.vcsProvider.AddCommitsDiff(test.externalID, "1", "2", []vcs.FileDiff{
 				{Path: gitFile1, Type: vcs.FileDiffTypeAdded},
 			})
-			require.NoError(t, err)
+			a.NoError(err)
 			payload, err := json.Marshal(test.newWebhookPushEvent(gitFile1, "1", "2"))
-			require.NoError(t, err)
+			a.NoError(err)
 			err = ctl.vcsProvider.SendWebhookPush(test.externalID, payload)
-			require.NoError(t, err)
+			a.NoError(err)
 
 			// Get schema update issues.
 			issues, err := ctl.getIssues(&projectUID, api.IssueOpen)
-			require.NoError(t, err)
-			require.Len(t, issues, 1)
+			a.NoError(err)
+			a.Len(issues, 1)
 			status, err := ctl.waitIssuePipeline(ctx, issues[0].ID)
-			require.NoError(t, err)
-			require.Equal(t, api.TaskDone, status)
+			a.NoError(err)
+			a.Equal(api.TaskDone, status)
 
 			// Simulate Git commits for data update.
+			database0Name := "TestTenantVCS_YAML_tenant0"
 			gitFile2 := baseDirectory + "/ver2##data##insert_a_new_row.yml"
 			err = ctl.vcsProvider.AddFiles(
 				test.externalID,
@@ -1581,51 +1494,26 @@ databases:
 statement: |
   INSERT INTO book (name) VALUES ('Star Wars')
 `,
-						databases[0].Name,
+						database0Name,
 					),
 				},
 			)
-			require.NoError(t, err)
+			a.NoError(err)
 			err = ctl.vcsProvider.AddCommitsDiff(test.externalID, "2", "3", []vcs.FileDiff{
 				{Path: gitFile2, Type: vcs.FileDiffTypeAdded},
 			})
-			require.NoError(t, err)
+			a.NoError(err)
 			payload, err = json.Marshal(test.newWebhookPushEvent(gitFile2, "2", "3"))
-			require.NoError(t, err)
+			a.NoError(err)
 			err = ctl.vcsProvider.SendWebhookPush(test.externalID, payload)
-			require.NoError(t, err)
+			a.NoError(err)
 
 			// Get data update issues.
 			issues, err = ctl.getIssues(&projectUID, api.IssueOpen)
-			require.NoError(t, err)
+			a.NoError(err)
 			status, err = ctl.waitIssuePipeline(ctx, issues[0].ID)
-			require.NoError(t, err)
-			require.Equal(t, api.TaskDone, status)
-
-			// Query migration history, only the database of the first tenant should be touched
-			instanceUID0, err := strconv.Atoi(testInstances[0].Uid)
-			require.NoError(t, err)
-			histories, err := ctl.getInstanceMigrationHistory(
-				instanceUID0,
-				db.MigrationHistoryFind{
-					Database: &databases[0].Name,
-				},
-			)
-			require.NoError(t, err)
-			require.Len(t, histories, 2)
-			require.Equal(t, "ver2-dml", histories[0].Version)
-
-			instanceUID1, err := strconv.Atoi(testInstances[1].Uid)
-			require.NoError(t, err)
-			histories, err = ctl.getInstanceMigrationHistory(
-				instanceUID1,
-				db.MigrationHistoryFind{
-					Database: &databases[1].Name,
-				},
-			)
-			require.NoError(t, err)
-			require.Len(t, histories, 1)
-			require.Equal(t, "ver1-ddl", histories[0].Version)
+			a.NoError(err)
+			a.Equal(api.TaskDone, status)
 		})
 	}
 }

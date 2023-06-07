@@ -26,6 +26,8 @@ import (
 var (
 	baseTableType = "BASE TABLE"
 	viewTableType = "VIEW"
+	// Sequence is available to TiDB only.
+	sequenceTableType = "SEQUENCE"
 
 	_ db.Driver = (*Driver)(nil)
 )
@@ -324,8 +326,7 @@ func (driver *Driver) querySingleSQL(ctx context.Context, conn *sql.Conn, single
 	if singleSQL.Empty {
 		return nil, nil
 	}
-	statement := singleSQL.Text
-
+	statement := strings.TrimRight(singleSQL.Text, " \n\t;")
 	if !strings.HasPrefix(statement, "EXPLAIN") && queryContext.Limit > 0 {
 		var err error
 		statement, err = driver.getStatementWithResultLimit(statement, queryContext.Limit)
@@ -341,4 +342,9 @@ func (driver *Driver) querySingleSQL(ctx context.Context, conn *sql.Conn, single
 	}
 
 	return util.Query2(ctx, driver.dbType, conn, statement, queryContext)
+}
+
+// RunStatement runs a SQL statement in a given connection.
+func (*Driver) RunStatement(ctx context.Context, conn *sql.Conn, statement string) ([]*v1pb.QueryResult, error) {
+	return util.RunStatement(ctx, bbparser.MySQL, conn, statement)
 }

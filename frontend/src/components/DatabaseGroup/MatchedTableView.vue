@@ -1,13 +1,20 @@
 <template>
-  <div class="w-full border min-h-[20rem]">
+  <div class="mb-2 flex flex-row items-center">
+    <span class="text-lg mr-2">{{ $t("db.tables") }}</span>
+    <BBLoader v-show="state.isRequesting" class="opacity-60" />
+  </div>
+  <div
+    class="w-full border rounded min-h-[20rem] max-h-[24rem] overflow-y-auto"
+  >
     <div
-      class="w-full flex flex-row justify-between items-center px-2 py-1 bg-gray-100 border-b"
+      class="sticky top-0 z-[1] w-full flex flex-row justify-between items-center px-2 py-1 bg-gray-100 border-b cursor-pointer"
+      @click="state.showMatchedTableList = !state.showMatchedTableList"
     >
-      <div>
-        <span>Matched table</span>
+      <div class="text-sm font-medium">
+        <span>{{ $t("database-group.matched-table") }}</span>
         <span class="ml-1 text-gray-400">({{ matchedTableList.length }})</span>
       </div>
-      <button @click="state.showMatchedTableList = !state.showMatchedTableList">
+      <button class="opacity-60">
         <heroicons-outline:chevron-right
           v-if="!state.showMatchedTableList"
           class="w-5 h-auto"
@@ -15,34 +22,29 @@
         <heroicons-outline:chevron-down v-else class="w-5 h-auto" />
       </button>
     </div>
-    <div v-show="state.showMatchedTableList" class="w-full">
+    <div v-show="state.showMatchedTableList" class="w-full my-1">
       <div
-        v-for="database in matchedTableList"
-        :key="database.name"
+        v-for="table in matchedTableList"
+        :key="table.database"
         class="w-full flex flex-row justify-between items-center px-2 py-1 gap-x-2"
       >
-        <span>{{ database.databaseName }}</span>
+        <span class="text-sm">{{ table.table }}</span>
         <div class="flex flex-row justify-end items-center">
-          <InstanceV1EngineIcon :instance="database.instanceEntity" />
-          <span class="ml-1 text-sm text-gray-400">{{
-            database.instanceEntity.title
-          }}</span>
+          <DatabaseView :database-name="table.database" />
         </div>
       </div>
     </div>
     <div
-      class="w-full flex flex-row justify-between items-center px-2 py-1 bg-gray-100 border-b"
-      :class="[state.showMatchedTableList && 'border-t']"
+      class="sticky top-8 z-[1] w-full flex flex-row justify-between items-center px-2 py-1 bg-gray-100 border-y cursor-pointer"
+      @click="state.showUnmatchedTableList = !state.showUnmatchedTableList"
     >
-      <div>
-        <span>Unmatched table</span>
+      <div class="text-sm font-medium">
+        <span>{{ $t("database-group.unmatched-table") }}</span>
         <span class="ml-1 text-gray-400"
           >({{ unmatchedTableList.length }})</span
         >
       </div>
-      <button
-        @click="state.showUnmatchedTableList = !state.showUnmatchedTableList"
-      >
+      <button class="opacity-60">
         <heroicons-outline:chevron-right
           v-if="!state.showUnmatchedTableList"
           class="w-5 h-auto"
@@ -50,18 +52,15 @@
         <heroicons-outline:chevron-down v-else class="w-5 h-auto" />
       </button>
     </div>
-    <div v-show="state.showUnmatchedTableList">
+    <div v-show="state.showUnmatchedTableList" class="w-full py-1">
       <div
-        v-for="database in matchedTableList"
-        :key="database.name"
-        class="w-full flex flex-row justify-between items-center"
+        v-for="table in unmatchedTableList"
+        :key="table.database"
+        class="w-full flex flex-row justify-between items-center px-2 py-1 gap-x-2"
       >
-        <span>{{ database.databaseName }}</span>
+        <span class="text-sm">{{ table.table }}</span>
         <div class="flex flex-row justify-end items-center">
-          <InstanceV1EngineIcon :instance="database.instanceEntity" />
-          <span class="ml-1 text-sm text-gray-400">{{
-            database.instanceEntity.title
-          }}</span>
+          <DatabaseView :database-name="table.database" />
         </div>
       </div>
     </div>
@@ -69,44 +68,75 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, watch, reactive } from "vue";
-import { ConditionGroupExpr } from "@/plugins/cel";
-import { useDatabaseV1Store } from "@/store";
-import { ComposedDatabase, ComposedProject } from "@/types";
-import { sortDatabaseV1List } from "@/utils";
-import { InstanceV1EngineIcon } from "../v2";
+import { ref, watch, reactive } from "vue";
+import { ConditionGroupExpr, convertToCELString } from "@/plugins/cel";
+import { ComposedProject } from "@/types";
+import { DatabaseView } from "../v2";
+import {
+  SchemaGroup,
+  SchemaGroup_Table,
+} from "@/types/proto/v1/project_service";
+import { projectServiceClient } from "@/grpcweb";
+import { Expr } from "@/types/proto/google/type/expr";
+import { useDebounceFn } from "@vueuse/core";
+import {
+  databaseGroupNamePrefix,
+  schemaGroupNamePrefix,
+} from "@/store/modules/v1/common";
+import BBLoader from "@/bbkit/BBLoader.vue";
 
 interface LocalState {
+  isRequesting: boolean;
   showMatchedTableList: boolean;
   showUnmatchedTableList: boolean;
 }
 
 const props = defineProps<{
   project: ComposedProject;
-  environmentId: string;
+  databaseGroupName: string;
   expr: ConditionGroupExpr;
+  schemaGroup?: SchemaGroup;
 }>();
 
 const state = reactive<LocalState>({
-  showMatchedTableList: false,
+  isRequesting: false,
+  showMatchedTableList: true,
   showUnmatchedTableList: false,
 });
-const matchedTableList = ref<ComposedDatabase[]>([]);
-const unmatchedTableList = ref<ComposedDatabase[]>([]);
-const databaseList = computed(() => {
-  const list = useDatabaseV1Store().databaseListByProject(props.project.name);
-  return sortDatabaseV1List(list);
-});
+const matchedTableList = ref<SchemaGroup_Table[]>([]);
+const unmatchedTableList = ref<SchemaGroup_Table[]>([]);
 
-watch(
-  () => [databaseList.value, props.expr],
-  async () => {
-    // TODO: fetch matched and unmatched table list with expr.
-    matchedTableList.value = databaseList.value;
+const updateMatchingState = useDebounceFn(async () => {
+  state.isRequesting = true;
+  try {
+    const celString = convertToCELString(props.expr);
+    const validateOnlyResourceId = "creating-schema-group";
+    const databaseGroupName = `${props.project.name}/${databaseGroupNamePrefix}${props.databaseGroupName}`;
+    const result = await projectServiceClient.createSchemaGroup({
+      parent: databaseGroupName,
+      schemaGroup: {
+        name: `${databaseGroupName}/${schemaGroupNamePrefix}${validateOnlyResourceId}`,
+        tablePlaceholder: validateOnlyResourceId,
+        tableExpr: Expr.fromJSON({
+          expression: celString,
+        }),
+      },
+      schemaGroupId: validateOnlyResourceId,
+      validateOnly: true,
+    });
+    matchedTableList.value = result.matchedTables;
+    unmatchedTableList.value = result.unmatchedTables;
+  } catch (error) {
+    matchedTableList.value = [];
     unmatchedTableList.value = [];
-  },
-  {
-    immediate: true,
+    console.error(error);
+    // do nothing else.
   }
-);
+  state.isRequesting = false;
+}, 500);
+
+watch(() => props, updateMatchingState, {
+  immediate: true,
+  deep: true,
+});
 </script>

@@ -20,34 +20,36 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	ProjectService_GetProject_FullMethodName             = "/bytebase.v1.ProjectService/GetProject"
-	ProjectService_ListProjects_FullMethodName           = "/bytebase.v1.ProjectService/ListProjects"
-	ProjectService_SearchProjects_FullMethodName         = "/bytebase.v1.ProjectService/SearchProjects"
-	ProjectService_CreateProject_FullMethodName          = "/bytebase.v1.ProjectService/CreateProject"
-	ProjectService_UpdateProject_FullMethodName          = "/bytebase.v1.ProjectService/UpdateProject"
-	ProjectService_DeleteProject_FullMethodName          = "/bytebase.v1.ProjectService/DeleteProject"
-	ProjectService_UndeleteProject_FullMethodName        = "/bytebase.v1.ProjectService/UndeleteProject"
-	ProjectService_GetIamPolicy_FullMethodName           = "/bytebase.v1.ProjectService/GetIamPolicy"
-	ProjectService_BatchGetIamPolicy_FullMethodName      = "/bytebase.v1.ProjectService/BatchGetIamPolicy"
-	ProjectService_SetIamPolicy_FullMethodName           = "/bytebase.v1.ProjectService/SetIamPolicy"
-	ProjectService_GetDeploymentConfig_FullMethodName    = "/bytebase.v1.ProjectService/GetDeploymentConfig"
-	ProjectService_UpdateDeploymentConfig_FullMethodName = "/bytebase.v1.ProjectService/UpdateDeploymentConfig"
-	ProjectService_AddWebhook_FullMethodName             = "/bytebase.v1.ProjectService/AddWebhook"
-	ProjectService_UpdateWebhook_FullMethodName          = "/bytebase.v1.ProjectService/UpdateWebhook"
-	ProjectService_RemoveWebhook_FullMethodName          = "/bytebase.v1.ProjectService/RemoveWebhook"
-	ProjectService_TestWebhook_FullMethodName            = "/bytebase.v1.ProjectService/TestWebhook"
-	ProjectService_SetProjectGitOpsInfo_FullMethodName   = "/bytebase.v1.ProjectService/SetProjectGitOpsInfo"
-	ProjectService_GetProjectGitOpsInfo_FullMethodName   = "/bytebase.v1.ProjectService/GetProjectGitOpsInfo"
-	ProjectService_ListDatabaseGroups_FullMethodName     = "/bytebase.v1.ProjectService/ListDatabaseGroups"
-	ProjectService_GetDatabaseGroup_FullMethodName       = "/bytebase.v1.ProjectService/GetDatabaseGroup"
-	ProjectService_CreateDatabaseGroup_FullMethodName    = "/bytebase.v1.ProjectService/CreateDatabaseGroup"
-	ProjectService_UpdateDatabaseGroup_FullMethodName    = "/bytebase.v1.ProjectService/UpdateDatabaseGroup"
-	ProjectService_DeleteDatabaseGroup_FullMethodName    = "/bytebase.v1.ProjectService/DeleteDatabaseGroup"
-	ProjectService_ListSchemaGroups_FullMethodName       = "/bytebase.v1.ProjectService/ListSchemaGroups"
-	ProjectService_GetSchemaGroup_FullMethodName         = "/bytebase.v1.ProjectService/GetSchemaGroup"
-	ProjectService_CreateSchemaGroup_FullMethodName      = "/bytebase.v1.ProjectService/CreateSchemaGroup"
-	ProjectService_UpdateSchemaGroup_FullMethodName      = "/bytebase.v1.ProjectService/UpdateSchemaGroup"
-	ProjectService_DeleteSchemaGroup_FullMethodName      = "/bytebase.v1.ProjectService/DeleteSchemaGroup"
+	ProjectService_GetProject_FullMethodName              = "/bytebase.v1.ProjectService/GetProject"
+	ProjectService_ListProjects_FullMethodName            = "/bytebase.v1.ProjectService/ListProjects"
+	ProjectService_SearchProjects_FullMethodName          = "/bytebase.v1.ProjectService/SearchProjects"
+	ProjectService_CreateProject_FullMethodName           = "/bytebase.v1.ProjectService/CreateProject"
+	ProjectService_UpdateProject_FullMethodName           = "/bytebase.v1.ProjectService/UpdateProject"
+	ProjectService_DeleteProject_FullMethodName           = "/bytebase.v1.ProjectService/DeleteProject"
+	ProjectService_UndeleteProject_FullMethodName         = "/bytebase.v1.ProjectService/UndeleteProject"
+	ProjectService_GetIamPolicy_FullMethodName            = "/bytebase.v1.ProjectService/GetIamPolicy"
+	ProjectService_BatchGetIamPolicy_FullMethodName       = "/bytebase.v1.ProjectService/BatchGetIamPolicy"
+	ProjectService_SetIamPolicy_FullMethodName            = "/bytebase.v1.ProjectService/SetIamPolicy"
+	ProjectService_GetDeploymentConfig_FullMethodName     = "/bytebase.v1.ProjectService/GetDeploymentConfig"
+	ProjectService_UpdateDeploymentConfig_FullMethodName  = "/bytebase.v1.ProjectService/UpdateDeploymentConfig"
+	ProjectService_AddWebhook_FullMethodName              = "/bytebase.v1.ProjectService/AddWebhook"
+	ProjectService_UpdateWebhook_FullMethodName           = "/bytebase.v1.ProjectService/UpdateWebhook"
+	ProjectService_RemoveWebhook_FullMethodName           = "/bytebase.v1.ProjectService/RemoveWebhook"
+	ProjectService_TestWebhook_FullMethodName             = "/bytebase.v1.ProjectService/TestWebhook"
+	ProjectService_UpdateProjectGitOpsInfo_FullMethodName = "/bytebase.v1.ProjectService/UpdateProjectGitOpsInfo"
+	ProjectService_UnsetProjectGitOpsInfo_FullMethodName  = "/bytebase.v1.ProjectService/UnsetProjectGitOpsInfo"
+	ProjectService_SetupProjectSQLReviewCI_FullMethodName = "/bytebase.v1.ProjectService/SetupProjectSQLReviewCI"
+	ProjectService_GetProjectGitOpsInfo_FullMethodName    = "/bytebase.v1.ProjectService/GetProjectGitOpsInfo"
+	ProjectService_ListDatabaseGroups_FullMethodName      = "/bytebase.v1.ProjectService/ListDatabaseGroups"
+	ProjectService_GetDatabaseGroup_FullMethodName        = "/bytebase.v1.ProjectService/GetDatabaseGroup"
+	ProjectService_CreateDatabaseGroup_FullMethodName     = "/bytebase.v1.ProjectService/CreateDatabaseGroup"
+	ProjectService_UpdateDatabaseGroup_FullMethodName     = "/bytebase.v1.ProjectService/UpdateDatabaseGroup"
+	ProjectService_DeleteDatabaseGroup_FullMethodName     = "/bytebase.v1.ProjectService/DeleteDatabaseGroup"
+	ProjectService_ListSchemaGroups_FullMethodName        = "/bytebase.v1.ProjectService/ListSchemaGroups"
+	ProjectService_GetSchemaGroup_FullMethodName          = "/bytebase.v1.ProjectService/GetSchemaGroup"
+	ProjectService_CreateSchemaGroup_FullMethodName       = "/bytebase.v1.ProjectService/CreateSchemaGroup"
+	ProjectService_UpdateSchemaGroup_FullMethodName       = "/bytebase.v1.ProjectService/UpdateSchemaGroup"
+	ProjectService_DeleteSchemaGroup_FullMethodName       = "/bytebase.v1.ProjectService/DeleteSchemaGroup"
 )
 
 // ProjectServiceClient is the client API for ProjectService service.
@@ -71,8 +73,10 @@ type ProjectServiceClient interface {
 	UpdateWebhook(ctx context.Context, in *UpdateWebhookRequest, opts ...grpc.CallOption) (*Project, error)
 	RemoveWebhook(ctx context.Context, in *RemoveWebhookRequest, opts ...grpc.CallOption) (*Project, error)
 	TestWebhook(ctx context.Context, in *TestWebhookRequest, opts ...grpc.CallOption) (*TestWebhookResponse, error)
-	SetProjectGitOpsInfo(ctx context.Context, in *SetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error)
-	GetProjectGitOpsInfo(ctx context.Context, in *SetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error)
+	UpdateProjectGitOpsInfo(ctx context.Context, in *UpdateProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error)
+	UnsetProjectGitOpsInfo(ctx context.Context, in *UnsetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	SetupProjectSQLReviewCI(ctx context.Context, in *SetupSQLReviewCIRequest, opts ...grpc.CallOption) (*SetupSQLReviewCIResponse, error)
+	GetProjectGitOpsInfo(ctx context.Context, in *GetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error)
 	ListDatabaseGroups(ctx context.Context, in *ListDatabaseGroupsRequest, opts ...grpc.CallOption) (*ListDatabaseGroupsResponse, error)
 	GetDatabaseGroup(ctx context.Context, in *GetDatabaseGroupRequest, opts ...grpc.CallOption) (*DatabaseGroup, error)
 	CreateDatabaseGroup(ctx context.Context, in *CreateDatabaseGroupRequest, opts ...grpc.CallOption) (*DatabaseGroup, error)
@@ -237,16 +241,34 @@ func (c *projectServiceClient) TestWebhook(ctx context.Context, in *TestWebhookR
 	return out, nil
 }
 
-func (c *projectServiceClient) SetProjectGitOpsInfo(ctx context.Context, in *SetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error) {
+func (c *projectServiceClient) UpdateProjectGitOpsInfo(ctx context.Context, in *UpdateProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error) {
 	out := new(ProjectGitOpsInfo)
-	err := c.cc.Invoke(ctx, ProjectService_SetProjectGitOpsInfo_FullMethodName, in, out, opts...)
+	err := c.cc.Invoke(ctx, ProjectService_UpdateProjectGitOpsInfo_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *projectServiceClient) GetProjectGitOpsInfo(ctx context.Context, in *SetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error) {
+func (c *projectServiceClient) UnsetProjectGitOpsInfo(ctx context.Context, in *UnsetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, ProjectService_UnsetProjectGitOpsInfo_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *projectServiceClient) SetupProjectSQLReviewCI(ctx context.Context, in *SetupSQLReviewCIRequest, opts ...grpc.CallOption) (*SetupSQLReviewCIResponse, error) {
+	out := new(SetupSQLReviewCIResponse)
+	err := c.cc.Invoke(ctx, ProjectService_SetupProjectSQLReviewCI_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *projectServiceClient) GetProjectGitOpsInfo(ctx context.Context, in *GetProjectGitOpsInfoRequest, opts ...grpc.CallOption) (*ProjectGitOpsInfo, error) {
 	out := new(ProjectGitOpsInfo)
 	err := c.cc.Invoke(ctx, ProjectService_GetProjectGitOpsInfo_FullMethodName, in, out, opts...)
 	if err != nil {
@@ -366,8 +388,10 @@ type ProjectServiceServer interface {
 	UpdateWebhook(context.Context, *UpdateWebhookRequest) (*Project, error)
 	RemoveWebhook(context.Context, *RemoveWebhookRequest) (*Project, error)
 	TestWebhook(context.Context, *TestWebhookRequest) (*TestWebhookResponse, error)
-	SetProjectGitOpsInfo(context.Context, *SetProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error)
-	GetProjectGitOpsInfo(context.Context, *SetProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error)
+	UpdateProjectGitOpsInfo(context.Context, *UpdateProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error)
+	UnsetProjectGitOpsInfo(context.Context, *UnsetProjectGitOpsInfoRequest) (*emptypb.Empty, error)
+	SetupProjectSQLReviewCI(context.Context, *SetupSQLReviewCIRequest) (*SetupSQLReviewCIResponse, error)
+	GetProjectGitOpsInfo(context.Context, *GetProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error)
 	ListDatabaseGroups(context.Context, *ListDatabaseGroupsRequest) (*ListDatabaseGroupsResponse, error)
 	GetDatabaseGroup(context.Context, *GetDatabaseGroupRequest) (*DatabaseGroup, error)
 	CreateDatabaseGroup(context.Context, *CreateDatabaseGroupRequest) (*DatabaseGroup, error)
@@ -433,10 +457,16 @@ func (UnimplementedProjectServiceServer) RemoveWebhook(context.Context, *RemoveW
 func (UnimplementedProjectServiceServer) TestWebhook(context.Context, *TestWebhookRequest) (*TestWebhookResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TestWebhook not implemented")
 }
-func (UnimplementedProjectServiceServer) SetProjectGitOpsInfo(context.Context, *SetProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SetProjectGitOpsInfo not implemented")
+func (UnimplementedProjectServiceServer) UpdateProjectGitOpsInfo(context.Context, *UpdateProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateProjectGitOpsInfo not implemented")
 }
-func (UnimplementedProjectServiceServer) GetProjectGitOpsInfo(context.Context, *SetProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error) {
+func (UnimplementedProjectServiceServer) UnsetProjectGitOpsInfo(context.Context, *UnsetProjectGitOpsInfoRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnsetProjectGitOpsInfo not implemented")
+}
+func (UnimplementedProjectServiceServer) SetupProjectSQLReviewCI(context.Context, *SetupSQLReviewCIRequest) (*SetupSQLReviewCIResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetupProjectSQLReviewCI not implemented")
+}
+func (UnimplementedProjectServiceServer) GetProjectGitOpsInfo(context.Context, *GetProjectGitOpsInfoRequest) (*ProjectGitOpsInfo, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetProjectGitOpsInfo not implemented")
 }
 func (UnimplementedProjectServiceServer) ListDatabaseGroups(context.Context, *ListDatabaseGroupsRequest) (*ListDatabaseGroupsResponse, error) {
@@ -770,26 +800,62 @@ func _ProjectService_TestWebhook_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ProjectService_SetProjectGitOpsInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetProjectGitOpsInfoRequest)
+func _ProjectService_UpdateProjectGitOpsInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateProjectGitOpsInfoRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ProjectServiceServer).SetProjectGitOpsInfo(ctx, in)
+		return srv.(ProjectServiceServer).UpdateProjectGitOpsInfo(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ProjectService_SetProjectGitOpsInfo_FullMethodName,
+		FullMethod: ProjectService_UpdateProjectGitOpsInfo_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ProjectServiceServer).SetProjectGitOpsInfo(ctx, req.(*SetProjectGitOpsInfoRequest))
+		return srv.(ProjectServiceServer).UpdateProjectGitOpsInfo(ctx, req.(*UpdateProjectGitOpsInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProjectService_UnsetProjectGitOpsInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnsetProjectGitOpsInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProjectServiceServer).UnsetProjectGitOpsInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProjectService_UnsetProjectGitOpsInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProjectServiceServer).UnsetProjectGitOpsInfo(ctx, req.(*UnsetProjectGitOpsInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProjectService_SetupProjectSQLReviewCI_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetupSQLReviewCIRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProjectServiceServer).SetupProjectSQLReviewCI(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProjectService_SetupProjectSQLReviewCI_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProjectServiceServer).SetupProjectSQLReviewCI(ctx, req.(*SetupSQLReviewCIRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _ProjectService_GetProjectGitOpsInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetProjectGitOpsInfoRequest)
+	in := new(GetProjectGitOpsInfoRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -801,7 +867,7 @@ func _ProjectService_GetProjectGitOpsInfo_Handler(srv interface{}, ctx context.C
 		FullMethod: ProjectService_GetProjectGitOpsInfo_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ProjectServiceServer).GetProjectGitOpsInfo(ctx, req.(*SetProjectGitOpsInfoRequest))
+		return srv.(ProjectServiceServer).GetProjectGitOpsInfo(ctx, req.(*GetProjectGitOpsInfoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1058,8 +1124,16 @@ var ProjectService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ProjectService_TestWebhook_Handler,
 		},
 		{
-			MethodName: "SetProjectGitOpsInfo",
-			Handler:    _ProjectService_SetProjectGitOpsInfo_Handler,
+			MethodName: "UpdateProjectGitOpsInfo",
+			Handler:    _ProjectService_UpdateProjectGitOpsInfo_Handler,
+		},
+		{
+			MethodName: "UnsetProjectGitOpsInfo",
+			Handler:    _ProjectService_UnsetProjectGitOpsInfo_Handler,
+		},
+		{
+			MethodName: "SetupProjectSQLReviewCI",
+			Handler:    _ProjectService_SetupProjectSQLReviewCI_Handler,
 		},
 		{
 			MethodName: "GetProjectGitOpsInfo",

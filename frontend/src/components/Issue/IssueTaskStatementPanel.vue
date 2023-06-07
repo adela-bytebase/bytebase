@@ -59,10 +59,10 @@
       <button
         v-if="shouldShowStatementEditButtonForUI"
         type="button"
-        class="btn-icon"
+        class="px-4 py-2 cursor-pointer border border-control-border rounded text-control hover:bg-control-bg-hover text-sm font-normal focus:ring-control focus:outline-none focus-visible:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed"
         @click.prevent="beginEdit"
       >
-        <heroicons-solid:pencil class="h-5 w-5" />
+        {{ $t("common.edit") }}
       </button>
 
       <template v-else-if="!create">
@@ -99,7 +99,7 @@
   >
     <MonacoEditor
       ref="editorRef"
-      class="w-full max-h-[360px]"
+      class="w-full h-auto max-h-[360px] min-h-[120px]"
       data-label="bb-issue-sql-editor"
       :value="state.editStatement"
       :readonly="readonly"
@@ -128,13 +128,13 @@ import {
   pushNotification,
   useDBSchemaStore,
   useUIStateStore,
-  useDatabaseStore,
   useSheetV1Store,
+  useDatabaseV1Store,
 } from "@/store";
 import { useIssueLogic } from "./logic";
 import {
-  Database,
-  dialectOfEngine,
+  ComposedDatabase,
+  dialectOfEngineV1,
   Issue,
   SQLDialect,
   Task,
@@ -145,16 +145,12 @@ import {
 import {
   getBacktracePayloadWithIssue,
   sheetNameOfTask,
-  useInstanceEditorLanguage,
+  useInstanceV1EditorLanguage,
 } from "@/utils";
 import { TableMetadata } from "@/types/proto/store/database";
 import MonacoEditor from "../MonacoEditor/MonacoEditor.vue";
 import { useSQLAdviceMarkers } from "./logic/useSQLAdviceMarkers";
 import UploadProgressButton from "../misc/UploadProgressButton.vue";
-import {
-  getSheetPathByLegacyProject,
-  getProjectPathByLegacyProject,
-} from "@/store/modules/v1/common";
 import {
   Sheet_Visibility,
   Sheet_Source,
@@ -171,10 +167,7 @@ interface LocalState {
 
 type LocalEditState = Pick<LocalState, "editing" | "editStatement">;
 
-const EDITOR_MIN_HEIGHT = {
-  READONLY: 0, // not limited to keep the UI compact
-  EDITABLE: 120, // ~= 6 lines, a reasonable size to start writing SQL
-};
+const EDITOR_MIN_HEIGHT = 120; // ~= 6 lines, a reasonable size to start writing SQL
 
 defineProps({
   sqlHint: {
@@ -297,9 +290,19 @@ const useTempEditState = (state: LocalState) => {
     },
     { immediate: true }
   );
+
+  const reset = () => {
+    stopWatching && stopWatching();
+
+    if (!create.value) {
+      stopWatching = startWatching();
+    }
+  };
+
+  return reset;
 };
 
-useTempEditState(state);
+const resetTempEditState = useTempEditState(state);
 
 const getOrFetchSheetStatementByName = async (
   sheetName: string | undefined
@@ -322,13 +325,13 @@ const readonly = computed(() => {
 
 const { markers } = useSQLAdviceMarkers();
 
-const language = useInstanceEditorLanguage(
-  computed(() => selectedDatabase.value?.instance)
+const language = useInstanceV1EditorLanguage(
+  computed(() => selectedDatabase.value?.instanceEntity)
 );
 
 const dialect = computed((): SQLDialect => {
   const db = selectedDatabase.value;
-  return dialectOfEngine(db?.instance.engine);
+  return dialectOfEngineV1(db?.instanceEntity.engine);
 });
 
 const formatOnSave = computed({
@@ -413,10 +416,10 @@ watch(
     if (create.value) {
       const taskCreate = task as TaskCreate;
       if (taskCreate.databaseId) {
-        const db = await useDatabaseStore().getOrFetchDatabaseById(
-          taskCreate.databaseId
+        const db = await useDatabaseV1Store().getOrFetchDatabaseByUID(
+          String(taskCreate.databaseId)
         );
-        sheetName = getSheetPathByLegacyProject(db.project, taskCreate.sheetId);
+        sheetName = `${db.project}/sheets/${taskCreate.sheetId}`;
       }
     } else {
       sheetName = sheetNameOfTask(task as Task);
@@ -456,6 +459,7 @@ const saveEdit = async () => {
   if (!selectedDatabase.value) {
     return;
   }
+  resetTempEditState();
   if (allowFormatOnSave.value && formatOnSave.value) {
     editorRef.value?.formatEditorContent();
   }
@@ -493,9 +497,7 @@ const handleUploadFile = async (event: Event, tick: (p: number) => void) => {
   }
 
   state.isUploadingFile = true;
-  const projectName = getProjectPathByLegacyProject(
-    selectedDatabase.value.project
-  );
+  const projectName = selectedDatabase.value.project;
   const { filename, content: statement } = await handleUploadFileEvent(
     event,
     100
@@ -517,12 +519,19 @@ const handleUploadFile = async (event: Event, tick: (p: number) => void) => {
     });
     state.isUploadingFile = false;
 
+    resetTempEditState();
     updateSheetId(sheetV1Store.getSheetUid(sheet.name));
     await updateStatement(statement);
     state.editing = false;
     if (selectedTask.value) {
       updateEditorHeight();
     }
+
+    pushNotification({
+      module: "bytebase",
+      style: "INFO",
+      title: "File upload success",
+    });
   };
 
   return new Promise((resolve, reject) => {
@@ -621,8 +630,6 @@ const onStatementChange = (value: string) => {
     // time the user types.
     updateStatement(state.editStatement);
   }
-
-  if (selectedTask.value) updateEditorHeight();
 };
 
 // Handle and update monaco editor auto completion context.
@@ -638,14 +645,18 @@ const useDatabaseAndTableList = () => {
   watch(
     databaseList,
     (list) => {
-      list.forEach((db) => dbSchemaStore.getOrFetchDatabaseMetadataById(db.id));
+      list.forEach((db) => {
+        if (db.uid !== String(UNKNOWN_ID)) {
+          dbSchemaStore.getOrFetchDatabaseMetadataById(Number(db.uid));
+        }
+      });
     },
     { immediate: true }
   );
 
   const tableList = computed(() => {
     return databaseList.value
-      .map((item) => dbSchemaStore.getTableListByDatabaseId(item.id))
+      .map((item) => dbSchemaStore.getTableListByDatabaseId(Number(item.uid)))
       .flat();
   });
 
@@ -655,14 +666,14 @@ const useDatabaseAndTableList = () => {
 const { databaseList, tableList } = useDatabaseAndTableList();
 
 const handleUpdateEditorAutoCompletionContext = async () => {
-  const databaseMap: Map<Database, TableMetadata[]> = new Map();
+  const databaseMap: Map<ComposedDatabase, TableMetadata[]> = new Map();
   for (const database of databaseList.value) {
     const tableList = await dbSchemaStore.getOrFetchTableListByDatabaseId(
-      database.id
+      Number(database.uid)
     );
     databaseMap.set(database, tableList);
   }
-  editorRef.value?.setEditorAutoCompletionContext(databaseMap);
+  editorRef.value?.setEditorAutoCompletionContextV1(databaseMap);
 };
 
 const updateEditorHeight = () => {
@@ -670,8 +681,8 @@ const updateEditorHeight = () => {
     const contentHeight =
       editorRef.value?.editorInstance?.getContentHeight() as number;
     let actualHeight = contentHeight;
-    if (state.editing && actualHeight < EDITOR_MIN_HEIGHT.EDITABLE) {
-      actualHeight = EDITOR_MIN_HEIGHT.EDITABLE;
+    if (actualHeight < EDITOR_MIN_HEIGHT) {
+      actualHeight = EDITOR_MIN_HEIGHT;
     }
     editorRef.value?.setEditorContentHeight(actualHeight);
   });
@@ -685,4 +696,7 @@ const handleMonacoEditorReady = () => {
 watch([databaseList, tableList], () => {
   handleUpdateEditorAutoCompletionContext();
 });
+
+watch(() => state.editing, updateEditorHeight);
+watch(() => state.editStatement, updateEditorHeight);
 </script>

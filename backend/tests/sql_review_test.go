@@ -12,12 +12,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	// Import pg driver.
 	// init() in pgx will register it's pgx driver.
+	"github.com/google/go-cmp/cmp"
 	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"gopkg.in/yaml.v3"
 
@@ -30,15 +33,17 @@ import (
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
-var noSQLReviewPolicy = []api.TaskCheckResult{
-	{
-		Status:    api.TaskCheckStatusSuccess,
-		Namespace: api.AdvisorNamespace,
-		Code:      common.Ok.Int(),
-		Title:     "Empty SQL review policy or disabled",
-		Content:   "",
-	},
-}
+var (
+	noSQLReviewPolicy = []api.TaskCheckResult{
+		{
+			Status:    api.TaskCheckStatusSuccess,
+			Namespace: api.AdvisorNamespace,
+			Code:      common.Ok.Int(),
+			Title:     "Empty SQL review policy or disabled",
+			Content:   "",
+		},
+	}
+)
 
 type test struct {
 	Statement string
@@ -114,7 +119,7 @@ func TestSQLReviewForPostgreSQL(t *testing.T) {
 	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	reviewPolicy, err := prodTemplateSQLReviewPolicyForPostgreSQL()
@@ -153,26 +158,16 @@ func TestSQLReviewForPostgreSQL(t *testing.T) {
 		},
 	})
 	a.NoError(err)
-	instanceUID, err := strconv.Atoi(instance.Uid)
-	a.NoError(err)
-
-	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
-	})
-	a.NoError(err)
-	a.Nil(databases)
 
 	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "bytebase", nil)
 	a.NoError(err)
 
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
+	database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+		Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName),
 	})
 	a.NoError(err)
-	a.Equal(1, len(databases))
-
-	database := databases[0]
-	a.Equal(instanceUID, database.Instance.ID)
+	databaseUID, err := strconv.Atoi(database.Uid)
+	a.NoError(err)
 
 	yamlFile, err := os.Open(filepath)
 	a.NoError(err)
@@ -185,7 +180,7 @@ func TestSQLReviewForPostgreSQL(t *testing.T) {
 	a.NoError(err)
 
 	for i, t := range tests {
-		result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, database.ID, projectUID, t.Statement, t.Run)
+		result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, databaseUID, projectUID, project.Name, t.Statement, t.Run)
 		if record {
 			tests[i].Result = result
 		} else {
@@ -210,7 +205,7 @@ func TestSQLReviewForPostgreSQL(t *testing.T) {
 	})
 	a.NoError(err)
 
-	result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, database.ID, projectUID, statements[0], false)
+	result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, databaseUID, projectUID, project.Name, statements[0], false)
 	a.Equal(noSQLReviewPolicy, result)
 
 	// delete the SQL review policy
@@ -219,7 +214,7 @@ func TestSQLReviewForPostgreSQL(t *testing.T) {
 	})
 	a.NoError(err)
 
-	result = createIssueAndReturnSQLReviewResult(ctx, a, ctl, database.ID, projectUID, statements[0], false)
+	result = createIssueAndReturnSQLReviewResult(ctx, a, ctl, databaseUID, projectUID, project.Name, statements[0], false)
 	a.Equal(noSQLReviewPolicy, result)
 }
 
@@ -266,6 +261,18 @@ func TestSQLReviewForMySQL(t *testing.T) {
 			SELECT 8 AS id, 'h' AS name WHERE 1=1 UNION ALL
 			SELECT 9 AS id, 'i' AS name WHERE 1=1 UNION ALL
 			SELECT 10 AS id, 'j' AS name WHERE 1=1) value_table`
+		wantQueryResult = &v1pb.QueryResult{
+			ColumnNames:     []string{"count(*)"},
+			ColumnTypeNames: []string{"BIGINT"},
+			Masked:          []bool{false},
+			Rows: []*v1pb.QueryRow{
+				{
+					Values: []*v1pb.RowValue{
+						{Kind: &v1pb.RowValue_StringValue{StringValue: "4"}},
+					},
+				},
+			},
+		}
 	)
 
 	t.Parallel()
@@ -306,7 +313,7 @@ func TestSQLReviewForMySQL(t *testing.T) {
 	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	reviewPolicy, err := prodTemplateSQLReviewPolicyForMySQL()
@@ -345,31 +352,16 @@ func TestSQLReviewForMySQL(t *testing.T) {
 		},
 	})
 	a.NoError(err)
-	instanceUID, err := strconv.Atoi(instance.Uid)
-	a.NoError(err)
-
-	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
-	})
-	a.NoError(err)
-	a.Nil(databases)
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		InstanceID: &instanceUID,
-	})
-	a.NoError(err)
-	a.Nil(databases)
 
 	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil)
 	a.NoError(err)
 
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
+	database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+		Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName),
 	})
 	a.NoError(err)
-	a.Equal(1, len(databases))
-
-	database := databases[0]
-	a.Equal(instanceUID, database.Instance.ID)
+	databaseUID, err := strconv.Atoi(database.Uid)
+	a.NoError(err)
 
 	yamlFile, err := os.Open(filepath)
 	a.NoError(err)
@@ -382,7 +374,7 @@ func TestSQLReviewForMySQL(t *testing.T) {
 	a.NoError(err)
 
 	for i, t := range tests {
-		result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, database.ID, projectUID, t.Statement, t.Run)
+		result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, databaseUID, projectUID, project.Name, t.Statement, t.Run)
 		if record {
 			tests[i].Result = result
 		} else {
@@ -413,17 +405,27 @@ func TestSQLReviewForMySQL(t *testing.T) {
 		`INSERT INTO test(id, name) VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd');`,
 	}
 	for _, stmt := range initialStmts {
-		createIssueAndReturnSQLReviewResult(ctx, a, ctl, database.ID, projectUID, stmt, true /* wait */)
+		createIssueAndReturnSQLReviewResult(ctx, a, ctl, databaseUID, projectUID, project.Name, stmt, true /* wait */)
 	}
 	countSQL := "SELECT count(*) FROM test WHERE 1=1;"
 	dmlSQL := "INSERT INTO test SELECT * FROM " + valueTable
-	origin, err := ctl.query(instance, databaseName, countSQL)
+	originQueryResp, err := ctl.sqlServiceClient.Query(ctx, &v1pb.QueryRequest{
+		Name: instance.Name, ConnectionDatabase: databaseName, Statement: countSQL,
+	})
 	a.NoError(err)
-	a.Equal("[[\"count(*)\"],[\"BIGINT\"],[[\"4\"]],[false]]", origin)
-	createIssueAndReturnSQLReviewResult(ctx, a, ctl, database.ID, projectUID, dmlSQL, false /* wait */)
-	finial, err := ctl.query(instance, databaseName, countSQL)
+	a.Equal(1, len(originQueryResp.Results))
+	diff := cmp.Diff(wantQueryResult, originQueryResp.Results[0], protocmp.Transform())
+	a.Equal("", diff)
+
+	createIssueAndReturnSQLReviewResult(ctx, a, ctl, databaseUID, projectUID, project.Name, dmlSQL, false /* wait */)
+
+	finalQueryResp, err := ctl.sqlServiceClient.Query(ctx, &v1pb.QueryRequest{
+		Name: instance.Name, ConnectionDatabase: databaseName, Statement: countSQL,
+	})
 	a.NoError(err)
-	a.Equal(origin, finial)
+	a.Equal(1, len(finalQueryResp.Results))
+	diff = cmp.Diff(wantQueryResult, finalQueryResp.Results[0], protocmp.Transform())
+	a.Equal("", diff)
 
 	// disable the SQL review policy
 	policy.Enforce = false
@@ -441,19 +443,23 @@ func TestSQLReviewForMySQL(t *testing.T) {
 	})
 	a.NoError(err)
 
-	result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, database.ID, projectUID, statements[0], false)
+	result := createIssueAndReturnSQLReviewResult(ctx, a, ctl, databaseUID, projectUID, project.Name, statements[0], false)
 	a.Equal(noSQLReviewPolicy, result)
 }
 
-func createIssueAndReturnSQLReviewResult(ctx context.Context, a *require.Assertions, ctl *controller, databaseID int, projectID int, statement string, wait bool) []api.TaskCheckResult {
-	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  projectID,
-		Name:       "statement",
-		Statement:  statement,
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+func createIssueAndReturnSQLReviewResult(ctx context.Context, a *require.Assertions, ctl *controller, databaseID int, projectID int, projectName, statement string, wait bool) []api.TaskCheckResult {
+	sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+		Parent: projectName,
+		Sheet: &v1pb.Sheet{
+			Title:      "statement",
+			Content:    []byte(statement),
+			Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+			Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+			Type:       v1pb.Sheet_TYPE_SQL,
+		},
 	})
+	a.NoError(err)
+	sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", projectName)))
 	a.NoError(err)
 
 	createContext, err := json.Marshal(&api.MigrationContext{
@@ -461,7 +467,7 @@ func createIssueAndReturnSQLReviewResult(ctx context.Context, a *require.Asserti
 			{
 				MigrationType: db.Migrate,
 				DatabaseID:    databaseID,
-				SheetID:       sheet.ID,
+				SheetID:       sheetUID,
 			},
 		},
 	})

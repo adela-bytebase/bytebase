@@ -1,13 +1,16 @@
 package parser
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
 	"sort"
 	"strings"
 
+	pgquery "github.com/pganalyze/pg_query_go/v2"
 	tidbparser "github.com/pingcap/tidb/parser"
 	tidbast "github.com/pingcap/tidb/parser/ast"
 	"github.com/pingcap/tidb/parser/model"
@@ -23,6 +26,149 @@ type SingleSQL struct {
 	LastLine int
 	// The sql is empty, such as `/* comments */;` or just `;`.
 	Empty bool
+}
+
+// SchemaResource is the resource of the schema.
+type SchemaResource struct {
+	Database string
+	Schema   string
+	Table    string
+}
+
+// String implements fmt.Stringer interface.
+func (r SchemaResource) String() string {
+	return fmt.Sprintf("%s.%s.%s", r.Database, r.Schema, r.Table)
+}
+
+// Pretty returns the pretty string of the resource.
+func (r SchemaResource) Pretty() string {
+	list := make([]string, 0, 3)
+	if r.Database != "" {
+		list = append(list, r.Database)
+	}
+	if r.Schema != "" {
+		list = append(list, r.Schema)
+	}
+	if r.Table != "" {
+		list = append(list, r.Table)
+	}
+	return strings.Join(list, ".")
+}
+
+// ExtractResourceList extracts the resource list from the SQL.
+func ExtractResourceList(engineType EngineType, currentDatabase string, currentSchema string, sql string) ([]SchemaResource, error) {
+	switch engineType {
+	case MySQL, TiDB, MariaDB, OceanBase:
+		return extractMySQLResourceList(currentDatabase, sql)
+	case Oracle:
+		// The resource list for Oracle may contains table, view and temporary table.
+		return extractOracleResourceList(currentDatabase, currentSchema, sql)
+	case Postgres:
+		// The resource list for Postgres may contains table, view and temporary table.
+		return extractPostgresResourceList(currentDatabase, "public", sql)
+	default:
+		if currentDatabase == "" {
+			return nil, errors.Errorf("database must be specified for engine type: %s", engineType)
+		}
+
+		return []SchemaResource{{Database: currentDatabase}}, nil
+	}
+}
+
+func extractPostgresResourceList(currentDatabase string, currentSchema string, sql string) ([]SchemaResource, error) {
+	jsonText, err := pgquery.ParseToJSON(sql)
+	if err != nil {
+		return nil, err
+	}
+
+	var jsonData map[string]any
+
+	if err := json.Unmarshal([]byte(jsonText), &jsonData); err != nil {
+		return nil, err
+	}
+
+	resourceMap := make(map[string]SchemaResource)
+	list := extractRangeVarFromJSON(currentDatabase, currentSchema, jsonData)
+	for _, resource := range list {
+		resourceMap[resource.String()] = resource
+	}
+	list = []SchemaResource{}
+	for _, resource := range resourceMap {
+		list = append(list, resource)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].String() < list[j].String()
+	})
+	return list, nil
+}
+
+func extractRangeVarFromJSON(currentDatabase string, currentSchema string, jsonData map[string]any) []SchemaResource {
+	var result []SchemaResource
+	if jsonData["RangeVar"] != nil {
+		resource := SchemaResource{
+			Database: currentDatabase,
+			Schema:   currentSchema,
+		}
+		rangeVar := jsonData["RangeVar"].(map[string]any)
+		if rangeVar["schemaname"] != nil {
+			resource.Schema = rangeVar["schemaname"].(string)
+		}
+		if rangeVar["relname"] != nil {
+			resource.Table = rangeVar["relname"].(string)
+		}
+		result = append(result, resource)
+	}
+
+	for _, value := range jsonData {
+		switch v := value.(type) {
+		case map[string]any:
+			result = append(result, extractRangeVarFromJSON(currentDatabase, currentSchema, v)...)
+		case []any:
+			for _, item := range v {
+				if m, ok := item.(map[string]any); ok {
+					result = append(result, extractRangeVarFromJSON(currentDatabase, currentSchema, m)...)
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+func extractMySQLResourceList(currentDatabase string, sql string) ([]SchemaResource, error) {
+	nodes, err := ParseMySQL(sql, "", "")
+	if err != nil {
+		return nil, err
+	}
+
+	resourceMap := make(map[string]SchemaResource)
+
+	for _, node := range nodes {
+		tableList := ExtractMySQLTableList(node, false /* asName */)
+		for _, table := range tableList {
+			resource := SchemaResource{
+				Database: table.Schema.O,
+				Schema:   "",
+				Table:    table.Name.O,
+			}
+			if resource.Database == "" {
+				resource.Database = currentDatabase
+			}
+			if _, ok := resourceMap[resource.String()]; !ok {
+				resourceMap[resource.String()] = resource
+			}
+		}
+	}
+
+	resourceList := make([]SchemaResource, 0, len(resourceMap))
+	for _, resource := range resourceMap {
+		resourceList = append(resourceList, resource)
+	}
+	sort.Slice(resourceList, func(i, j int) bool {
+		return resourceList[i].String() < resourceList[j].String()
+	})
+
+	return resourceList, nil
 }
 
 // GetSQLFingerprint returns the fingerprint of the SQL.
@@ -246,7 +392,14 @@ func SplitMultiSQL(engineType EngineType, statement string) ([]SingleSQL, error)
 		t := newTokenizer(statement)
 		list, err = t.splitMySQLMultiSQL()
 	default:
-		return nil, errors.Errorf("engine type is not supported: %s", engineType)
+		err = applyMultiStatements(strings.NewReader(statement), func(sql string) error {
+			list = append(list, SingleSQL{
+				Text:     sql,
+				LastLine: 0,
+				Empty:    false,
+			})
+			return nil
+		})
 	}
 
 	if err != nil {
@@ -264,6 +417,92 @@ func SplitMultiSQL(engineType EngineType, statement string) ([]SingleSQL, error)
 		result = append(result, sql)
 	}
 	return result, nil
+}
+
+// applyMultiStatements will apply the split statements from scanner.
+// This function only used for SQLite, snowflake.
+// For MySQL and PostgreSQL, use parser.SplitMultiSQLStream instead.
+// Copy from plugin/db/util/driverutil.go.
+func applyMultiStatements(sc io.Reader, f func(string) error) error {
+	// TODO(rebelice): use parser/tokenizer to split SQL statements.
+	reader := bufio.NewReader(sc)
+	var sb strings.Builder
+	delimiter := false
+	comment := false
+	done := false
+	for !done {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				done = true
+			} else {
+				return err
+			}
+		}
+		line = strings.TrimRight(line, "\r\n")
+
+		execute := false
+		switch {
+		case strings.HasPrefix(line, "/*"):
+			if strings.Contains(line, "*/") {
+				if !strings.HasSuffix(line, "*/") {
+					return errors.Errorf("`*/` must be the end of the line; new statement should start as a new line")
+				}
+			} else {
+				comment = true
+			}
+			continue
+		case comment && !strings.Contains(line, "*/"):
+			// Skip the line when in comment mode.
+			continue
+		case comment && strings.Contains(line, "*/"):
+			if !strings.HasSuffix(line, "*/") {
+				return errors.Errorf("`*/` must be the end of the line; new statement should start as a new line")
+			}
+			comment = false
+			continue
+		case sb.Len() == 0 && line == "":
+			continue
+		case strings.HasPrefix(line, "--"):
+			continue
+		case line == "DELIMITER ;;":
+			delimiter = true
+			continue
+		case line == "DELIMITER ;" && delimiter:
+			delimiter = false
+			execute = true
+		case strings.HasSuffix(line, ";"):
+			_, _ = sb.WriteString(line)
+			_, _ = sb.WriteString("\n")
+			if !delimiter {
+				execute = true
+			}
+		default:
+			_, _ = sb.WriteString(line)
+			_, _ = sb.WriteString("\n")
+			continue
+		}
+		if execute {
+			s := sb.String()
+			s = strings.Trim(s, "\n\t ")
+			if s != "" {
+				if err := f(s); err != nil {
+					return errors.Wrapf(err, "execute query %q failed", s)
+				}
+			}
+			sb.Reset()
+		}
+	}
+	// Apply the remaining content.
+	s := sb.String()
+	s = strings.Trim(s, "\n\t ")
+	if s != "" {
+		if err := f(s); err != nil {
+			return errors.Wrapf(err, "execute query %q failed", s)
+		}
+	}
+
+	return nil
 }
 
 // SplitMultiSQLStream splits statement stream into a slice of the single SQL.

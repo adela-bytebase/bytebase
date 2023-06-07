@@ -9,8 +9,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"os"
-	"path"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,7 +18,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/advisor"
@@ -34,6 +34,29 @@ import (
 	"github.com/bytebase/bytebase/backend/tests/fake"
 	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
+)
+
+var (
+	bookDataQuery     = `SELECT * FROM book;`
+	bookDataSQLResult = &v1pb.QueryResult{
+		ColumnNames:     []string{"id", "name"},
+		ColumnTypeNames: []string{"INTEGER", "TEXT"},
+		Masked:          []bool{false, false},
+		Rows: []*v1pb.QueryRow{
+			{
+				Values: []*v1pb.RowValue{
+					{Kind: &v1pb.RowValue_Int64Value{Int64Value: 1}},
+					{Kind: &v1pb.RowValue_StringValue{StringValue: "byte"}},
+				},
+			},
+			{
+				Values: []*v1pb.RowValue{
+					{Kind: &v1pb.RowValue_Int64Value{Int64Value: 2}},
+					{Kind: &v1pb.RowValue_NullValue{NullValue: structpb.NullValue_NULL_VALUE}},
+				},
+			},
+		},
+	}
 )
 
 func TestSchemaAndDataUpdate(t *testing.T) {
@@ -61,7 +84,7 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 	instanceDir, err := ctl.provisionSQLiteInstance(instanceRootDir, instanceName)
 	a.NoError(err)
 
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
@@ -74,44 +97,31 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 		},
 	})
 	a.NoError(err)
-	instanceUID, err := strconv.Atoi(instance.Uid)
-	a.NoError(err)
-
-	// Expecting project to have no database.
-	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
-	})
-	a.NoError(err)
-	a.Zero(len(databases))
-	// Expecting instance to have no database.
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		InstanceID: &instanceUID,
-	})
-	a.NoError(err)
-	a.Zero(len(databases))
 
 	// Create an issue that creates a database.
 	databaseName := "testSchemaUpdate"
 	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil /* labelMap */)
 	a.NoError(err)
 
-	// Expecting project to have 1 database.
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
+	database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+		Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName),
 	})
 	a.NoError(err)
-	a.Equal(1, len(databases))
-	database := databases[0]
-	a.Equal(instanceUID, database.Instance.ID)
+	databaseUID, err := strconv.Atoi(database.Uid)
+	a.NoError(err)
 
-	migrationStatementSheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  projectUID,
-		Name:       "migration statement sheet",
-		Statement:  migrationStatement,
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+	sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+		Parent: project.Name,
+		Sheet: &v1pb.Sheet{
+			Title:      "migration statement sheet",
+			Content:    []byte(migrationStatement),
+			Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+			Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+			Type:       v1pb.Sheet_TYPE_SQL,
+		},
 	})
+	a.NoError(err)
+	sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 	a.NoError(err)
 
 	// Create an issue that updates database schema.
@@ -119,8 +129,8 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
-				DatabaseID:    database.ID,
-				SheetID:       migrationStatementSheet.ID,
+				DatabaseID:    databaseUID,
+				SheetID:       sheetUID,
 			},
 		},
 	})
@@ -139,18 +149,22 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 	a.Equal(api.TaskDone, status)
 
 	// Query schema.
-	result, err := ctl.query(instance, databaseName, bookTableQuery)
+	dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/schema", database.Name)})
 	a.NoError(err)
-	a.Equal(bookSchemaSQLResult, result)
+	a.Equal(wantBookSchema, dbMetadata.Schema)
 
-	dataUpdateStatementSheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  projectUID,
-		Name:       "dataUpdateStatement",
-		Statement:  dataUpdateStatement,
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+	sheet, err = ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+		Parent: project.Name,
+		Sheet: &v1pb.Sheet{
+			Title:      "dataUpdateStatement",
+			Content:    []byte(dataUpdateStatement),
+			Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+			Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+			Type:       v1pb.Sheet_TYPE_SQL,
+		},
 	})
+	a.NoError(err)
+	sheetUID, err = strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 	a.NoError(err)
 
 	// Create an issue that updates database data.
@@ -158,8 +172,8 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Data,
-				DatabaseID:    database.ID,
-				SheetID:       dataUpdateStatementSheet.ID,
+				DatabaseID:    databaseUID,
+				SheetID:       sheetUID,
 			},
 		},
 	})
@@ -178,103 +192,96 @@ func TestSchemaAndDataUpdate(t *testing.T) {
 	a.Equal(api.TaskDone, status)
 
 	// Get migration history.
-	histories, err := ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{})
+	resp, err := ctl.databaseServiceClient.ListChangeHistories(ctx, &v1pb.ListChangeHistoriesRequest{
+		Parent: database.Name,
+	})
 	a.NoError(err)
-	wantHistories := []api.MigrationHistory{
+	histories := resp.ChangeHistories
+	wantHistories := []*v1pb.ChangeHistory{
 		{
-			Database:   databaseName,
-			Source:     db.UI,
-			Type:       db.Data,
-			Status:     db.Done,
+			Source:     v1pb.ChangeHistory_UI,
+			Type:       v1pb.ChangeHistory_DATA,
+			Status:     v1pb.ChangeHistory_DONE,
 			Schema:     dumpedSchema,
-			SchemaPrev: dumpedSchema,
+			PrevSchema: dumpedSchema,
 		},
 		{
-			Database:   databaseName,
-			Source:     db.UI,
-			Type:       db.Migrate,
-			Status:     db.Done,
+			Source:     v1pb.ChangeHistory_UI,
+			Type:       v1pb.ChangeHistory_MIGRATE,
+			Status:     v1pb.ChangeHistory_DONE,
 			Schema:     dumpedSchema,
-			SchemaPrev: "",
+			PrevSchema: "",
 		},
 	}
 	a.Equal(len(wantHistories), len(histories))
 	for i, history := range histories {
-		got := api.MigrationHistory{
-			Database:   history.Database,
+		got := &v1pb.ChangeHistory{
 			Source:     history.Source,
 			Type:       history.Type,
 			Status:     history.Status,
 			Schema:     history.Schema,
-			SchemaPrev: history.SchemaPrev,
+			PrevSchema: history.PrevSchema,
 		}
 		want := wantHistories[i]
-		a.Equal(want, got)
+		a.True(proto.Equal(got, want))
 		a.NotEqual(history.Version, "")
 	}
 
 	// Create a manual backup.
-	backup, err := ctl.createBackup(api.BackupCreate{
-		DatabaseID:     database.ID,
-		Name:           "name",
-		Type:           api.BackupTypeManual,
-		StorageBackend: api.BackupStorageBackendLocal,
+	backup, err := ctl.databaseServiceClient.CreateBackup(ctx, &v1pb.CreateBackupRequest{
+		Parent: database.Name,
+		Backup: &v1pb.Backup{
+			Name:       fmt.Sprintf("%s/backups/name", database.Name),
+			BackupType: v1pb.Backup_MANUAL,
+		},
 	})
 	a.NoError(err)
-	err = ctl.waitBackup(backup.DatabaseID, backup.ID)
+	err = ctl.waitBackup(ctx, database.Name, backup.Name)
 	a.NoError(err)
-
-	backupPath := path.Join(dataDir, backup.Path)
-	backupContent, err := os.ReadFile(backupPath)
-	a.NoError(err)
-	a.Equal(string(backupContent), backupDump)
 
 	// Create an issue that creates a database.
 	cloneDatabaseName := "testClone"
 	err = ctl.cloneDatabaseFromBackup(ctx, projectUID, instance, cloneDatabaseName, backup, nil /* labelMap */)
 	a.NoError(err)
+	cloneDatabase, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{Name: fmt.Sprintf("%s/databases/%s", instance.Name, cloneDatabaseName)})
+	a.NoError(err)
 
 	// Query clone database book table data.
-	result, err = ctl.query(instance, cloneDatabaseName, bookDataQuery)
+	queryResp, err := ctl.sqlServiceClient.Query(ctx, &v1pb.QueryRequest{
+		Name: instance.Name, ConnectionDatabase: cloneDatabaseName, Statement: bookDataQuery,
+	})
 	a.NoError(err)
-	a.Equal(bookDataSQLResult, result)
+	a.Equal(1, len(queryResp.Results))
+	diff := cmp.Diff(bookDataSQLResult, queryResp.Results[0], protocmp.Transform())
+	a.Equal("", diff)
+
 	// Query clone migration history.
-	histories, err = ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{Database: &cloneDatabaseName})
+	resp, err = ctl.databaseServiceClient.ListChangeHistories(ctx, &v1pb.ListChangeHistoriesRequest{
+		Parent: cloneDatabase.Name,
+	})
 	a.NoError(err)
-	wantCloneHistories := []api.MigrationHistory{
+	histories = resp.ChangeHistories
+	wantCloneHistories := []*v1pb.ChangeHistory{
 		{
-			Database:   cloneDatabaseName,
-			Source:     db.UI,
-			Type:       db.Branch,
-			Status:     db.Done,
+			Source:     v1pb.ChangeHistory_UI,
+			Type:       v1pb.ChangeHistory_BRANCH,
+			Status:     v1pb.ChangeHistory_DONE,
 			Schema:     dumpedSchema,
-			SchemaPrev: dumpedSchema,
+			PrevSchema: dumpedSchema,
 		},
 	}
 	a.Equal(len(wantCloneHistories), len(histories))
 	for i, history := range histories {
-		got := api.MigrationHistory{
-			Database:   history.Database,
+		got := &v1pb.ChangeHistory{
 			Source:     history.Source,
 			Type:       history.Type,
 			Status:     history.Status,
 			Schema:     history.Schema,
-			SchemaPrev: history.SchemaPrev,
+			PrevSchema: history.PrevSchema,
 		}
 		want := wantCloneHistories[i]
-		a.Equal(want, got)
+		a.True(proto.Equal(got, want))
 	}
-
-	// Create a sheet to mock SQL editor new tab action with UNKNOWN ProjectID.
-	_, err = ctl.createSheet(api.SheetCreate{
-		ProjectID:  -1,
-		DatabaseID: &database.ID,
-		Name:       "my-sheet",
-		Statement:  "SELECT * FROM demo",
-		Visibility: api.PrivateSheet,
-		Source:     api.SheetFromBytebase,
-	})
-	a.NoError(err)
 
 	_, err = ctl.sheetServiceClient.SearchSheets(ctx, &v1pb.SearchSheetsRequest{
 		Parent: "projects/-",
@@ -287,7 +294,7 @@ func TestVCS(t *testing.T) {
 	tests := []struct {
 		name                string
 		vcsProviderCreator  fake.VCSProviderCreator
-		vcsType             vcs.Type
+		vcsType             v1pb.ExternalVersionControl_Type
 		externalID          string
 		repositoryFullPath  string
 		newWebhookPushEvent func(added, modified [][]string, beforeSHA, afterSHA string) any
@@ -295,7 +302,7 @@ func TestVCS(t *testing.T) {
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/schemaUpdate",
 			newWebhookPushEvent: func(added, modified [][]string, beforeSHA, afterSHA string) any {
@@ -322,7 +329,7 @@ func TestVCS(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(added, modified [][]string, beforeSHA, afterSHA string) any {
@@ -361,7 +368,7 @@ func TestVCS(t *testing.T) {
 		{
 			name:               "Bitbucket",
 			vcsProviderCreator: fake.NewBitbucket,
-			vcsType:            vcs.Bitbucket,
+			vcsType:            v1pb.ExternalVersionControl_BITBUCKET,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(added, _ [][]string, beforeSHA, afterSHA string) any {
@@ -443,16 +450,16 @@ func TestVCS(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS.
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project.
@@ -468,22 +475,23 @@ func TestVCS(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
 			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{ENV_ID}}/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: "{{ENV_ID}}/.{{DB_NAME}}##LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
 
 			// Provision an instance.
@@ -491,7 +499,7 @@ func TestVCS(t *testing.T) {
 			instanceDir, err := ctl.provisionSQLiteInstance(t.TempDir(), instanceName)
 			a.NoError(err)
 
-			prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+			prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 			a.NoError(err)
 
 			instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
@@ -504,21 +512,18 @@ func TestVCS(t *testing.T) {
 				},
 			})
 			a.NoError(err)
-			instanceUID, err := strconv.Atoi(instance.Uid)
-			a.NoError(err)
 
 			// Create an issue that creates a database.
 			databaseName := "testVCSSchemaUpdate"
 			err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil /* labelMap */)
 			a.NoError(err)
-			// Expecting project to have 1 database.
-			databases, err := ctl.getDatabases(api.DatabaseFind{
-				ProjectID: &projectUID,
+
+			database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+				Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName),
 			})
 			a.NoError(err)
-			a.Equal(1, len(databases))
-			database := databases[0]
-			a.Equal(instanceUID, database.Instance.ID)
+			databaseUID, err := strconv.Atoi(database.Uid)
+			a.NoError(err)
 
 			// Simulate Git commits for schema update.
 			// We create multiple commits in one push event to test for the behavior of creating one issue per database.
@@ -573,9 +578,9 @@ func TestVCS(t *testing.T) {
 			a.NoError(err)
 
 			// Query schema.
-			result, err := ctl.query(instance, databaseName, bookTableQuery)
+			dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/schema", database.Name)})
 			a.NoError(err)
-			a.Equal(bookSchemaSQLResult, result)
+			a.Equal(want3BookSchema, dbMetadata.Schema)
 
 			// Simulate Git commits for failed data update.
 			gitFile4 := "bbtest/prod/testVCSSchemaUpdate##ver4##data##insert_data.sql"
@@ -645,14 +650,18 @@ func TestVCS(t *testing.T) {
 			)
 			a.NoError(err)
 
-			sheet, err := ctl.createSheet(api.SheetCreate{
-				ProjectID:  projectUID,
-				Name:       "migration statement 4 sheet",
-				Statement:  migrationStatement4,
-				Visibility: api.ProjectSheet,
-				Source:     api.SheetFromBytebaseArtifact,
-				Type:       api.SheetForSQL,
+			sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+				Parent: project.Name,
+				Sheet: &v1pb.Sheet{
+					Title:      "migration statement 4 sheet",
+					Content:    []byte(migrationStatement4),
+					Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+					Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+					Type:       v1pb.Sheet_TYPE_SQL,
+				},
 			})
+			a.NoError(err)
+			sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 			a.NoError(err)
 
 			// Schema change from UI.
@@ -661,8 +670,8 @@ func TestVCS(t *testing.T) {
 				DetailList: []*api.MigrationDetail{
 					{
 						MigrationType: db.Migrate,
-						DatabaseID:    database.ID,
-						SheetID:       sheet.ID,
+						DatabaseID:    databaseUID,
+						SheetID:       sheetUID,
 					},
 				},
 			})
@@ -680,77 +689,69 @@ func TestVCS(t *testing.T) {
 			a.NoError(err)
 			a.Equal(api.TaskDone, status)
 			environmentResourceID := strings.TrimPrefix(prodEnvironment.Name, "environments/")
-			latestFileName := fmt.Sprintf("%s/%s/.%s##LATEST.sql", baseDirectory, environmentResourceID, database.Name)
+			latestFileName := fmt.Sprintf("%s/%s/.%s##LATEST.sql", baseDirectory, environmentResourceID, databaseName)
 			files, err := ctl.vcsProvider.GetFiles(test.externalID, latestFileName)
 			a.NoError(err)
 			a.Len(files, 1)
 			a.Equal(dumpedSchema4, files[latestFileName])
 
 			// Get migration history.
-			histories, err := ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{})
+			resp, err := ctl.databaseServiceClient.ListChangeHistories(ctx, &v1pb.ListChangeHistoriesRequest{
+				Parent: database.Name,
+			})
 			a.NoError(err)
-
-			var historiesDeref []api.MigrationHistory
-			for _, history := range histories {
-				historiesDeref = append(historiesDeref, *history)
-			}
-
-			wantHistories := []api.MigrationHistory{
+			histories := resp.ChangeHistories
+			wantHistories := []*v1pb.ChangeHistory{
 				{
-					Database:   databaseName,
-					Source:     db.UI,
-					Type:       db.Migrate,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_UI,
+					Type:       v1pb.ChangeHistory_MIGRATE,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     dumpedSchema4,
-					SchemaPrev: dumpedSchema3,
+					PrevSchema: dumpedSchema3,
 				},
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.Data,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_DATA,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     dumpedSchema3,
-					SchemaPrev: dumpedSchema3,
+					PrevSchema: dumpedSchema3,
 				},
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.Migrate,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_MIGRATE,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     dumpedSchema3,
-					SchemaPrev: dumpedSchema2,
+					PrevSchema: dumpedSchema2,
 				},
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.Migrate,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_MIGRATE,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     dumpedSchema2,
-					SchemaPrev: dumpedSchema,
+					PrevSchema: dumpedSchema,
 				},
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.Migrate,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_MIGRATE,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     dumpedSchema,
-					SchemaPrev: "",
+					PrevSchema: "",
 				},
 			}
 			a.Equal(len(wantHistories), len(histories))
-
 			for i, history := range histories {
-				got := api.MigrationHistory{
-					Database:   history.Database,
+				got := &v1pb.ChangeHistory{
 					Source:     history.Source,
 					Type:       history.Type,
 					Status:     history.Status,
 					Schema:     history.Schema,
-					SchemaPrev: history.SchemaPrev,
+					PrevSchema: history.PrevSchema,
 				}
-				a.Equalf(wantHistories[i], got, "got histories %+v", historiesDeref)
-				a.NotEmpty(history.Version)
+				want := wantHistories[i]
+				a.True(proto.Equal(got, want))
+				a.NotEqual(history.Version, "")
 			}
+
 			a.Equal("ver4-dml", histories[1].Version)
 			a.Equal("ver3-ddl", histories[2].Version)
 			a.Equal("ver2-ddl", histories[3].Version)
@@ -759,13 +760,13 @@ func TestVCS(t *testing.T) {
 	}
 }
 
-func TestVCS_SDL(t *testing.T) {
+func TestVCS_SDL_POSTGRES(t *testing.T) {
 	// TODO(rebelice): remove skip when support PostgreSQL SDL.
 	t.Skip()
 	tests := []struct {
 		name                string
 		vcsProviderCreator  fake.VCSProviderCreator
-		vcsType             vcs.Type
+		vcsType             v1pb.ExternalVersionControl_Type
 		externalID          string
 		repositoryFullPath  string
 		newWebhookPushEvent func(added, modified []string, beforeSHA, afterSHA string) any
@@ -773,7 +774,7 @@ func TestVCS_SDL(t *testing.T) {
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/schemaUpdate",
 			newWebhookPushEvent: func(added, modified []string, beforeSHA, afterSHA string) any {
@@ -798,7 +799,7 @@ func TestVCS_SDL(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(added, modified []string, beforeSHA, afterSHA string) any {
@@ -879,16 +880,16 @@ func TestVCS_SDL(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project
@@ -904,25 +905,26 @@ func TestVCS_SDL(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
 			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{ENV_ID}}/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: "{{ENV_ID}}/.{{DB_NAME}}##LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
 
-			prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+			prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 			a.NoError(err)
 
 			instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
@@ -935,11 +937,12 @@ func TestVCS_SDL(t *testing.T) {
 				},
 			})
 			a.NoError(err)
-			instanceUID, err := strconv.Atoi(instance.Uid)
-			a.NoError(err)
 
 			// Create an issue that creates a database
 			err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "bytebase", nil /* labelMap */)
+			a.NoError(err)
+
+			database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName)})
 			a.NoError(err)
 
 			// Simulate Git commits for schema update to create a new table "users".
@@ -1013,17 +1016,6 @@ func TestVCS_SDL(t *testing.T) {
 			)
 			a.NoError(err)
 
-			// Query list of tables
-			result, err := ctl.query(instance, databaseName, `
-SELECT table_name 
-    FROM information_schema.tables 
-WHERE table_type = 'BASE TABLE' 
-    AND table_schema NOT IN 
-        ('pg_catalog', 'information_schema');
-`)
-			a.NoError(err)
-			a.Equal(`[["table_name"],["NAME"],[["projects"],["users"]],[false]]`, result)
-
 			// Get migration history
 			const initialSchema = `
 SET statement_timeout = 0;
@@ -1094,47 +1086,51 @@ ALTER TABLE ONLY public.users
 
 `
 
-			histories, err := ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{})
+			// Query list of tables
+			dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/schema", database.Name)})
 			a.NoError(err)
-			wantHistories := []api.MigrationHistory{
+			a.Equal(updatedSchema, dbMetadata.Schema)
+
+			resp, err := ctl.databaseServiceClient.ListChangeHistories(ctx, &v1pb.ListChangeHistoriesRequest{
+				Parent: database.Name,
+			})
+			a.NoError(err)
+			histories := resp.ChangeHistories
+			wantHistories := []*v1pb.ChangeHistory{
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.Data,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_DATA,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     updatedSchema,
-					SchemaPrev: updatedSchema,
+					PrevSchema: updatedSchema,
 				},
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.MigrateSDL,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_MIGRATE_SDL,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     updatedSchema,
-					SchemaPrev: initialSchema,
+					PrevSchema: initialSchema,
 				},
 				{
-					Database:   databaseName,
-					Source:     db.UI,
-					Type:       db.Migrate,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_UI,
+					Type:       v1pb.ChangeHistory_MIGRATE,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     initialSchema,
-					SchemaPrev: "",
+					PrevSchema: "",
 				},
 			}
 			a.Equal(len(wantHistories), len(histories))
-
 			for i, history := range histories {
-				got := api.MigrationHistory{
-					Database:   history.Database,
+				got := &v1pb.ChangeHistory{
 					Source:     history.Source,
 					Type:       history.Type,
 					Status:     history.Status,
 					Schema:     history.Schema,
-					SchemaPrev: history.SchemaPrev,
+					PrevSchema: history.PrevSchema,
 				}
-				a.Equal(wantHistories[i], got, i)
-				a.NotEmpty(history.Version)
+				want := wantHistories[i]
+				a.True(proto.Equal(got, want))
+				a.NotEqual(history.Version, "")
 			}
 		})
 	}
@@ -1166,7 +1162,7 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 	tests := []struct {
 		name                  string
 		vcsProviderCreator    fake.VCSProviderCreator
-		vcsType               vcs.Type
+		vcsType               v1pb.ExternalVersionControl_Type
 		baseDirectory         string
 		envName               string
 		filePathTemplate      string
@@ -1178,7 +1174,7 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 		{
 			name:               "singleAsterisk",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			baseDirectory:      "bbtest",
 			envName:            "wildcard",
 			filePathTemplate:   "{{ENV_ID}}/*/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
@@ -1205,7 +1201,7 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 		{
 			name:               "continuousSingleAsterisk",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			baseDirectory:      "bbtest",
 			envName:            "wildcard",
 			filePathTemplate:   "{{ENV_ID}}/*/*/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
@@ -1231,7 +1227,7 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 		{
 			name:               "doubleAsterisks",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			baseDirectory:      "bbtest",
 			envName:            "wildcard",
 			filePathTemplate:   "{{ENV_ID}}/**/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
@@ -1264,7 +1260,7 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 			vcsProviderCreator: fake.NewGitLab,
 			envName:            "wildcard",
 			baseDirectory:      "",
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			filePathTemplate:   "{{ENV_ID}}/**/foo/*/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 			commitNewFileNames: []string{
 				// ** matches foo, foo matches foo, * matches bar
@@ -1292,7 +1288,7 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 			vcsProviderCreator: fake.NewGitLab,
 			envName:            "prod1",
 			baseDirectory:      "bbtest",
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			filePathTemplate:   "{{ENV_ID}}/**/foo/*/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 			commitNewFileNames: []string{
 				// ** matches foo, foo matches foo, * matches bar
@@ -1320,7 +1316,7 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 			vcsProviderCreator: fake.NewGitLab,
 			envName:            "ZO",
 			baseDirectory:      "bbtest",
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			filePathTemplate:   "{{ENV_ID}}/{{DB_NAME}}/sql/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 			commitNewFileNames: []string{
 				fmt.Sprintf("%s/%s/%s/sql/%s##ver1##migrate##create_table_t1.sql", baseDirectory, "zo", dbName, dbName),
@@ -1362,16 +1358,16 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS.
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project.
@@ -1387,22 +1383,23 @@ func TestWildcardInVCSFilePathTemplate(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(externalID, branchFilter)
 			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           repoFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, repoFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, repoFullPath),
 					BranchFilter:       branchFilter,
 					BaseDirectory:      test.baseDirectory,
 					FilePathTemplate:   test.filePathTemplate,
 					SchemaPathTemplate: "{{ENV_ID}}/.{{DB_NAME}}##LATEST.sql",
-					ExternalID:         externalID,
+					ExternalId:         externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
 
 			environment, err := ctl.environmentServiceClient.CreateEnvironment(ctx,
@@ -1479,19 +1476,19 @@ func TestVCS_SQL_Review(t *testing.T) {
 	tests := []struct {
 		name                    string
 		vcsProviderCreator      fake.VCSProviderCreator
-		vcsType                 vcs.Type
+		vcsType                 v1pb.ExternalVersionControl_Type
 		externalID              string
 		repositoryFullPath      string
-		getEmptySQLReviewResult func(repo *api.Repository, filePath, rootURL string) *api.VCSSQLReviewResult
-		getSQLReviewResult      func(repo *api.Repository, filePath string) *api.VCSSQLReviewResult
+		getEmptySQLReviewResult func(gitOpsInfo *v1pb.ProjectGitOpsInfo, filePath, rootURL string) *api.VCSSQLReviewResult
+		getSQLReviewResult      func(gitOpsInfo *v1pb.ProjectGitOpsInfo, filePath string) *api.VCSSQLReviewResult
 	}{
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/schemaUpdate",
-			getEmptySQLReviewResult: func(repo *api.Repository, filePath, rootURL string) *api.VCSSQLReviewResult {
+			getEmptySQLReviewResult: func(gitOpsInfo *v1pb.ProjectGitOpsInfo, filePath, rootURL string) *api.VCSSQLReviewResult {
 				pathes := strings.Split(filePath, "/")
 				return &api.VCSSQLReviewResult{
 					Status: advisor.Warn,
@@ -1507,7 +1504,7 @@ func TestVCS_SQL_Review(t *testing.T) {
 					},
 				}
 			},
-			getSQLReviewResult: func(repo *api.Repository, filePath string) *api.VCSSQLReviewResult {
+			getSQLReviewResult: func(gitOpsInfo *v1pb.ProjectGitOpsInfo, filePath string) *api.VCSSQLReviewResult {
 				pathes := strings.Split(filePath, "/")
 				filename := pathes[len(pathes)-1]
 				return &api.VCSSQLReviewResult{
@@ -1530,10 +1527,10 @@ func TestVCS_SQL_Review(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
-			getEmptySQLReviewResult: func(repo *api.Repository, filePath, rootURL string) *api.VCSSQLReviewResult {
+			getEmptySQLReviewResult: func(gitOpsInfo *v1pb.ProjectGitOpsInfo, filePath, rootURL string) *api.VCSSQLReviewResult {
 				return &api.VCSSQLReviewResult{
 					Status: advisor.Warn,
 					Content: []string{
@@ -1545,7 +1542,7 @@ func TestVCS_SQL_Review(t *testing.T) {
 					},
 				}
 			},
-			getSQLReviewResult: func(repo *api.Repository, filePath string) *api.VCSSQLReviewResult {
+			getSQLReviewResult: func(gitOpsInfo *v1pb.ProjectGitOpsInfo, filePath string) *api.VCSSQLReviewResult {
 				return &api.VCSSQLReviewResult{
 					Status: advisor.Warn,
 					Content: []string{
@@ -1610,16 +1607,16 @@ func TestVCS_SQL_Review(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS.
-			vcsData, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project.
@@ -1628,7 +1625,7 @@ func TestVCS_SQL_Review(t *testing.T) {
 			projectUID, err := strconv.Atoi(project.Uid)
 			a.NoError(err)
 
-			prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+			prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 			a.NoError(err)
 
 			instance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
@@ -1653,35 +1650,38 @@ func TestVCS_SQL_Review(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
 			a.NoError(err)
 
-			repository, err := ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              vcsData.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			gitOpsInfo, err := ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{ENV_ID}}/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: "{{ENV_ID}}/.{{DB_NAME}}##LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
-			a.NotNil(repository)
-			a.Equal(false, repository.EnableSQLReviewCI)
+			a.NotNil(gitOpsInfo)
+			a.Equal(false, gitOpsInfo.EnableSqlReviewCi)
 
-			sqlReviewCI, err := ctl.createSQLReviewCI(projectUID, repository.ID)
+			resp, err := ctl.projectServiceClient.SetupProjectSQLReviewCI(ctx, &v1pb.SetupSQLReviewCIRequest{
+				Name: fmt.Sprintf("%s/gitOpsInfo", project.Name),
+			})
 			a.NoError(err)
-			a.NotNil(sqlReviewCI)
+			a.NotEmpty(resp.PullRequestUrl)
 
-			repositoryList, err := ctl.listRepository(projectUID)
+			gitOpsInfo, err = ctl.projectServiceClient.GetProjectGitOpsInfo(ctx, &v1pb.GetProjectGitOpsInfoRequest{
+				Name: fmt.Sprintf("%s/gitOpsInfo", project.Name),
+			})
 			a.NoError(err)
-			a.NotNil(repositoryList)
-			a.Equal(1, len(repositoryList))
-			a.Equal(true, repositoryList[0].EnableSQLReviewCI)
+			a.Equal(true, gitOpsInfo.EnableSqlReviewCi)
 
 			// Simulate Git commits and pull request for SQL review.
 			prID := rand.Int()
@@ -1704,14 +1704,14 @@ func TestVCS_SQL_Review(t *testing.T) {
 			a.NoError(err)
 
 			// trigger SQL review with empty policy.
-			res, err := postVCSSQLReview(ctl, repository, &api.VCSSQLReviewRequest{
-				RepositoryID:  repository.ExternalID,
+			res, err := postVCSSQLReview(ctl, gitOpsInfo, &api.VCSSQLReviewRequest{
+				RepositoryID:  gitOpsInfo.ExternalId,
 				PullRequestID: fmt.Sprintf("%d", prID),
-				WebURL:        repository.WebURL,
+				WebURL:        gitOpsInfo.WebUrl,
 			})
 			a.NoError(err)
 
-			emptySQLReview := test.getEmptySQLReviewResult(repository, gitFile, ctl.rootURL)
+			emptySQLReview := test.getEmptySQLReviewResult(gitOpsInfo, gitFile, ctl.rootURL)
 			a.Equal(emptySQLReview.Status, res.Status)
 			a.Equal(emptySQLReview.Content, res.Content)
 
@@ -1730,14 +1730,14 @@ func TestVCS_SQL_Review(t *testing.T) {
 			})
 			a.NoError(err)
 
-			reviewResult, err := postVCSSQLReview(ctl, repository, &api.VCSSQLReviewRequest{
-				RepositoryID:  repository.ExternalID,
+			reviewResult, err := postVCSSQLReview(ctl, gitOpsInfo, &api.VCSSQLReviewRequest{
+				RepositoryID:  gitOpsInfo.ExternalId,
 				PullRequestID: fmt.Sprintf("%d", prID),
-				WebURL:        repository.WebURL,
+				WebURL:        gitOpsInfo.WebUrl,
 			})
 			a.NoError(err)
 
-			expectResult := test.getSQLReviewResult(repository, gitFile)
+			expectResult := test.getSQLReviewResult(gitOpsInfo, gitFile)
 			a.Equal(expectResult.Status, reviewResult.Status)
 			a.Equal(expectResult.Content, reviewResult.Content)
 		})
@@ -1752,7 +1752,7 @@ func TestBranchNameInVCSSetupAndUpdate(t *testing.T) {
 		want              bool
 	}
 	type vcsTestCase struct {
-		vcsType            vcs.Type
+		vcsType            v1pb.ExternalVersionControl_Type
 		vcsProviderCreator fake.VCSProviderCreator
 		externalID         string
 		repoFullPath       string
@@ -1761,7 +1761,7 @@ func TestBranchNameInVCSSetupAndUpdate(t *testing.T) {
 
 	tests := []vcsTestCase{
 		{
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			vcsProviderCreator: fake.NewGitLab,
 			externalID:         "1234",
 			repoFullPath:       "1234",
@@ -1801,7 +1801,7 @@ func TestBranchNameInVCSSetupAndUpdate(t *testing.T) {
 			},
 		},
 		{
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			vcsProviderCreator: fake.NewGitHub,
 			externalID:         "test/branch",
 			repoFullPath:       "test/branch",
@@ -1861,22 +1861,20 @@ func TestBranchNameInVCSSetupAndUpdate(t *testing.T) {
 			}()
 
 			// Create a VCS.
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          "testName",
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         "testName",
 					Type:          vcsTest.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testID",
 					Secret:        "testSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project.
 			project, err := ctl.createProject(ctx)
-			a.NoError(err)
-			projectUID, err := strconv.Atoi(project.Uid)
 			a.NoError(err)
 
 			for _, test := range vcsTest.caseList {
@@ -1892,28 +1890,31 @@ func TestBranchNameInVCSSetupAndUpdate(t *testing.T) {
 					}
 
 					// Create a repository.
-					_, err = ctl.createRepository(
-						api.RepositoryCreate{
-							VCSID:              apiVCS.ID,
-							ProjectID:          projectUID,
-							Name:               "Test Repository",
+					_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+						ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+							Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+							VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+							Title:              "Test Repository",
 							FullPath:           vcsTest.repoFullPath,
-							WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, vcsTest.repoFullPath),
+							WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, vcsTest.repoFullPath),
 							BranchFilter:       test.branchFilter,
 							BaseDirectory:      "",
 							FilePathTemplate:   "{{ENV_ID}}/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 							SchemaPathTemplate: "",
-							ExternalID:         vcsTest.externalID,
+							ExternalId:         vcsTest.externalID,
 							AccessToken:        "accessToken1",
 							RefreshToken:       "refreshToken1",
 						},
-					)
+						AllowMissing: true,
+					})
 
 					if test.want {
 						a.Error(err)
 					} else {
 						a.NoError(err)
-						err = ctl.unlinkRepository(projectUID)
+						_, err = ctl.projectServiceClient.UnsetProjectGitOpsInfo(ctx, &v1pb.UnsetProjectGitOpsInfoRequest{
+							Name: fmt.Sprintf("%s/gitOpsInfo", project.Name),
+						})
 						a.NoError(err)
 					}
 				})
@@ -1939,8 +1940,8 @@ func getWorkspaceID(ctl *controller) (string, error) {
 }
 
 // postVCSSQLReview will create the VCS SQL review and get the response.
-func postVCSSQLReview(ctl *controller, repo *api.Repository, request *api.VCSSQLReviewRequest) (*api.VCSSQLReviewResult, error) {
-	url := fmt.Sprintf("%s/hook/sql-review/%s", ctl.rootURL, repo.WebhookEndpointID)
+func postVCSSQLReview(ctl *controller, gitOpsInfo *v1pb.ProjectGitOpsInfo, request *api.VCSSQLReviewRequest) (*api.VCSSQLReviewResult, error) {
+	url := fmt.Sprintf("%s/hook/sql-review/%s", ctl.rootURL, gitOpsInfo.WebhookEndpointId)
 
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -2156,34 +2157,29 @@ CREATE TABLE public.book (
 				a.FailNow("unsupported db type")
 			}
 			a.NoError(err)
-			instanceUID, err := strconv.Atoi(instance.Uid)
-			a.NoError(err)
 
-			a.NoError(err)
 			err = ctl.createDatabase(ctx, projectUID, instance, test.databaseName, "root", nil /* labelMap */)
 			a.NoError(err)
-			databases, err := ctl.getDatabases(api.DatabaseFind{
-				InstanceID: &instanceUID,
+
+			database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+				Name: fmt.Sprintf("%s/databases/%s", instance.Name, test.databaseName),
 			})
 			a.NoError(err)
-			// Find databases
-			var database *api.Database
-			for _, db := range databases {
-				if db.Name == test.databaseName {
-					database = db
-					break
-				}
-			}
-			a.NotNil(database)
+			databaseUID, err := strconv.Atoi(database.Uid)
+			a.NoError(err)
 
-			ddlSheet, err := ctl.createSheet(api.SheetCreate{
-				ProjectID:  projectUID,
-				Name:       "test ddl",
-				Statement:  test.ddl,
-				Visibility: api.ProjectSheet,
-				Source:     api.SheetFromBytebaseArtifact,
-				Type:       api.SheetForSQL,
+			ddlSheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+				Parent: project.Name,
+				Sheet: &v1pb.Sheet{
+					Title:      "test ddl",
+					Content:    []byte(test.ddl),
+					Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+					Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+					Type:       v1pb.Sheet_TYPE_SQL,
+				},
 			})
+			a.NoError(err)
+			ddlSheetUID, err := strconv.Atoi(strings.TrimPrefix(ddlSheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 			a.NoError(err)
 
 			// Create an issue that updates database schema.
@@ -2191,8 +2187,8 @@ CREATE TABLE public.book (
 				DetailList: []*api.MigrationDetail{
 					{
 						MigrationType: db.Migrate,
-						DatabaseID:    database.ID,
-						SheetID:       ddlSheet.ID,
+						DatabaseID:    databaseUID,
+						SheetID:       ddlSheetUID,
 					},
 				},
 			})
@@ -2209,15 +2205,15 @@ CREATE TABLE public.book (
 			status, err := ctl.waitIssuePipeline(ctx, issue.ID)
 			a.NoError(err)
 			a.Equal(api.TaskDone, status)
-			latestSchemaDump, err := ctl.getLatestSchemaDump(database.ID)
+			latestSchemaDump, err := ctl.getLatestSchemaDump(databaseUID)
 			a.NoError(err)
 			a.Equal(test.wantRawSchema, latestSchemaDump)
 			if test.dbType == db.MySQL {
-				latestSchemaSDL, err := ctl.getLatestSchemaSDL(database.ID)
+				latestSchemaSDL, err := ctl.getLatestSchemaSDL(databaseUID)
 				a.NoError(err)
 				a.Equal(test.wantSDL, latestSchemaSDL)
 			}
-			latestSchemaMetadataString, err := ctl.getLatestSchemaMetadata(database.ID)
+			latestSchemaMetadataString, err := ctl.getLatestSchemaMetadata(databaseUID)
 			a.NoError(err)
 			var latestSchemaMetadata storepb.DatabaseMetadata
 			err = protojson.Unmarshal([]byte(latestSchemaMetadataString), &latestSchemaMetadata)
@@ -2253,7 +2249,7 @@ func TestMarkTaskAsDone(t *testing.T) {
 	instanceDir, err := ctl.provisionSQLiteInstance(instanceRootDir, instanceName)
 	a.NoError(err)
 
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	// Add an instance.
@@ -2267,44 +2263,31 @@ func TestMarkTaskAsDone(t *testing.T) {
 		},
 	})
 	a.NoError(err)
-	instanceUID, err := strconv.Atoi(instance.Uid)
-	a.NoError(err)
-
-	// Expecting project to have no database.
-	databases, err := ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
-	})
-	a.NoError(err)
-	a.Zero(len(databases))
-	// Expecting instance to have no database.
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		InstanceID: &instanceUID,
-	})
-	a.NoError(err)
-	a.Zero(len(databases))
 
 	// Create an issue that creates a database.
 	databaseName := "testSchemaUpdate"
 	err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "", nil /* labelMap */)
 	a.NoError(err)
 
-	// Expecting project to have 1 database.
-	databases, err = ctl.getDatabases(api.DatabaseFind{
-		ProjectID: &projectUID,
+	database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+		Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName),
 	})
 	a.NoError(err)
-	a.Equal(1, len(databases))
-	database := databases[0]
-	a.Equal(instanceUID, database.Instance.ID)
+	databaseUID, err := strconv.Atoi(database.Uid)
+	a.NoError(err)
 
-	sheet, err := ctl.createSheet(api.SheetCreate{
-		ProjectID:  projectUID,
-		Name:       "migration statement sheet",
-		Statement:  migrationStatement,
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+	sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+		Parent: project.Name,
+		Sheet: &v1pb.Sheet{
+			Title:      "migration statement sheet",
+			Content:    []byte(migrationStatement),
+			Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+			Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+			Type:       v1pb.Sheet_TYPE_SQL,
+		},
 	})
+	a.NoError(err)
+	sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 	a.NoError(err)
 
 	// Create an issue that updates database schema.
@@ -2312,8 +2295,8 @@ func TestMarkTaskAsDone(t *testing.T) {
 		DetailList: []*api.MigrationDetail{
 			{
 				MigrationType: db.Migrate,
-				DatabaseID:    database.ID,
-				SheetID:       sheet.ID,
+				DatabaseID:    databaseUID,
+				SheetID:       sheetUID,
 			},
 		},
 	})
@@ -2351,16 +2334,16 @@ func TestMarkTaskAsDone(t *testing.T) {
 	a.Equal(api.TaskDone, status)
 
 	// Query schema.
-	result, err := ctl.query(instance, databaseName, bookTableQuery)
+	dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/schema", database.Name)})
 	a.NoError(err)
-	a.NotEqual(bookSchemaSQLResult, result)
+	a.Equal("", dbMetadata.Schema)
 }
 
 func TestVCS_SDL_MySQL(t *testing.T) {
 	tests := []struct {
 		name                string
 		vcsProviderCreator  fake.VCSProviderCreator
-		vcsType             vcs.Type
+		vcsType             v1pb.ExternalVersionControl_Type
 		externalID          string
 		repositoryFullPath  string
 		newWebhookPushEvent func(added, modified []string, beforeSHA, afterSHA string) any
@@ -2368,7 +2351,7 @@ func TestVCS_SDL_MySQL(t *testing.T) {
 		{
 			name:               "GitLab",
 			vcsProviderCreator: fake.NewGitLab,
-			vcsType:            vcs.GitLab,
+			vcsType:            v1pb.ExternalVersionControl_GITLAB,
 			externalID:         "121",
 			repositoryFullPath: "test/schemaUpdate",
 			newWebhookPushEvent: func(added, modified []string, beforeSHA, afterSHA string) any {
@@ -2393,7 +2376,7 @@ func TestVCS_SDL_MySQL(t *testing.T) {
 		{
 			name:               "GitHub",
 			vcsProviderCreator: fake.NewGitHub,
-			vcsType:            vcs.GitHub,
+			vcsType:            v1pb.ExternalVersionControl_GITHUB,
 			externalID:         "octocat/Hello-World",
 			repositoryFullPath: "octocat/Hello-World",
 			newWebhookPushEvent: func(added, modified []string, beforeSHA, afterSHA string) any {
@@ -2473,16 +2456,16 @@ func TestVCS_SDL_MySQL(t *testing.T) {
 			a.NoError(err)
 
 			// Create a VCS
-			apiVCS, err := ctl.createVCS(
-				api.VCSCreate{
-					Name:          t.Name(),
+			evcs, err := ctl.evcsClient.CreateExternalVersionControl(ctx, &v1pb.CreateExternalVersionControlRequest{
+				ExternalVersionControl: &v1pb.ExternalVersionControl{
+					Title:         t.Name(),
 					Type:          test.vcsType,
-					InstanceURL:   ctl.vcsURL,
-					APIURL:        ctl.vcsProvider.APIURL(ctl.vcsURL),
-					ApplicationID: "testApplicationID",
+					Url:           ctl.vcsURL,
+					ApiUrl:        ctl.vcsProvider.APIURL(ctl.vcsURL),
+					ApplicationId: "testApplicationID",
 					Secret:        "testApplicationSecret",
 				},
-			)
+			})
 			a.NoError(err)
 
 			// Create a project
@@ -2507,25 +2490,26 @@ func TestVCS_SDL_MySQL(t *testing.T) {
 			err = ctl.vcsProvider.CreateBranch(test.externalID, "feature/foo")
 			a.NoError(err)
 
-			_, err = ctl.createRepository(
-				api.RepositoryCreate{
-					VCSID:              apiVCS.ID,
-					ProjectID:          projectUID,
-					Name:               "Test Repository",
+			_, err = ctl.projectServiceClient.UpdateProjectGitOpsInfo(ctx, &v1pb.UpdateProjectGitOpsInfoRequest{
+				ProjectGitopsInfo: &v1pb.ProjectGitOpsInfo{
+					Name:               fmt.Sprintf("%s/gitOpsInfo", project.Name),
+					VcsUid:             strings.TrimPrefix(evcs.Name, "externalVersionControls/"),
+					Title:              "Test Repository",
 					FullPath:           test.repositoryFullPath,
-					WebURL:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
+					WebUrl:             fmt.Sprintf("%s/%s", ctl.vcsURL, test.repositoryFullPath),
 					BranchFilter:       "feature/foo",
 					BaseDirectory:      baseDirectory,
 					FilePathTemplate:   "{{ENV_ID}}/{{DB_NAME}}##{{VERSION}}##{{TYPE}}##{{DESCRIPTION}}.sql",
 					SchemaPathTemplate: "{{ENV_ID}}/.{{DB_NAME}}##LATEST.sql",
-					ExternalID:         test.externalID,
+					ExternalId:         test.externalID,
 					AccessToken:        "accessToken1",
 					RefreshToken:       "refreshToken1",
 				},
-			)
+				AllowMissing: true,
+			})
 			a.NoError(err)
 
-			prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+			prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 			a.NoError(err)
 
 			// Add an instance
@@ -2539,11 +2523,12 @@ func TestVCS_SDL_MySQL(t *testing.T) {
 				},
 			})
 			a.NoError(err)
-			instanceUID, err := strconv.Atoi(instance.Uid)
-			a.NoError(err)
 
 			// Create an issue that creates a database
 			err = ctl.createDatabase(ctx, projectUID, instance, databaseName, "bytebase", nil /* labelMap */)
+			a.NoError(err)
+
+			database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{Name: fmt.Sprintf("%s/databases/%s", instance.Name, databaseName)})
 			a.NoError(err)
 
 			// Simulate Git commits for schema update to create a new table "users".
@@ -2617,15 +2602,6 @@ func TestVCS_SDL_MySQL(t *testing.T) {
 			)
 			a.NoError(err)
 
-			// Query list of tables
-			result, err := ctl.query(instance, databaseName, fmt.Sprintf(`
-SELECT table_name 
-    FROM information_schema.tables 
-WHERE table_schema = '%s'; 
-`, databaseName))
-			a.NoError(err)
-			a.Equal(`[["TABLE_NAME"],["VARCHAR"],[["projects"],["users"]],[false]]`, result)
-
 			// Get migration history
 			const initialSchema = "SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0;\n" +
 				"SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0;\n" +
@@ -2661,46 +2637,54 @@ WHERE table_schema = '%s';
 				"  PRIMARY KEY (`id`)\n" +
 				") ENGINE=InnoDB DEFAULT CHARACTER SET=UTF8MB4 DEFAULT COLLATE=UTF8MB4_GENERAL_CI;\n\n"
 
-			histories, err := ctl.getInstanceMigrationHistory(instanceUID, db.MigrationHistoryFind{})
+			// Query list of tables
+			dbMetadata, err := ctl.databaseServiceClient.GetDatabaseSchema(ctx, &v1pb.GetDatabaseSchemaRequest{Name: fmt.Sprintf("%s/schema", database.Name)})
 			a.NoError(err)
-			wantHistories := []api.MigrationHistory{
+			a.Equal(updatedSchema, dbMetadata.Schema)
+
+			resp, err := ctl.databaseServiceClient.ListChangeHistories(ctx, &v1pb.ListChangeHistoriesRequest{
+				Parent: database.Name,
+			})
+			a.NoError(err)
+			histories := resp.ChangeHistories
+			wantHistories := []*v1pb.ChangeHistory{
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.Data,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_DATA,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     updatedSchema,
-					SchemaPrev: updatedSchema,
+					PrevSchema: updatedSchema,
 				},
 				{
-					Database:   databaseName,
-					Source:     db.VCS,
-					Type:       db.MigrateSDL,
-					Status:     db.Done,
+					Source:     v1pb.ChangeHistory_VCS,
+					Type:       v1pb.ChangeHistory_MIGRATE_SDL,
+					Status:     v1pb.ChangeHistory_DONE,
 					Schema:     updatedSchema,
-					SchemaPrev: initialSchema,
+					PrevSchema: initialSchema,
 				},
 			}
 			a.Equal(len(wantHistories), len(histories))
-
 			for i, history := range histories {
-				got := api.MigrationHistory{
-					Database:   history.Database,
+				got := &v1pb.ChangeHistory{
 					Source:     history.Source,
 					Type:       history.Type,
 					Status:     history.Status,
 					Schema:     history.Schema,
-					SchemaPrev: history.SchemaPrev,
+					PrevSchema: history.PrevSchema,
 				}
-				a.Equal(wantHistories[i], got, i)
-				a.NotEmpty(history.Version)
+				want := wantHistories[i]
+				a.True(proto.Equal(got, want))
+				a.NotEqual(history.Version, "")
 			}
 
 			// Test SDL format.
-			sdlHistory, err := ctl.getInstanceSDLMigrationHistory(instanceUID, histories[1].ID)
+			sdlHistory, err := ctl.databaseServiceClient.GetChangeHistory(ctx, &v1pb.GetChangeHistoryRequest{
+				Name:      histories[1].Name,
+				SdlFormat: true,
+			})
 			a.NoError(err)
 			a.Equal(updatedSDL, sdlHistory.Schema)
-			a.Equal(initialSDL, sdlHistory.SchemaPrev)
+			a.Equal(initialSDL, sdlHistory.PrevSchema)
 		})
 	}
 }

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/testing/protocmp"
 
 	api "github.com/bytebase/bytebase/backend/legacyapi"
 	"github.com/bytebase/bytebase/backend/plugin/db"
@@ -24,35 +27,84 @@ func TestAdminQueryAffectedRows(t *testing.T) {
 		prepareStatements string
 		query             string
 		want              bool
-		affectedRows      []string
+		affectedRows      []*v1pb.QueryResult
 	}{
 		{
 			databaseName:      "Test1",
 			dbType:            db.MySQL,
 			prepareStatements: "CREATE TABLE tbl(id INT PRIMARY KEY);",
 			query:             "INSERT INTO tbl VALUES(1);",
-			affectedRows:      []string{`[["Affected Rows"],["INT"],[[1]]]`},
+			affectedRows: []*v1pb.QueryResult{
+				{
+					ColumnNames:     []string{"Affected Rows"},
+					ColumnTypeNames: []string{"INT"},
+					Rows: []*v1pb.QueryRow{
+						{
+							Values: []*v1pb.RowValue{
+								{Kind: &v1pb.RowValue_Int64Value{Int64Value: 1}},
+							},
+						},
+					},
+				},
+			},
 		},
 		{
 			databaseName:      "Test2",
 			dbType:            db.MySQL,
 			prepareStatements: "CREATE TABLE tbl(id INT PRIMARY KEY);",
 			query:             "INSERT INTO tbl VALUES(1); DELETE FROM tbl WHERE id = 1;",
-			affectedRows:      []string{`[["Affected Rows"],["INT"],[[1]]]`, `[["Affected Rows"],["INT"],[[1]]]`},
+			affectedRows: []*v1pb.QueryResult{
+				{
+					ColumnNames:     []string{"Affected Rows"},
+					ColumnTypeNames: []string{"INT"},
+					Rows: []*v1pb.QueryRow{
+						{
+							Values: []*v1pb.RowValue{
+								{Kind: &v1pb.RowValue_Int64Value{Int64Value: 1}},
+							},
+						},
+					},
+				},
+				{
+					ColumnNames:     []string{"Affected Rows"},
+					ColumnTypeNames: []string{"INT"},
+					Rows: []*v1pb.QueryRow{
+						{
+							Values: []*v1pb.RowValue{
+								{Kind: &v1pb.RowValue_Int64Value{Int64Value: 1}},
+							},
+						},
+					},
+				},
+			},
 		},
 		{
 			databaseName:      "Test3",
 			dbType:            db.Postgres,
 			prepareStatements: "CREATE TABLE public.tbl(id INT PRIMARY KEY);",
 			query:             "INSERT INTO tbl VALUES(1),(2);",
-			affectedRows:      []string{`[["Affected Rows"],["INT"],[[2]]]`},
+			affectedRows: []*v1pb.QueryResult{
+				{
+					ColumnNames:     []string{"Affected Rows"},
+					ColumnTypeNames: []string{"INT"},
+					Rows: []*v1pb.QueryRow{
+						{
+							Values: []*v1pb.RowValue{
+								{Kind: &v1pb.RowValue_Int64Value{Int64Value: 2}},
+							},
+						},
+					},
+				},
+			},
 		},
 		{
 			databaseName:      "Test4",
 			dbType:            db.Postgres,
 			prepareStatements: "CREATE TABLE tbl(id INT PRIMARY KEY);",
 			query:             "ALTER TABLE tbl ADD COLUMN name VARCHAR(255);",
-			affectedRows:      []string{`[[],null,[],[]]`},
+			affectedRows: []*v1pb.QueryResult{
+				{},
+			},
 		},
 	}
 
@@ -83,7 +135,7 @@ func TestAdminQueryAffectedRows(t *testing.T) {
 	projectUID, err := strconv.Atoi(project.Uid)
 	a.NoError(err)
 
-	prodEnvironment, _, err := ctl.getEnvironment(ctx, "prod")
+	prodEnvironment, err := ctl.getEnvironment(ctx, "prod")
 	a.NoError(err)
 
 	mysqlInstance, err := ctl.instanceServiceClient.CreateInstance(ctx, &v1pb.CreateInstanceRequest{
@@ -108,7 +160,7 @@ func TestAdminQueryAffectedRows(t *testing.T) {
 	})
 	a.NoError(err)
 
-	for idx, tt := range tests {
+	for _, tt := range tests {
 		var instance *v1pb.Instance
 		databaseOwner := ""
 		switch tt.dbType {
@@ -123,33 +175,25 @@ func TestAdminQueryAffectedRows(t *testing.T) {
 		err = ctl.createDatabase(ctx, projectUID, instance, tt.databaseName, databaseOwner, nil)
 		a.NoError(err)
 
-		databases, err := ctl.getDatabases(api.DatabaseFind{
-			ProjectID: &projectUID,
+		database, err := ctl.databaseServiceClient.GetDatabase(ctx, &v1pb.GetDatabaseRequest{
+			Name: fmt.Sprintf("%s/databases/%s", instance.Name, tt.databaseName),
 		})
 		a.NoError(err)
-		a.Equal(idx+1, len(databases))
-
-		var database *api.Database
-		for _, d := range databases {
-			if d.Name == tt.databaseName {
-				database = d
-				break
-			}
-		}
-		a.NotNil(database)
-
-		instanceUID, err := strconv.Atoi(instance.Uid)
+		databaseUID, err := strconv.Atoi(database.Uid)
 		a.NoError(err)
-		a.Equal(instanceUID, database.Instance.ID)
 
-		sheet, err := ctl.createSheet(api.SheetCreate{
-			ProjectID:  projectUID,
-			Name:       "prepareStatements",
-			Statement:  tt.prepareStatements,
-			Visibility: api.ProjectSheet,
-			Source:     api.SheetFromBytebaseArtifact,
-			Type:       api.SheetForSQL,
+		sheet, err := ctl.sheetServiceClient.CreateSheet(ctx, &v1pb.CreateSheetRequest{
+			Parent: project.Name,
+			Sheet: &v1pb.Sheet{
+				Title:      "prepareStatements",
+				Content:    []byte(tt.prepareStatements),
+				Visibility: v1pb.Sheet_VISIBILITY_PROJECT,
+				Source:     v1pb.Sheet_SOURCE_BYTEBASE_ARTIFACT,
+				Type:       v1pb.Sheet_TYPE_SQL,
+			},
 		})
+		a.NoError(err)
+		sheetUID, err := strconv.Atoi(strings.TrimPrefix(sheet.Name, fmt.Sprintf("%s/sheets/", project.Name)))
 		a.NoError(err)
 
 		// Create an issue that updates database schema.
@@ -157,8 +201,8 @@ func TestAdminQueryAffectedRows(t *testing.T) {
 			DetailList: []*api.MigrationDetail{
 				{
 					MigrationType: db.Migrate,
-					DatabaseID:    database.ID,
-					SheetID:       sheet.ID,
+					DatabaseID:    databaseUID,
+					SheetID:       sheetUID,
 				},
 			},
 		})
@@ -176,13 +220,14 @@ func TestAdminQueryAffectedRows(t *testing.T) {
 		a.NoError(err)
 		a.Equal(api.TaskDone, status)
 
-		singleSQLResults, err := ctl.adminQuery(instance, tt.databaseName, tt.query)
+		results, err := ctl.adminQuery(ctx, instance, tt.databaseName, tt.query)
 		a.NoError(err)
 
-		a.Equal(len(tt.affectedRows), len(singleSQLResults))
-		for idx, singleSQLResult := range singleSQLResults {
-			a.Equal("", singleSQLResult.Error)
-			a.Equal(tt.affectedRows[idx], singleSQLResult.Data)
+		a.Equal(len(tt.affectedRows), len(results))
+		for idx, result := range results {
+			a.Equal("", result.Error)
+			diff := cmp.Diff(tt.affectedRows[idx], result, protocmp.Transform())
+			a.Equal("", diff)
 		}
 	}
 }

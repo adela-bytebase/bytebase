@@ -29,6 +29,7 @@
 <script lang="ts" setup>
 import { computed, reactive, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useDebounceFn } from "@vueuse/core";
 
 import type { ResourceId, ValidatedMessage } from "@/types";
 
@@ -71,7 +72,7 @@ const resourceName = computed(() => {
   return t(`resource.${props.resourceType}`);
 });
 
-const handleResourceIdChange = async (newValue: string) => {
+const handleResourceIdChange = useDebounceFn(async (newValue: string) => {
   if (props.readonly) {
     return;
   }
@@ -110,11 +111,13 @@ const handleResourceIdChange = async (newValue: string) => {
   }
 
   // custom validation for resource id. (e.g. check if the resource id is already used)
-  if (props.validate) {
+  if (state.validatedMessages.length === 0 && props.validate) {
     const messages = await props.validate(state.resourceId);
-    state.validatedMessages.push(...messages);
+    if (Array.isArray(messages)) {
+      state.validatedMessages.push(...messages);
+    }
   }
-};
+}, 500);
 
 watch(
   () => props.value,

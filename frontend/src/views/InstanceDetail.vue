@@ -92,17 +92,16 @@
     </div>
   </div>
 
-  <BBModal
-    v-if="state.showCreateDatabaseModal"
+  <Drawer
+    v-model:show="state.showCreateDatabaseModal"
     :title="$t('quick-action.create-db')"
-    @close="state.showCreateDatabaseModal = false"
   >
-    <CreateDatabasePrepForm
+    <CreateDatabasePrepPanel
       :environment-id="environment?.uid"
       :instance-id="instance.uid"
       @dismiss="state.showCreateDatabaseModal = false"
     />
-  </BBModal>
+  </Drawer>
 
   <FeatureModal
     v-if="state.showFeatureModal"
@@ -124,15 +123,14 @@ import {
 } from "@/utils";
 import ArchiveBanner from "@/components/ArchiveBanner.vue";
 import InstanceForm from "@/components/InstanceForm/";
-import CreateDatabasePrepForm from "@/components/CreateDatabasePrepForm.vue";
-import { InstanceRoleTable, DatabaseV1Table } from "@/components/v2";
+import { CreateDatabasePrepPanel } from "@/components/CreateDatabasePrepForm";
+import { InstanceRoleTable, DatabaseV1Table, Drawer } from "@/components/v2";
 import { SQLResultSet } from "@/types";
 import {
   featureToRef,
   pushNotification,
-  useInstanceStore,
   useSubscriptionV1Store,
-  useSQLStore,
+  useLegacySQLStore,
   useDBSchemaStore,
   useCurrentUserV1,
   useInstanceV1Store,
@@ -155,14 +153,13 @@ const props = defineProps({
   },
 });
 
-const instanceStore = useInstanceStore();
 const instanceV1Store = useInstanceV1Store();
 const databaseStore = useDatabaseV1Store();
 const subscriptionStore = useSubscriptionV1Store();
 const { t } = useI18n();
 
 const currentUserV1 = useCurrentUserV1();
-const sqlStore = useSQLStore();
+const sqlStore = useLegacySQLStore();
 
 const state = reactive<LocalState>({
   showCreateDatabaseModal: false,
@@ -234,8 +231,6 @@ const allowArchiveOrRestore = computed(() => {
 const doArchive = async () => {
   await useGracefulRequest(async () => {
     await instanceV1Store.archiveInstance(instance.value);
-    // Legacy compatibility
-    await instanceStore.fetchInstanceById(Number(instance.value.uid));
 
     pushNotification({
       module: "bytebase",
@@ -255,8 +250,6 @@ const doRestore = async () => {
   }
   await useGracefulRequest(async () => {
     await instanceV1Store.restoreInstance(instance.value);
-    // Legacy compatibility
-    await instanceStore.fetchInstanceById(Number(instance.value.uid));
 
     pushNotification({
       module: "bytebase",
