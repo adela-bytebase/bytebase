@@ -71,13 +71,13 @@ export type TaskDatabaseSchemaUpdatePayload = {
   skippedReason: string;
   statement: string;
   sheetId: SheetId;
+  schemaGroupName?: string;
   pushEvent?: VCSPushEvent;
 };
 
 export type TaskDatabaseSchemaUpdateSDLPayload = {
   skipped: boolean;
   skippedReason: string;
-  statement: string;
   sheetId: SheetId;
   pushEvent?: VCSPushEvent;
 };
@@ -121,6 +121,7 @@ export type TaskDatabaseDataUpdatePayload = {
   skippedReason: string;
   statement: string;
   sheetId: SheetId;
+  schemaGroupName?: string;
   pushEvent?: VCSPushEvent;
   rollbackEnabled: boolean;
   rollbackSqlStatus?: RollbackSQLStatus;
@@ -185,6 +186,8 @@ export type Task = {
   // Tasks such as creating database may not have database.
   database?: Database;
   payload?: TaskPayload;
+  // Using by grouping batch change.
+  statement?: string;
 
   // Task DAG
   blockedBy: Task[];

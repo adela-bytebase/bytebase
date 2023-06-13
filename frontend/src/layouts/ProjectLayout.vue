@@ -109,7 +109,12 @@ const projectTabItemList = computed((): ProjectTabItem[] => {
   ) {
     const list = [{ name: t("common.databases"), hash: "databases" }];
     if (!isDefaultProject.value) {
-      list.push({ name: t("common.settings"), hash: "setting" });
+      list.push(
+        ...[
+          { name: t("common.members"), hash: "members" },
+          { name: t("common.settings"), hash: "setting" },
+        ]
+      );
     }
     return list;
   }
@@ -119,7 +124,7 @@ const projectTabItemList = computed((): ProjectTabItem[] => {
     { name: t("common.databases"), hash: "databases" },
 
     isTenantProject.value
-      ? { name: "Database groups", hash: "database-groups" }
+      ? { name: t("common.database-groups"), hash: "database-groups" }
       : null,
 
     isTenantProject.value
@@ -135,6 +140,9 @@ const projectTabItemList = computed((): ProjectTabItem[] => {
     isDefaultProject.value
       ? null
       : { name: t("common.webhooks"), hash: "webhook" },
+    isDefaultProject.value
+      ? null
+      : { name: t("common.members"), hash: "members" },
     isDefaultProject.value
       ? null
       : { name: t("common.settings"), hash: "setting" },

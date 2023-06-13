@@ -1,18 +1,57 @@
 <template>
-  <button
-    v-if="showApproveButton"
-    class="btn-primary"
-    @click="state.modal = true"
-  >
-    {{ $t("common.approve") }}
-  </button>
+  <div class="flex items-stretch gap-x-4">
+    <button
+      v-if="allowReject"
+      class="btn-normal"
+      @click="showModal(Review_Approver_Status.REJECTED)"
+    >
+      {{ $t("custom-approval.issue-review.send-back") }}
+    </button>
+
+    <BBTooltipButton
+      v-if="allowApprove"
+      :disabled="disallowApproveReasonList.length > 0"
+      :tooltip-props="{
+        placement: 'bottom-end',
+      }"
+      type="primary"
+      tooltip-mode="DISABLED-ONLY"
+      @click="showModal(Review_Approver_Status.APPROVED)"
+    >
+      {{ $t("common.approve") }}
+
+      <template #tooltip>
+        <div class="whitespace-pre-line max-w-[20rem]">
+          <div v-for="(reason, i) in disallowApproveReasonList" :key="i">
+            {{ reason }}
+          </div>
+        </div>
+      </template>
+    </BBTooltipButton>
+
+    <button
+      v-if="allowReRequestReview"
+      class="btn-primary"
+      @click="showModal(Review_Approver_Status.PENDING)"
+    >
+      {{ $t("custom-approval.issue-review.re-request-review") }}
+    </button>
+
+    <StandaloneIssueStatusTransitionButtonGroup
+      :display-mode="
+        allowApprove || allowReject || allowReRequestReview
+          ? 'DROPDOWN'
+          : 'BUTTON'
+      "
+    />
+  </div>
 
   <BBModal
     v-if="state.modal"
-    :title="$t('custom-approval.issue-review.approve-issue')"
+    :title="state.modal.title"
     class="relative overflow-hidden !w-[30rem] !max-w-[30rem]"
     header-class="overflow-hidden"
-    @close="state.modal = false"
+    @close="state.modal = undefined"
   >
     <div
       v-if="state.loading"
@@ -21,8 +60,11 @@
       <BBSpin />
     </div>
     <IssueReviewForm
-      @cancel="state.modal = false"
-      @confirm="handleConfirmApprove"
+      :status="state.modal.status"
+      :ok-text="state.modal.okText"
+      :button-style="state.modal.buttonStyle"
+      @cancel="state.modal = undefined"
+      @confirm="handleModalConfirm"
     />
   </BBModal>
 </template>
@@ -37,26 +79,37 @@ import {
   useReviewStore,
 } from "@/store";
 import { Issue } from "@/types";
+import { BBTooltipButton } from "@/bbkit";
 import { useIssueLogic } from "../logic";
 import IssueReviewForm from "./IssueReviewForm.vue";
+import { extractUserUID, taskCheckRunSummary } from "@/utils";
+import { useI18n } from "vue-i18n";
+import { StandaloneIssueStatusTransitionButtonGroup } from "../StatusTransitionButtonGroup";
+import { Review_Approver_Status } from "@/types/proto/v1/review_service";
 
 type LocalState = {
-  modal: boolean;
+  modal?: {
+    title: string;
+    status: Review_Approver_Status;
+    okText: string;
+    buttonStyle: "PRIMARY" | "ERROR" | "NORMAL";
+  };
   loading: boolean;
 };
 
 const state = reactive<LocalState>({
-  modal: false,
+  modal: undefined,
   loading: false,
 });
 
+const { t } = useI18n();
 const store = useReviewStore();
 const currentUserV1 = useCurrentUserV1();
 const issueContext = useIssueLogic();
 const issue = issueContext.issue as Ref<Issue>;
-const { flow, ready, done } = useIssueReviewContext();
+const { flow, ready, status, done } = useIssueReviewContext();
 
-const showApproveButton = computed(() => {
+const allowApproveOrReject = computed(() => {
   if (issue.value.status === "CANCELED" || issue.value.status === "DONE") {
     return false;
   }
@@ -72,12 +125,93 @@ const showApproveButton = computed(() => {
   return candidates.includes(currentUserV1.value.name);
 });
 
-const handleConfirmApprove = async (onSuccess: () => void) => {
+const allowApprove = computed(() => {
+  if (!allowApproveOrReject.value) return false;
+
+  return status.value === Review_Approver_Status.PENDING;
+});
+const allowReject = computed(() => {
+  if (!allowApproveOrReject.value) return false;
+  return status.value === Review_Approver_Status.PENDING;
+});
+
+const allowReRequestReview = computed(() => {
+  return (
+    String(issue.value.creator.id) ===
+      extractUserUID(currentUserV1.value.name) &&
+    status.value === Review_Approver_Status.REJECTED
+  );
+});
+
+const allTaskChecksPassed = computed(() => {
+  const taskList =
+    issue.value.pipeline?.stageList.flatMap((stage) => stage.taskList) ?? [];
+  return taskList.every((task) => {
+    const summary = taskCheckRunSummary(task);
+    return summary.errorCount === 0 && summary.runningCount === 0;
+  });
+});
+
+const disallowApproveReasonList = computed((): string[] => {
+  const reasons: string[] = [];
+  if (!allTaskChecksPassed.value) {
+    reasons.push(
+      t(
+        "custom-approval.issue-review.disallow-approve-reason.some-task-checks-didnt-pass"
+      )
+    );
+  }
+  return reasons;
+});
+
+const showModal = (status: Review_Approver_Status) => {
+  state.modal = {
+    status,
+    title: "",
+    okText: "",
+    buttonStyle: "NORMAL",
+  };
+  switch (status) {
+    case Review_Approver_Status.APPROVED:
+      state.modal.title = t("custom-approval.issue-review.approve-issue");
+      state.modal.okText = t("common.approval");
+      state.modal.buttonStyle = "PRIMARY";
+      break;
+    case Review_Approver_Status.REJECTED:
+      state.modal.title = t("custom-approval.issue-review.send-back-issue");
+      state.modal.okText = t("custom-approval.issue-review.send-back");
+      state.modal.buttonStyle = "ERROR";
+      break;
+    case Review_Approver_Status.PENDING:
+      state.modal.title = t(
+        "custom-approval.issue-review.re-request-review-issue"
+      );
+      state.modal.okText = t("custom-approval.issue-review.re-request-review");
+      state.modal.buttonStyle = "PRIMARY";
+  }
+};
+
+const handleModalConfirm = async (
+  {
+    status,
+    comment,
+  }: {
+    status: Review_Approver_Status;
+    comment?: string;
+  },
+  onSuccess: () => void
+) => {
   state.loading = true;
   try {
-    await store.approveReview(issue.value);
-    onSuccess();
-    state.modal = false;
+    if (status === Review_Approver_Status.APPROVED) {
+      await store.approveReview(issue.value, comment);
+      onSuccess();
+    } else if (status === Review_Approver_Status.PENDING) {
+      await store.requestReview(issue.value, comment);
+    } else if (status === Review_Approver_Status.REJECTED) {
+      await store.rejectReview(issue.value, comment);
+    }
+    state.modal = undefined;
 
     // notify the issue logic to update issue status
     issueContext.onStatusChanged(true);

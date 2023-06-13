@@ -141,6 +141,25 @@ export interface ApproveReviewRequest {
    * Format: projects/{project}/reviews/{review}
    */
   name: string;
+  comment: string;
+}
+
+export interface RejectReviewRequest {
+  /**
+   * The name of the review to add an rejecting reviewer.
+   * Format: projects/{project}/reviews/{review}
+   */
+  name: string;
+  comment: string;
+}
+
+export interface RequestReviewRequest {
+  /**
+   * The name of the review to request a review.
+   * Format: projects/{project}/reviews/{review}
+   */
+  name: string;
+  comment: string;
 }
 
 export interface Review {
@@ -200,6 +219,7 @@ export enum Review_Approver_Status {
   STATUS_UNSPECIFIED = 0,
   PENDING = 1,
   APPROVED = 2,
+  REJECTED = 3,
   UNRECOGNIZED = -1,
 }
 
@@ -214,6 +234,9 @@ export function review_Approver_StatusFromJSON(object: any): Review_Approver_Sta
     case 2:
     case "APPROVED":
       return Review_Approver_Status.APPROVED;
+    case 3:
+    case "REJECTED":
+      return Review_Approver_Status.REJECTED;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -229,6 +252,8 @@ export function review_Approver_StatusToJSON(object: Review_Approver_Status): st
       return "PENDING";
     case Review_Approver_Status.APPROVED:
       return "APPROVED";
+    case Review_Approver_Status.REJECTED:
+      return "REJECTED";
     case Review_Approver_Status.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -306,6 +331,7 @@ export interface ApprovalNode {
     | undefined;
   /** Format: roles/{role} */
   role?: string | undefined;
+  externalNodeId?: string | undefined;
 }
 
 /**
@@ -902,13 +928,16 @@ export const BatchUpdateReviewsResponse = {
 };
 
 function createBaseApproveReviewRequest(): ApproveReviewRequest {
-  return { name: "" };
+  return { name: "", comment: "" };
 }
 
 export const ApproveReviewRequest = {
   encode(message: ApproveReviewRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.name !== "") {
       writer.uint32(10).string(message.name);
+    }
+    if (message.comment !== "") {
+      writer.uint32(18).string(message.comment);
     }
     return writer;
   },
@@ -927,6 +956,13 @@ export const ApproveReviewRequest = {
 
           message.name = reader.string();
           continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.comment = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -937,12 +973,16 @@ export const ApproveReviewRequest = {
   },
 
   fromJSON(object: any): ApproveReviewRequest {
-    return { name: isSet(object.name) ? String(object.name) : "" };
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      comment: isSet(object.comment) ? String(object.comment) : "",
+    };
   },
 
   toJSON(message: ApproveReviewRequest): unknown {
     const obj: any = {};
     message.name !== undefined && (obj.name = message.name);
+    message.comment !== undefined && (obj.comment = message.comment);
     return obj;
   },
 
@@ -953,6 +993,149 @@ export const ApproveReviewRequest = {
   fromPartial(object: DeepPartial<ApproveReviewRequest>): ApproveReviewRequest {
     const message = createBaseApproveReviewRequest();
     message.name = object.name ?? "";
+    message.comment = object.comment ?? "";
+    return message;
+  },
+};
+
+function createBaseRejectReviewRequest(): RejectReviewRequest {
+  return { name: "", comment: "" };
+}
+
+export const RejectReviewRequest = {
+  encode(message: RejectReviewRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.comment !== "") {
+      writer.uint32(18).string(message.comment);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): RejectReviewRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRejectReviewRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.comment = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RejectReviewRequest {
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      comment: isSet(object.comment) ? String(object.comment) : "",
+    };
+  },
+
+  toJSON(message: RejectReviewRequest): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    message.comment !== undefined && (obj.comment = message.comment);
+    return obj;
+  },
+
+  create(base?: DeepPartial<RejectReviewRequest>): RejectReviewRequest {
+    return RejectReviewRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<RejectReviewRequest>): RejectReviewRequest {
+    const message = createBaseRejectReviewRequest();
+    message.name = object.name ?? "";
+    message.comment = object.comment ?? "";
+    return message;
+  },
+};
+
+function createBaseRequestReviewRequest(): RequestReviewRequest {
+  return { name: "", comment: "" };
+}
+
+export const RequestReviewRequest = {
+  encode(message: RequestReviewRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.comment !== "") {
+      writer.uint32(18).string(message.comment);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): RequestReviewRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRequestReviewRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.comment = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RequestReviewRequest {
+    return {
+      name: isSet(object.name) ? String(object.name) : "",
+      comment: isSet(object.comment) ? String(object.comment) : "",
+    };
+  },
+
+  toJSON(message: RequestReviewRequest): unknown {
+    const obj: any = {};
+    message.name !== undefined && (obj.name = message.name);
+    message.comment !== undefined && (obj.comment = message.comment);
+    return obj;
+  },
+
+  create(base?: DeepPartial<RequestReviewRequest>): RequestReviewRequest {
+    return RequestReviewRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<RequestReviewRequest>): RequestReviewRequest {
+    const message = createBaseRequestReviewRequest();
+    message.name = object.name ?? "";
+    message.comment = object.comment ?? "";
     return message;
   },
 };
@@ -1561,7 +1744,7 @@ export const ApprovalStep = {
 };
 
 function createBaseApprovalNode(): ApprovalNode {
-  return { type: 0, groupValue: undefined, role: undefined };
+  return { type: 0, groupValue: undefined, role: undefined, externalNodeId: undefined };
 }
 
 export const ApprovalNode = {
@@ -1574,6 +1757,9 @@ export const ApprovalNode = {
     }
     if (message.role !== undefined) {
       writer.uint32(26).string(message.role);
+    }
+    if (message.externalNodeId !== undefined) {
+      writer.uint32(34).string(message.externalNodeId);
     }
     return writer;
   },
@@ -1606,6 +1792,13 @@ export const ApprovalNode = {
 
           message.role = reader.string();
           continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.externalNodeId = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1620,6 +1813,7 @@ export const ApprovalNode = {
       type: isSet(object.type) ? approvalNode_TypeFromJSON(object.type) : 0,
       groupValue: isSet(object.groupValue) ? approvalNode_GroupValueFromJSON(object.groupValue) : undefined,
       role: isSet(object.role) ? String(object.role) : undefined,
+      externalNodeId: isSet(object.externalNodeId) ? String(object.externalNodeId) : undefined,
     };
   },
 
@@ -1631,6 +1825,7 @@ export const ApprovalNode = {
         ? approvalNode_GroupValueToJSON(message.groupValue)
         : undefined);
     message.role !== undefined && (obj.role = message.role);
+    message.externalNodeId !== undefined && (obj.externalNodeId = message.externalNodeId);
     return obj;
   },
 
@@ -1643,6 +1838,7 @@ export const ApprovalNode = {
     message.type = object.type ?? 0;
     message.groupValue = object.groupValue ?? undefined;
     message.role = object.role ?? undefined;
+    message.externalNodeId = object.externalNodeId ?? undefined;
     return message;
   },
 };
@@ -2001,6 +2197,125 @@ export const ReviewServiceDefinition = {
         },
       },
     },
+    rejectReview: {
+      name: "RejectReview",
+      requestType: RejectReviewRequest,
+      requestStream: false,
+      responseType: Review,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          578365826: [
+            new Uint8Array([
+              43,
+              58,
+              1,
+              42,
+              34,
+              38,
+              47,
+              118,
+              49,
+              47,
+              123,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              114,
+              101,
+              118,
+              105,
+              101,
+              119,
+              115,
+              47,
+              42,
+              125,
+              58,
+              114,
+              101,
+              106,
+              101,
+              99,
+              116,
+            ]),
+          ],
+        },
+      },
+    },
+    requestReview: {
+      name: "RequestReview",
+      requestType: RequestReviewRequest,
+      requestStream: false,
+      responseType: Review,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          578365826: [
+            new Uint8Array([
+              44,
+              58,
+              1,
+              42,
+              34,
+              39,
+              47,
+              118,
+              49,
+              47,
+              123,
+              110,
+              97,
+              109,
+              101,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              47,
+              114,
+              101,
+              118,
+              105,
+              101,
+              119,
+              115,
+              47,
+              42,
+              125,
+              58,
+              114,
+              101,
+              113,
+              117,
+              101,
+              115,
+              116,
+            ]),
+          ],
+        },
+      },
+    },
   },
 } as const;
 
@@ -2017,6 +2332,8 @@ export interface ReviewServiceImplementation<CallContextExt = {}> {
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<BatchUpdateReviewsResponse>>;
   approveReview(request: ApproveReviewRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Review>>;
+  rejectReview(request: RejectReviewRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Review>>;
+  requestReview(request: RequestReviewRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Review>>;
 }
 
 export interface ReviewServiceClient<CallOptionsExt = {}> {
@@ -2032,6 +2349,8 @@ export interface ReviewServiceClient<CallOptionsExt = {}> {
     options?: CallOptions & CallOptionsExt,
   ): Promise<BatchUpdateReviewsResponse>;
   approveReview(request: DeepPartial<ApproveReviewRequest>, options?: CallOptions & CallOptionsExt): Promise<Review>;
+  rejectReview(request: DeepPartial<RejectReviewRequest>, options?: CallOptions & CallOptionsExt): Promise<Review>;
+  requestReview(request: DeepPartial<RequestReviewRequest>, options?: CallOptions & CallOptionsExt): Promise<Review>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

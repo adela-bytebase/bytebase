@@ -127,7 +127,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, request *v1pb.Crea
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
-	driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, "" /* databaseName */)
+	driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, nil /* database */)
 	if err == nil {
 		defer driver.Close(ctx)
 		if _, err := s.schemaSyncer.SyncInstance(ctx, instance); err != nil {
@@ -225,7 +225,7 @@ func (s *InstanceService) SyncSlowQueries(ctx context.Context, request *v1pb.Syn
 
 	switch instance.Engine {
 	case db.MySQL:
-		driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, "" /* database name */)
+		driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, nil /* database */)
 		if err != nil {
 			return nil, err
 		}
@@ -254,7 +254,7 @@ func (s *InstanceService) SyncSlowQueries(ctx context.Context, request *v1pb.Syn
 				continue
 			}
 			if err := func() error {
-				driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, database.DatabaseName)
+				driver, err := s.dbFactory.GetAdminDatabaseDriver(ctx, instance, database)
 				if err != nil {
 					return err
 				}
@@ -349,6 +349,25 @@ func (s *InstanceService) UndeleteInstance(ctx context.Context, request *v1pb.Un
 	}
 
 	return convertToInstance(ins), nil
+}
+
+// SyncInstance syncs the instance.
+func (s *InstanceService) SyncInstance(ctx context.Context, request *v1pb.SyncInstanceRequest) (*v1pb.SyncInstanceResponse, error) {
+	instance, err := s.getInstanceMessage(ctx, request.Name)
+	if err != nil {
+		return nil, err
+	}
+	if instance.Deleted {
+		return nil, status.Errorf(codes.InvalidArgument, "instance %q has been deleted", request.Name)
+	}
+
+	if _, err := s.schemaSyncer.SyncInstance(ctx, instance); err != nil {
+		return nil, err
+	}
+	// Sync all databases in the instance asynchronously.
+	s.stateCfg.InstanceDatabaseSyncChan <- instance
+
+	return &v1pb.SyncInstanceResponse{}, nil
 }
 
 // AddDataSource adds a data source to an instance.

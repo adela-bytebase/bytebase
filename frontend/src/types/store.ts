@@ -1,6 +1,5 @@
 import { MigrationHistoryId, QueryHistory, OnboardingGuideType } from ".";
-import { Activity } from "./activity";
-import { Backup, BackupSetting } from "./backup";
+import { Backup } from "./backup";
 import { Bookmark } from "./bookmark";
 import { Command } from "./common";
 import { Database } from "./database";
@@ -25,12 +24,7 @@ import { Principal } from "./principal";
 import { Project } from "./project";
 import { VCS } from "./vcs";
 import { Label } from "./label";
-import type { AuditLog } from "@/types/auditLog";
 import { DatabaseMetadata } from "./proto/store/database";
-
-export interface AuditLogState {
-  auditLogList: AuditLog[];
-}
 
 export interface PrincipalState {
   principalList: Principal[];
@@ -38,11 +32,6 @@ export interface PrincipalState {
 
 export interface BookmarkState {
   bookmarkList: Map<PrincipalId, Bookmark[]>;
-}
-
-export interface ActivityState {
-  activityListByUser: Map<PrincipalId, Activity[]>;
-  activityListByIssue: Map<IssueId, Activity[]>;
 }
 
 export interface InboxState {
@@ -102,10 +91,6 @@ export interface DBSchemaState {
 
 export interface BackupState {
   backupList: Map<DatabaseId, Backup[]>;
-}
-
-export interface BackupSettingState {
-  backupSetting: Map<DatabaseId, BackupSetting>;
 }
 
 export interface VCSState {

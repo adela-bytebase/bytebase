@@ -1,8 +1,6 @@
 package api
 
 import (
-	"encoding/json"
-
 	"github.com/bytebase/bytebase/backend/plugin/advisor"
 	"github.com/bytebase/bytebase/backend/plugin/vcs"
 )
@@ -21,6 +19,8 @@ const (
 	ActivityIssueFieldUpdate ActivityType = "bb.issue.field.update"
 	// ActivityIssueStatusUpdate is the type for updating issue status.
 	ActivityIssueStatusUpdate ActivityType = "bb.issue.status.update"
+	// ActivityIssueApprovalNotify is the type for notifying issue approval.
+	ActivityIssueApprovalNotify ActivityType = "bb.issue.approval.notify"
 	// ActivityPipelineStageStatusUpdate is the type for stage begins or ends.
 	ActivityPipelineStageStatusUpdate ActivityType = "bb.pipeline.stage.status.update"
 	// ActivityPipelineTaskStatusUpdate is the type for updating pipeline task status.
@@ -135,6 +135,12 @@ type ActivityIssueStatusUpdatePayload struct {
 	NewStatus IssueStatus `json:"newStatus,omitempty"`
 	// Used by inbox to display info without paying the join cost
 	IssueName string `json:"issueName"`
+}
+
+// ActivityIssueApprovalNotifyPayload is the API message payloads for notifying issue approval.
+type ActivityIssueApprovalNotifyPayload struct {
+	// ProtoPayload is protojson.Marshal(storepb.ActivityIssueApprovalNotifyPayload).
+	ProtoPayload string `json:"protoPayload,omitempty"`
 }
 
 // ActivityPipelineStageStatusUpdatePayload is the API message payloads for stage status updates.
@@ -298,34 +304,6 @@ type ActivityCreate struct {
 	Level       ActivityLevel
 	Comment     string `jsonapi:"attr,comment"`
 	Payload     string `jsonapi:"attr,payload"`
-}
-
-// ActivityFind is the API message for finding activities.
-type ActivityFind struct {
-	ID *int
-
-	// Domain specific fields
-	CreatorID       *int
-	TypePrefixList  []string
-	LevelList       []ActivityLevel
-	ContainerID     *int
-	Limit           *int
-	CreatedTsAfter  *int64
-	CreatedTsBefore *int64
-	// If specified, only find activities whose ID is smaller than SinceID.
-	SinceID *int
-	// If specified, sorts the returned list by created_ts in <<ORDER>>
-	// Different use cases want different orders.
-	// e.g. Issue activity list wants ASC, while view recent activity list wants DESC.
-	Order *SortOrder
-}
-
-func (find *ActivityFind) String() string {
-	str, err := json.Marshal(*find)
-	if err != nil {
-		return err.Error()
-	}
-	return string(str)
 }
 
 // ActivityPatch is the API message for patching an activity.

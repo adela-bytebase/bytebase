@@ -48,13 +48,17 @@
             @goto-sql-editor-failed="
               handleGotoSQLEditorFailed(database as ComposedDatabase)
             "
-          />
+          >
+            <template v-if="showSelectionColumn" #selection>
+              <slot name="selection" :database="database" />
+            </template>
+          </DatabaseTableRow>
         </template>
         <template v-else>
           <div class="bb-grid-cell">
             <div class="flex items-center space-x-2">
               <SQLEditorButtonV1 :disabled="true" :tooltip="true" />
-              <span>{{ getDatabaseGroup(database).databaseGroupName }}</span>
+              <span>{{ getDatabaseGroup(database).databasePlaceholder }}</span>
               <BBBadge text="GROUP" :can-remove="false" class="text-xs" />
             </div>
           </div>

@@ -19,7 +19,11 @@
                   class="pt-2 pb-2.5 text-xl font-bold leading-6 text-main truncate flex items-center gap-x-3"
                 >
                   {{ schemaGroupName }}
-                  <BBBadge text="Group" :can-remove="false" class="text-xs" />
+                  <BBBadge
+                    text="Schema Group"
+                    :can-remove="false"
+                    class="text-xs"
+                  />
                 </h1>
               </div>
             </div>
@@ -33,6 +37,12 @@
               >
               <ProjectV1Name :project="project" hash="#database-groups" />
             </dd>
+            <dd class="flex items-center text-sm md:mr-4">
+              <span class="textlabel"
+                >{{ $t("database-group.self") }}&nbsp;-&nbsp;</span
+              >
+              <DatabaseGroupName :database-group="schemaGroup?.databaseGroup" />
+            </dd>
           </dl>
         </div>
 
@@ -44,21 +54,7 @@
             class="btn-normal"
             @click.prevent="state.showConfigurePanel = true"
           >
-            Configure
-          </button>
-          <button
-            type="button"
-            class="btn-normal"
-            @click.prevent="createMigration('bb.issue.database.schema.update')"
-          >
-            Alter Schema
-          </button>
-          <button
-            type="button"
-            class="btn-normal"
-            @click.prevent="createMigration('bb.issue.database.data.update')"
-          >
-            Change Data
+            {{ $t("common.configure") }}
           </button>
         </div>
       </div>
@@ -67,7 +63,9 @@
 
       <div class="w-full px-3 max-w-5xl grid grid-cols-5 gap-x-6">
         <div class="col-span-3">
-          <p class="pl-1 text-lg mb-2">Condition</p>
+          <p class="pl-1 text-lg mb-2">
+            {{ $t("database-group.condition.self") }}
+          </p>
           <ExprEditor
             :expr="state.expr!"
             :allow-admin="false"
@@ -108,8 +106,7 @@ import { ConditionGroupExpr } from "@/plugins/cel";
 import DatabaseGroupPanel from "@/components/DatabaseGroup/DatabaseGroupPanel.vue";
 import ExprEditor from "@/components/DatabaseGroup/common/ExprEditor";
 import MatchedTableView from "@/components/DatabaseGroup/MatchedTableView.vue";
-import { generateIssueRoute } from "@/utils/databaseGroup/issue";
-import { useRouter } from "vue-router";
+import DatabaseGroupName from "@/components/v2/Model/DatabaseGroupName.vue";
 
 interface LocalState {
   isLoaded: boolean;
@@ -132,7 +129,6 @@ const props = defineProps({
   },
 });
 
-const router = useRouter();
 const projectStore = useProjectV1Store();
 const dbGroupStore = useDBGroupStore();
 const state = reactive<LocalState>({
@@ -149,18 +145,6 @@ const schemaGroup = computed(() => {
     `${projectNamePrefix}${props.projectName}/${databaseGroupNamePrefix}${props.databaseGroupName}/${schemaGroupNamePrefix}${props.schemaGroupName}`
   );
 });
-
-const createMigration = (
-  type: "bb.issue.database.schema.update" | "bb.issue.database.data.update"
-) => {
-  if (!schemaGroup.value) {
-    return;
-  }
-  const issueRoute = generateIssueRoute(type, schemaGroup.value.databaseGroup, [
-    schemaGroup.value.name,
-  ]);
-  router.push(issueRoute);
-};
 
 watch(
   () => [props, schemaGroup.value],

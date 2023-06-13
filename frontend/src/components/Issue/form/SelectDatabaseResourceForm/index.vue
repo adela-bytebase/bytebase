@@ -39,7 +39,7 @@ import {
 
 import {
   useDatabaseV1Store,
-  useDBSchemaStore,
+  useDBSchemaV1Store,
   useProjectV1Store,
 } from "@/store";
 import {
@@ -62,7 +62,7 @@ const emits = defineEmits<{
 }>();
 
 const databaseStore = useDatabaseV1Store();
-const dbSchemaStore = useDBSchemaStore();
+const dbSchemaStore = useDBSchemaV1Store();
 const selectedValueList = ref<string[]>([]);
 const databaseResourceMap = ref<Map<string, DatabaseResource>>(new Map());
 const loading = ref(false);
@@ -77,16 +77,14 @@ onMounted(async () => {
   });
 
   for (const database of databaseList) {
-    const databaseMetadata = await dbSchemaStore.getOrFetchDatabaseMetadataById(
-      Number(database.uid)
+    const databaseMetadata = await dbSchemaStore.getOrFetchDatabaseMetadata(
+      database.name
     );
     databaseResourceMap.value.set(`d-${database.uid}`, {
-      databaseId: database.uid,
       databaseName: database.name,
     });
     for (const schema of databaseMetadata.schemas) {
       databaseResourceMap.value.set(`s-${database.uid}-${schema.name}`, {
-        databaseId: database.uid,
         databaseName: database.name,
         schema: schema.name,
       });
@@ -94,7 +92,6 @@ onMounted(async () => {
         databaseResourceMap.value.set(
           `t-${database.uid}-${schema.name}-${table.name}`,
           {
-            databaseId: database.uid,
             databaseName: database.name,
             schema: schema.name,
             table: table.name,
@@ -192,11 +189,11 @@ watch(
     for (const databaseResource of props.selectedDatabaseResourceList) {
       let key = "";
       if (databaseResource.table !== undefined) {
-        key = `t-${databaseResource.databaseId}-${databaseResource.schema}-${databaseResource.table}`;
+        key = `t-${databaseResource.databaseName}-${databaseResource.schema}-${databaseResource.table}`;
       } else if (databaseResource.schema !== undefined) {
-        key = `s-${databaseResource.databaseId}-${databaseResource.schema}`;
+        key = `s-${databaseResource.databaseName}-${databaseResource.schema}`;
       } else {
-        key = `d-${databaseResource.databaseId}`;
+        key = `d-${databaseResource.databaseName}`;
       }
       selectedKeyList.push(key);
     }

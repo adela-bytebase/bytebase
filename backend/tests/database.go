@@ -1,11 +1,9 @@
 package tests
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +11,7 @@ import (
 	"github.com/google/jsonapi"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/bytebase/bytebase/backend/common/log"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
@@ -160,42 +159,6 @@ func (ctl *controller) postDatabaseEdit(databaseEdit api.DatabaseEdit) (*Databas
 	return databaseEditResult, nil
 }
 
-func (ctl *controller) getLatestSchemaSDL(databaseID int) (string, error) {
-	body, err := ctl.get(fmt.Sprintf("/database/%d/schema", databaseID), map[string]string{"sdl": "true"})
-	if err != nil {
-		return "", err
-	}
-	bs, err := io.ReadAll(body)
-	if err != nil {
-		return "", err
-	}
-	return string(bs), nil
-}
-
-func (ctl *controller) getLatestSchemaDump(databaseID int) (string, error) {
-	body, err := ctl.get(fmt.Sprintf("/database/%d/schema", databaseID), nil)
-	if err != nil {
-		return "", err
-	}
-	bs, err := io.ReadAll(body)
-	if err != nil {
-		return "", err
-	}
-	return string(bs), nil
-}
-
-func (ctl *controller) getLatestSchemaMetadata(databaseID int) (string, error) {
-	body, err := ctl.get(fmt.Sprintf("/database/%d/schema", databaseID), map[string]string{"metadata": "true"})
-	if err != nil {
-		return "", err
-	}
-	bs, err := io.ReadAll(body)
-	if err != nil {
-		return "", err
-	}
-	return string(bs), nil
-}
-
 func marshalLabels(labelMap map[string]string, environmentID string) (string, error) {
 	var labelList []*api.DatabaseLabel
 	for k, v := range labelMap {
@@ -217,19 +180,17 @@ func marshalLabels(labelMap map[string]string, environmentID string) (string, er
 }
 
 // disableAutomaticBackup disables the automatic backup of a database.
-func (ctl *controller) disableAutomaticBackup(databaseID int) error {
-	backupSetting := api.BackupSettingUpsert{
-		DatabaseID: databaseID,
-		Enabled:    false,
-	}
-	buf := new(bytes.Buffer)
-	if err := jsonapi.MarshalPayload(buf, &backupSetting); err != nil {
-		return errors.Wrap(err, "failed to marshal backupSetting")
-	}
-
-	if _, err := ctl.patch(fmt.Sprintf("/database/%d/backup-setting", databaseID), buf); err != nil {
+func (ctl *controller) disableAutomaticBackup(ctx context.Context, databaseName string) error {
+	if _, err := ctl.databaseServiceClient.UpdateBackupSetting(ctx, &v1pb.UpdateBackupSettingRequest{
+		Setting: &v1pb.BackupSetting{
+			Name:                 fmt.Sprintf("%s/backupSetting", databaseName),
+			CronSchedule:         "",
+			BackupRetainDuration: durationpb.New(time.Duration(7*24*60*60) * time.Second),
+		},
+	}); err != nil {
 		return err
 	}
+
 	return nil
 }
 

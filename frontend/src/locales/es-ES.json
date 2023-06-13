@@ -251,7 +251,9 @@
       "years": "{years} años"
     },
     "expiration": "Expiración",
-    "configure": "Configure"
+    "configure": "Configure",
+    "database-groups": "Grupo de bases de datos",
+    "members": "Miembros"
   },
   "error-page": {
     "go-back-home": "Volver al inicio"
@@ -404,6 +406,8 @@
     "profile": {
       "email": "Correo electrónico",
       "role": "Rol",
+      "phone": "Número de móvil",
+      "country-code": "Códigos de país y de área",
       "password": "Contraseña",
       "password-confirm": "Confirmar",
       "password-confirm-placeholder": "Confirmar nueva contraseña",
@@ -769,7 +773,8 @@
       "manually-select": "selección manual",
       "customize": "personalice",
       "data-export-attention": "Los datos se exportarán a un archivo y se descargarán en su computadora local. Y solo puede realizar la acción de exportación una vez."
-    }
+    },
+    "review-sent-back": "Revisión devuelta"
   },
   "alter-schema": {
     "vcs-enabled": "Este proyecto ha habilitado el control de versiones basado en VCS y seleccionar la base de datos a continuación lo llevará al repositorio Git correspondiente para iniciar el proceso de cambio.",
@@ -1016,10 +1021,10 @@
       "name": "Política de implementación",
       "tip": "La política se aplica retrospectivamente a las incidencias.",
       "info": "Para actualizar el esquema en la base de datos existente, esta configuración controla si la tarea requiere aprobación manual.",
-      "manual": "Requiere implementación manual",
-      "manual-info": "Las tareas solo se ejecutarán después de ser implementadas manualmente.",
-      "auto": "Omitir la implementación manual",
-      "auto-info": "Las tareas se implementarán y ejecutarán automáticamente si todas las comprobaciones de tarea son correctas.",
+      "manual": "Implementar manual",
+      "manual-info": "Requiere hacer clic en el botón \"Implementar\" manualmente, y luego se ejecutará el cambio.",
+      "auto": "Implementar automático",
+      "auto-info": "Si se aprueban todas las comprobaciones, el cambio se implementará y ejecutará automáticamente.",
       "assignee-group": {
         "workspace-owner-or-dba": "Requiere implementación del DBA o del propietario del espacio de trabajo.",
         "project-owner": "Requiere implementación del propietario del proyecto."
@@ -1396,7 +1401,8 @@
         "view-doc": "Ver documentación de {destination}"
       },
       "deletion": {
-        "btn-text": "Eliminar este webhook"
+        "btn-text": "Eliminar este webhook",
+        "confirm-title": "¿Eliminar el '{title}' del webhook y todo su historial de ejecución?"
       },
       "activity-item": {
         "issue-creation": {
@@ -1422,12 +1428,16 @@
         "issue-comment-creation": {
           "title": "Creación de comentario de incidencia",
           "label": "Cuando se crea un nuevo comentario en la incidencia"
+        },
+        "issue-approval-notify": {
+          "title": "Notificación de aprobación de incidencia",
+          "label": "Cuando se aprueba o rechaza una incidencia"
         }
       }
     },
     "settings": {
       "success-updated": "La configuración del proyecto se actualizó correctamente.",
-      "success-member-added-prompt": "Se agregó correctamente a {name} al proyecto.",
+      "success-member-added-prompt": "Se agregó correctamente al proyecto.",
       "success-member-deleted-prompt": "Se revocó el acceso de {name} al proyecto correctamente.",
       "member-placeholder": "Seleccionar usuario",
       "manage-member": "Administrar miembros",
@@ -1459,8 +1469,8 @@
       }
     },
     "mode": {
-      "standard": "Estándar",
-      "tenant": "Inquilino"
+      "standard": "Modo Estándar",
+      "tenant": "Modo Inquilino"
     },
     "db-name-template": "Plantilla de nombre de base de datos del inquilino",
     "select": "Seleccionar proyecto",
@@ -2171,7 +2181,9 @@
     "instance": "Instancia",
     "project": "Proyecto",
     "idp": "Proveedor de Identidad",
-    "role": "Rol"
+    "role": "Rol",
+    "database-group": "grupo de bases de datos",
+    "schema-group": "grupo de mesas"
   },
   "resource-id": {
     "self": "ID de {resource}",
@@ -2424,8 +2436,18 @@
       },
       "you": "Tú",
       "generating-approval-flow": "Generando flujo de aprobación",
-      "approved-issue": "incidencia aprobada"
-    }
+      "approved-issue": "incidencia aprobada",
+      "disallow-approve-reason": {
+        "some-task-checks-didnt-pass": "Algunas comprobaciones de tareas no pasaron"
+      },
+      "send-back": "Enviar de vuelta",
+      "send-back-issue": "¿Devolver el problema?",
+      "re-request-review": "Volver a solicitar revisión",
+      "re-request-review-issue": "¿Volver a solicitar revisión?",
+      "sent-back-issue": "Problema devuelto",
+      "re-requested-review": "revisión de problema nuevamente solicitada"
+    },
+    "send-back": "Enviar de vuelta"
   },
   "slow-query": {
     "self": "Consulta lenta",
@@ -2520,6 +2542,9 @@
     },
     "condition": {
       "self": "Condición"
+    },
+    "prev-editor": {
+      "description": "Puedes hacer referencia a la agrupación de tablas en SQL para realizar cambios en lote en todas las tablas dentro de un grupo de tablas. Para cada tabla, Bytebase generará un SQL individual."
     }
   },
   "export-center": {

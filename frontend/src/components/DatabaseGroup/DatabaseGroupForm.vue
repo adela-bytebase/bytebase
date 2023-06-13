@@ -3,18 +3,27 @@
     <div class="w-full grid grid-cols-3 gap-x-6 pb-6 mb-4 border-b">
       <div>
         <p class="text-lg mb-2">{{ $t("common.name") }}</p>
-        <ResourceIdInput
-          ref="resourceIdInput"
-          :value="state.resourceId"
-          :resource-type="resourceIdType"
-          :readonly="!isCreating"
-          :validate="validateResourceId"
+        <input
+          v-model="state.placeholder"
+          required
+          type="text"
+          class="textfield w-full"
         />
+        <div class="mt-2">
+          <ResourceIdField
+            ref="resourceIdField"
+            :resource-type="formatedResourceType"
+            :readonly="!isCreating"
+            :value="state.resourceId"
+            :resource-title="state.placeholder"
+            :validate="validateResourceId"
+          />
+        </div>
       </div>
       <div>
         <p class="text-lg mb-2">{{ $t("common.environment") }}</p>
         <EnvironmentSelect
-          :disabled="!isCreating"
+          :disabled="!isCreating || disableEditDatabaseGroupFields"
           :selected-id="state.environmentId"
           @select-environment-id="
             (environmentId) => {
@@ -37,7 +46,7 @@
       <div v-if="resourceType === 'SCHEMA_GROUP'">
         <p class="text-lg mb-2">{{ $t("database-group.self") }}</p>
         <DatabaseGroupSelect
-          :disabled="!isCreating"
+          :disabled="!isCreating || disableEditDatabaseGroupFields"
           :project-id="project.name"
           :environment-id="state.environmentId || ''"
           :selected-id="state.selectedDatabaseGroupId"
@@ -84,35 +93,47 @@
 import { Status } from "nice-grpc-web";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ConditionGroupExpr, resolveCELExpr, wrapAsGroup } from "@/plugins/cel";
-import { Expr as CELExpr } from "@/types/proto/google/api/expr/v1alpha1/syntax";
+import {
+  ConditionGroupExpr,
+  emptySimpleExpr,
+  wrapAsGroup,
+} from "@/plugins/cel";
 import ExprEditor from "./common/ExprEditor";
 import { ResourceType } from "./common/ExprEditor/context";
 import { DatabaseGroup, SchemaGroup } from "@/types/proto/v1/project_service";
-import { ComposedProject, ResourceId, ValidatedMessage } from "@/types";
+import {
+  ComposedDatabaseGroup,
+  ComposedProject,
+  ResourceId,
+  ValidatedMessage,
+} from "@/types";
 import { convertCELStringToExpr } from "@/utils/databaseGroup/cel";
 import { useDBGroupStore } from "@/store";
 import { getErrorCode } from "@/utils/grpcweb";
 import EnvironmentSelect from "../EnvironmentSelect.vue";
 import MatchedDatabaseView from "./MatchedDatabaseView.vue";
 import MatchedTableView from "./MatchedTableView.vue";
-import ResourceIdInput from "../v2/Form/ResourceIdInput.vue";
 import DatabaseGroupSelect from "./DatabaseGroupSelect.vue";
 import {
   databaseGroupNamePrefix,
   getProjectNameAndDatabaseGroupName,
   getProjectNameAndDatabaseGroupNameAndSchemaGroupName,
+  schemaGroupNamePrefix,
 } from "@/store/modules/v1/common";
 import { projectNamePrefix } from "@/store/modules/v1/common";
+import { ResourceIdField } from "../v2";
+import { head } from "lodash-es";
 
 const props = defineProps<{
   project: ComposedProject;
   resourceType: ResourceType;
   databaseGroup?: DatabaseGroup | SchemaGroup;
+  parentDatabaseGroup?: ComposedDatabaseGroup;
 }>();
 
 type LocalState = {
   resourceId: string;
+  placeholder: string;
   environmentId?: string;
   selectedDatabaseGroupId?: string;
   expr: ConditionGroupExpr;
@@ -122,33 +143,60 @@ const { t } = useI18n();
 const dbGroupStore = useDBGroupStore();
 const state = reactive<LocalState>({
   resourceId: "",
-  expr: wrapAsGroup(resolveCELExpr(CELExpr.fromJSON({}))),
+  placeholder: "",
+  expr: wrapAsGroup(emptySimpleExpr("_||_"), "_||_"),
 });
-const resourceIdInput = ref<InstanceType<typeof ResourceIdInput>>();
+const resourceIdField = ref<InstanceType<typeof ResourceIdField>>();
 const selectedDatabaseGroupName = computed(() => {
   const [, databaseGroupName] = getProjectNameAndDatabaseGroupName(
     state.selectedDatabaseGroupId || ""
   );
   return databaseGroupName;
 });
+const formatedResourceType = computed(() =>
+  props.resourceType === "DATABASE_GROUP" ? "database-group" : "schema-group"
+);
 
 const isCreating = computed(() => props.databaseGroup === undefined);
+
+const disableEditDatabaseGroupFields = computed(() => {
+  return (
+    props.resourceType === "SCHEMA_GROUP" &&
+    props.parentDatabaseGroup !== undefined
+  );
+});
 
 const resourceIdType = computed(() =>
   props.resourceType === "DATABASE_GROUP" ? "database-group" : "schema-group"
 );
 
 onMounted(async () => {
+  if (isCreating.value && props.resourceType === "SCHEMA_GROUP") {
+    if (props.parentDatabaseGroup) {
+      state.environmentId = props.parentDatabaseGroup.environment.uid;
+      state.selectedDatabaseGroupId = props.parentDatabaseGroup.name;
+    } else {
+      const dbGroup = head(dbGroupStore.getAllDatabaseGroupList());
+      if (dbGroup) {
+        state.environmentId = dbGroup.environment.uid;
+        state.selectedDatabaseGroupId = dbGroup.name;
+      }
+    }
+    return;
+  }
+
   const databaseGroup = props.databaseGroup;
   if (!databaseGroup) {
     return;
   }
 
   if (props.resourceType === "DATABASE_GROUP") {
+    const databaseGroupEntity = databaseGroup as DatabaseGroup;
     const [, databaseGroupName] = getProjectNameAndDatabaseGroupName(
       databaseGroup.name
     );
     state.resourceId = databaseGroupName;
+    state.placeholder = databaseGroupEntity.databasePlaceholder;
     const composedDatabaseGroup = await dbGroupStore.getOrFetchDBGroupByName(
       databaseGroup.name
     );
@@ -159,11 +207,14 @@ onMounted(async () => {
       state.expr = composedDatabaseGroup.simpleExpr;
     }
   } else {
-    const schemaGroup = databaseGroup as SchemaGroup;
-    const expression = schemaGroup.tableExpr?.expression ?? "";
+    const schemaGroupEntity = databaseGroup as SchemaGroup;
+    const expression = schemaGroupEntity.tableExpr?.expression ?? "";
     const [projectName, databaseGroupName, schemaGroupName] =
-      getProjectNameAndDatabaseGroupNameAndSchemaGroupName(schemaGroup.name);
+      getProjectNameAndDatabaseGroupNameAndSchemaGroupName(
+        schemaGroupEntity.name
+      );
     state.resourceId = schemaGroupName;
+    state.placeholder = schemaGroupEntity.tablePlaceholder;
     state.selectedDatabaseGroupId = `${projectNamePrefix}${projectName}/${databaseGroupNamePrefix}${databaseGroupName}`;
     const expr = await convertCELStringToExpr(expression);
     state.expr = expr;
@@ -188,12 +239,14 @@ const validateResourceId = async (
   let request = undefined;
   if (props.resourceType === "DATABASE_GROUP") {
     request = dbGroupStore.getOrFetchDBGroupByName(
-      `${props.project.name}/databaseGroups/${resourceId}`
+      `${props.project.name}/${databaseGroupNamePrefix}${resourceId}`,
+      true /* silent */
     );
   } else if (props.resourceType === "SCHEMA_GROUP") {
     if (state.selectedDatabaseGroupId) {
       request = dbGroupStore.getOrFetchSchemaGroupByName(
-        `${state.selectedDatabaseGroupId}/schemaGroups/${resourceId}`
+        `${state.selectedDatabaseGroupId}/${schemaGroupNamePrefix}${resourceId}`,
+        true /* silent */
       );
     }
   }
@@ -227,7 +280,7 @@ defineExpose({
   getFormState: () => {
     return {
       ...state,
-      resourceId: resourceIdInput.value?.resourceId || "",
+      resourceId: resourceIdField.value?.resourceId || "",
     };
   },
 });

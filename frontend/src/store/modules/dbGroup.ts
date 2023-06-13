@@ -61,10 +61,11 @@ export const useDBGroupStore = defineStore("db-group", () => {
   const dbGroupMapByName = ref<Map<string, ComposedDatabaseGroup>>(new Map());
   const schemaGroupMapByName = ref<Map<string, ComposedSchemaGroup>>(new Map());
   const cachedProjectNameSet = ref<Set<string>>(new Set());
+  const cachedDatabaseGroupNameSet = ref<Set<string>>(new Set());
 
   const fetchAllDatabaseGroupList = async () => {
     const { databaseGroups } = await projectServiceClient.listDatabaseGroups({
-      parent: "projects/-",
+      parent: `${projectNamePrefix}-`,
     });
     const composedList = [];
     for (const dbGroup of databaseGroups) {
@@ -79,13 +80,16 @@ export const useDBGroupStore = defineStore("db-group", () => {
     return Array.from(dbGroupMapByName.value.values());
   };
 
-  const getOrFetchDBGroupByName = async (name: string) => {
+  const getOrFetchDBGroupByName = async (name: string, silent = false) => {
     const cached = dbGroupMapByName.value.get(name);
     if (cached) return cached;
 
-    const databaseGroup = await projectServiceClient.getDatabaseGroup({
-      name: name,
-    });
+    const databaseGroup = await projectServiceClient.getDatabaseGroup(
+      {
+        name: name,
+      },
+      { silent }
+    );
     const composedData = await composeDatabaseGroup(databaseGroup);
     dbGroupMapByName.value.set(name, composedData);
     return composedData;
@@ -130,8 +134,6 @@ export const useDBGroupStore = defineStore("db-group", () => {
     >,
     name: string
   ) => {
-    // Note: use resource id as placeholder right now.
-    databaseGroup.databasePlaceholder = name;
     const createdDatabaseGroup = await projectServiceClient.createDatabaseGroup(
       {
         parent: projectName,
@@ -155,6 +157,14 @@ export const useDBGroupStore = defineStore("db-group", () => {
       throw new Error("Database group not found");
     }
     const updateMask: string[] = [];
+    if (
+      !isEqual(
+        rawDatabaseGroup.databasePlaceholder,
+        databaseGroup.databasePlaceholder
+      )
+    ) {
+      updateMask.push("database_placeholder");
+    }
     if (!isEqual(rawDatabaseGroup.databaseExpr, databaseGroup.databaseExpr)) {
       updateMask.push("database_expr");
     }
@@ -176,13 +186,16 @@ export const useDBGroupStore = defineStore("db-group", () => {
     dbGroupMapByName.value.delete(name);
   };
 
-  const getOrFetchSchemaGroupByName = async (name: string) => {
+  const getOrFetchSchemaGroupByName = async (name: string, silent = false) => {
     const cached = schemaGroupMapByName.value.get(name);
     if (cached) return cached;
 
-    const schemaGroup = await projectServiceClient.getSchemaGroup({
-      name: name,
-    });
+    const schemaGroup = await projectServiceClient.getSchemaGroup(
+      {
+        name: name,
+      },
+      { silent }
+    );
     const composedData = await composeSchemaGroup(schemaGroup);
     schemaGroupMapByName.value.set(name, composedData);
     return schemaGroup;
@@ -191,6 +204,12 @@ export const useDBGroupStore = defineStore("db-group", () => {
   const getOrFetchSchemaGroupListByDBGroupName = async (
     dbGroupName: string
   ) => {
+    const hasCache = cachedDatabaseGroupNameSet.value.has(dbGroupName);
+    if (hasCache) {
+      return Array.from(schemaGroupMapByName.value.values()).filter(
+        (schemaGroup) => schemaGroup.name.startsWith(dbGroupName)
+      );
+    }
     const { schemaGroups } = await projectServiceClient.listSchemaGroups({
       parent: dbGroupName,
     });
@@ -200,6 +219,7 @@ export const useDBGroupStore = defineStore("db-group", () => {
       schemaGroupMapByName.value.set(schemaGroup.name, composedData);
       composedList.push(composedData);
     }
+    cachedDatabaseGroupNameSet.value.add(dbGroupName);
     return composedList;
   };
 
@@ -218,8 +238,6 @@ export const useDBGroupStore = defineStore("db-group", () => {
     schemaGroup: Pick<SchemaGroup, "name" | "tablePlaceholder" | "tableExpr">,
     name: string
   ) => {
-    // Note: use resource id as placeholder right now.
-    schemaGroup.tablePlaceholder = name;
     const createdSchemaGroup = await projectServiceClient.createSchemaGroup({
       parent: dbGroupName,
       schemaGroup,
@@ -238,6 +256,11 @@ export const useDBGroupStore = defineStore("db-group", () => {
       throw new Error("Schema group not found");
     }
     const updateMask: string[] = [];
+    if (
+      !isEqual(rawSchemaGroup.tablePlaceholder, schemaGroup.tablePlaceholder)
+    ) {
+      updateMask.push("table_placeholder");
+    }
     if (!isEqual(rawSchemaGroup.tableExpr, schemaGroup.tableExpr)) {
       updateMask.push("table_expr");
     }

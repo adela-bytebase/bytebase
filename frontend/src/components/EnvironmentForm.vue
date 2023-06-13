@@ -24,7 +24,7 @@
             ref="resourceIdField"
             resource-type="environment"
             :readonly="!create"
-            :value="state.environment.name"
+            :value="extractEnvironmentResourceName(state.environment.name)"
             :resource-title="state.environment.title"
             :validate="validateResourceId"
           />
@@ -325,7 +325,11 @@ import { environmentNamePrefix } from "@/store/modules/v1/common";
 import { getErrorCode } from "@/utils/grpcweb";
 import { BBSwitch } from "@/bbkit";
 import { DrawerContent } from "@/components/v2";
-import { hasWorkspacePermissionV1, sqlReviewPolicySlug } from "@/utils";
+import {
+  extractEnvironmentResourceName,
+  hasWorkspacePermissionV1,
+  sqlReviewPolicySlug,
+} from "@/utils";
 import {
   pushNotification,
   useCurrentUserV1,
@@ -507,7 +511,8 @@ const validateResourceId = async (
 
   try {
     const env = await environmentV1Store.getOrFetchEnvironmentByName(
-      environmentNamePrefix + resourceId
+      environmentNamePrefix + resourceId,
+      true /* silent */
     );
     if (env) {
       return [

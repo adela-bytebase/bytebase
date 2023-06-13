@@ -1,8 +1,6 @@
 export * from "./activity";
 export * from "./anomaly";
-export * from "./auditLog";
 export * from "./auth";
-export * from "./backup";
 export * from "./bookmark";
 export * from "./command";
 export * from "./database";
@@ -32,7 +30,6 @@ export * from "./sqlReview";
 export * from "./onboardingState";
 export * from "./onboardingGuide";
 export * from "./schemaEditor";
-export * from "./dbSchema";
 export * from "./idp";
 export * from "./user";
 export * from "./risk";

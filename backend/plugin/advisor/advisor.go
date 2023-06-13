@@ -391,6 +391,20 @@ const (
 
 	// OracleIdentifierCase is an advisor type for Oracle identifier case.
 	OracleIdentifierCase Type = "bb.plugin.advisor.oracle.naming.identifier-case"
+
+	// Snowflake Advisor.
+
+	// SnowflakeNamingTableConvention is an advisor type for Snowflake table naming convention.
+	SnowflakeNamingTableConvention Type = "bb.plugin.advisor.snowflake.naming.table"
+
+	// SnowflakeTableRequirePK is an advisor type for Snowflake table require primary key.
+	SnowflakeTableRequirePK Type = "bb.plugin.advisor.snowflake.table.require-pk"
+
+	// SnowflakeTableNoFK is an advisor type for Snowflake table disallow foreign key.
+	SnowflakeTableNoFK Type = "bb.plugin.advisor.snowflake.table.no-foreign-key"
+
+	// SnowflakeColumnMaximumVarcharLength is an advisor type for Snowflake maximum varchar length.
+	SnowflakeColumnMaximumVarcharLength Type = "bb.plugin.advisor.snowflake.column.maximum-varchar-length"
 )
 
 // Advice is the result of an advisor.
