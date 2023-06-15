@@ -160,12 +160,15 @@
 - [v1/externalvs_service.proto](#v1_externalvs_service-proto)
     - [CreateExternalVersionControlRequest](#bytebase-v1-CreateExternalVersionControlRequest)
     - [DeleteExternalVersionControlRequest](#bytebase-v1-DeleteExternalVersionControlRequest)
+    - [ExchangeToken](#bytebase-v1-ExchangeToken)
+    - [ExchangeTokenRequest](#bytebase-v1-ExchangeTokenRequest)
     - [ExternalVersionControl](#bytebase-v1-ExternalVersionControl)
     - [GetExternalVersionControlRequest](#bytebase-v1-GetExternalVersionControlRequest)
     - [ListExternalVersionControlsRequest](#bytebase-v1-ListExternalVersionControlsRequest)
     - [ListExternalVersionControlsResponse](#bytebase-v1-ListExternalVersionControlsResponse)
     - [ListProjectGitOpsInfoRequest](#bytebase-v1-ListProjectGitOpsInfoRequest)
     - [ListProjectGitOpsInfoResponse](#bytebase-v1-ListProjectGitOpsInfoResponse)
+    - [OAuthToken](#bytebase-v1-OAuthToken)
     - [ProjectGitOpsInfo](#bytebase-v1-ProjectGitOpsInfo)
     - [SearchExternalVersionControlProjectsRequest](#bytebase-v1-SearchExternalVersionControlProjectsRequest)
     - [SearchExternalVersionControlProjectsResponse](#bytebase-v1-SearchExternalVersionControlProjectsResponse)
@@ -196,6 +199,18 @@
     - [IdentityProviderType](#bytebase-v1-IdentityProviderType)
   
     - [IdentityProviderService](#bytebase-v1-IdentityProviderService)
+  
+- [v1/inbox_service.proto](#v1_inbox_service-proto)
+    - [GetInboxSummaryRequest](#bytebase-v1-GetInboxSummaryRequest)
+    - [InboxMessage](#bytebase-v1-InboxMessage)
+    - [InboxSummary](#bytebase-v1-InboxSummary)
+    - [ListInboxRequest](#bytebase-v1-ListInboxRequest)
+    - [ListInboxResponse](#bytebase-v1-ListInboxResponse)
+    - [UpdateInboxRequest](#bytebase-v1-UpdateInboxRequest)
+  
+    - [InboxMessage.Status](#bytebase-v1-InboxMessage-Status)
+  
+    - [InboxService](#bytebase-v1-InboxService)
   
 - [v1/instance_role_service.proto](#v1_instance_role_service-proto)
     - [CreateInstanceRoleRequest](#bytebase-v1-CreateInstanceRoleRequest)
@@ -1236,7 +1251,7 @@ The user&#39;s `name` field is used to identify the user to update. Format: user
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the bookmark. Format: users/{user}/bookmarks/{bookmark}, user and bookmark are server-generated unique IDs. |
+| name | [string](#string) |  | The name of the bookmark. Format: bookmarks/{bookmark}, user and bookmark are server-generated unique IDs. |
 | title | [string](#string) |  | The title of the bookmark. |
 | link | [string](#string) |  | The resource link of the bookmark. Only support issue link for now. Format: Issue: /issue/slug(issue_name)-{issue_uid} Example: /issue/start-here-add-email-column-to-employee-table-101 |
 
@@ -1253,7 +1268,6 @@ The user&#39;s `name` field is used to identify the user to update. Format: user
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| parent | [string](#string) |  | The parent resource of the bookmark. Format: users/{user}, user is a server-generated unique IDs. |
 | bookmark | [Bookmark](#bytebase-v1-Bookmark) |  | The bookmark to create. |
 
 
@@ -1269,7 +1283,7 @@ The user&#39;s `name` field is used to identify the user to update. Format: user
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the bookmark to delete. Format: users/{user}/bookmarks/{bookmark}, user and bookmark are server-generated unique IDs. |
+| name | [string](#string) |  | The name of the bookmark to delete. Format: bookmarks/{bookmark} |
 
 
 
@@ -1284,7 +1298,6 @@ The user&#39;s `name` field is used to identify the user to update. Format: user
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| parent | [string](#string) |  | The parent resource of the bookmark. Format: users/{user}, user is a server-generated unique ID. |
 | page_size | [int32](#int32) |  | Not used. The maximum number of bookmarks to return. The service may return fewer than this value. If unspecified, at most 50 bookmarks will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
 | page_token | [string](#string) |  | Not used. A page token, received from a previous `ListBookmarks` call. Provide this to retrieve the subsequent page.
 
@@ -1326,7 +1339,7 @@ When paginating, all other parameters provided to `ListBookmarks` must match the
 | ----------- | ------------ | ------------- | ------------|
 | CreateBookmark | [CreateBookmarkRequest](#bytebase-v1-CreateBookmarkRequest) | [Bookmark](#bytebase-v1-Bookmark) | CreateBookmark creates a new bookmark. |
 | DeleteBookmark | [DeleteBookmarkRequest](#bytebase-v1-DeleteBookmarkRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) | DeleteBookmark deletes a bookmark. |
-| ListBookmarks | [ListBookmarksRequest](#bytebase-v1-ListBookmarksRequest) | [ListBookmarksResponse](#bytebase-v1-ListBookmarksResponse) | ListBookmark lists bookmarks. |
+| ListBookmarks | [ListBookmarksRequest](#bytebase-v1-ListBookmarksRequest) | [ListBookmarksResponse](#bytebase-v1-ListBookmarksResponse) | ListBookmarks lists bookmarks. |
 
  
 
@@ -2793,6 +2806,41 @@ The environment&#39;s `name` field is used to identify the environment to update
 
 
 
+<a name="bytebase-v1-ExchangeToken"></a>
+
+### ExchangeToken
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the external version control to retrieve the linked projects. Format: externalVersionControls/{externalVersionControl} |
+| code | [string](#string) |  |  |
+| type | [ExternalVersionControl.Type](#bytebase-v1-ExternalVersionControl-Type) |  |  |
+| instance_url | [string](#string) |  |  |
+| client_id | [string](#string) |  |  |
+| client_secret | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-ExchangeTokenRequest"></a>
+
+### ExchangeTokenRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| exchange_token | [ExchangeToken](#bytebase-v1-ExchangeToken) |  |  |
+
+
+
+
+
+
 <a name="bytebase-v1-ExternalVersionControl"></a>
 
 ### ExternalVersionControl
@@ -2885,6 +2933,23 @@ The environment&#39;s `name` field is used to identify the environment to update
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | project_gitops_info | [ProjectGitOpsInfo](#bytebase-v1-ProjectGitOpsInfo) | repeated | The binding between external version control and project. |
+
+
+
+
+
+
+<a name="bytebase-v1-OAuthToken"></a>
+
+### OAuthToken
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| access_token | [string](#string) |  |  |
+| refresh_token | [string](#string) |  |  |
+| expires_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
 
 
 
@@ -3018,6 +3083,7 @@ The environment&#39;s `name` field is used to identify the environment to update
 | ListExternalVersionControls | [ListExternalVersionControlsRequest](#bytebase-v1-ListExternalVersionControlsRequest) | [ListExternalVersionControlsResponse](#bytebase-v1-ListExternalVersionControlsResponse) |  |
 | CreateExternalVersionControl | [CreateExternalVersionControlRequest](#bytebase-v1-CreateExternalVersionControlRequest) | [ExternalVersionControl](#bytebase-v1-ExternalVersionControl) |  |
 | UpdateExternalVersionControl | [UpdateExternalVersionControlRequest](#bytebase-v1-UpdateExternalVersionControlRequest) | [ExternalVersionControl](#bytebase-v1-ExternalVersionControl) |  |
+| ExchangeToken | [ExchangeTokenRequest](#bytebase-v1-ExchangeTokenRequest) | [OAuthToken](#bytebase-v1-OAuthToken) |  |
 | DeleteExternalVersionControl | [DeleteExternalVersionControlRequest](#bytebase-v1-DeleteExternalVersionControlRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
 | SearchExternalVersionControlProjects | [SearchExternalVersionControlProjectsRequest](#bytebase-v1-SearchExternalVersionControlProjectsRequest) | [SearchExternalVersionControlProjectsResponse](#bytebase-v1-SearchExternalVersionControlProjectsResponse) |  |
 | ListProjectGitOpsInfo | [ListProjectGitOpsInfoRequest](#bytebase-v1-ListProjectGitOpsInfoRequest) | [ListProjectGitOpsInfoResponse](#bytebase-v1-ListProjectGitOpsInfoResponse) |  |
@@ -3326,6 +3392,139 @@ The identity provider&#39;s `name` field is used to identify the identity provid
 | DeleteIdentityProvider | [DeleteIdentityProviderRequest](#bytebase-v1-DeleteIdentityProviderRequest) | [.google.protobuf.Empty](#google-protobuf-Empty) |  |
 | UndeleteIdentityProvider | [UndeleteIdentityProviderRequest](#bytebase-v1-UndeleteIdentityProviderRequest) | [IdentityProvider](#bytebase-v1-IdentityProvider) |  |
 | TestIdentityProvider | [TestIdentityProviderRequest](#bytebase-v1-TestIdentityProviderRequest) | [TestIdentityProviderResponse](#bytebase-v1-TestIdentityProviderResponse) |  |
+
+ 
+
+
+
+<a name="v1_inbox_service-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## v1/inbox_service.proto
+
+
+
+<a name="bytebase-v1-GetInboxSummaryRequest"></a>
+
+### GetInboxSummaryRequest
+
+
+
+
+
+
+
+<a name="bytebase-v1-InboxMessage"></a>
+
+### InboxMessage
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The message name in inbox/{uid} format. |
+| activity_uid | [string](#string) |  |  |
+| status | [InboxMessage.Status](#bytebase-v1-InboxMessage-Status) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-InboxSummary"></a>
+
+### InboxSummary
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| has_unread | [bool](#bool) |  |  |
+| has_unread_error | [bool](#bool) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-ListInboxRequest"></a>
+
+### ListInboxRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| filter | [string](#string) |  | filter is the filter to apply on the list inbox request, follow the [ebnf](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form) syntax. The field only support in filter: - &#34;create_time&#34; with &#34;&gt;=&#34; operator, example: - create_time &gt;= &#34;2022-01-01T12:00:00.000Z&#34; |
+| page_size | [int32](#int32) |  | Not used. The maximum number of inbox to return. The service may return fewer than this value. If unspecified, at most 100 log entries will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
+| page_token | [string](#string) |  | Not used. A page token, received from a previous `ListInbox` call. Provide this to retrieve the subsequent page. |
+
+
+
+
+
+
+<a name="bytebase-v1-ListInboxResponse"></a>
+
+### ListInboxResponse
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| inbox_messages | [InboxMessage](#bytebase-v1-InboxMessage) | repeated | The list of inbox messages. |
+| next_page_token | [string](#string) |  | A token to retrieve next page of inbox. Pass this value in the page_token field in the subsequent call to `ListLogs` method to retrieve the next page of log entities. |
+
+
+
+
+
+
+<a name="bytebase-v1-UpdateInboxRequest"></a>
+
+### UpdateInboxRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| inbox_message | [InboxMessage](#bytebase-v1-InboxMessage) |  | The inbox message to update. |
+| update_mask | [google.protobuf.FieldMask](#google-protobuf-FieldMask) |  | The list of fields to update. |
+
+
+
+
+
+ 
+
+
+<a name="bytebase-v1-InboxMessage-Status"></a>
+
+### InboxMessage.Status
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| STATUS_UNSPECIFIED | 0 |  |
+| STATUS_UNREAD | 1 |  |
+| STATUS_READ | 2 |  |
+
+
+ 
+
+ 
+
+
+<a name="bytebase-v1-InboxService"></a>
+
+### InboxService
+
+
+| Method Name | Request Type | Response Type | Description |
+| ----------- | ------------ | ------------- | ------------|
+| ListInbox | [ListInboxRequest](#bytebase-v1-ListInboxRequest) | [ListInboxResponse](#bytebase-v1-ListInboxResponse) |  |
+| GetInboxSummary | [GetInboxSummaryRequest](#bytebase-v1-GetInboxSummaryRequest) | [InboxSummary](#bytebase-v1-InboxSummary) |  |
+| UpdateInbox | [UpdateInboxRequest](#bytebase-v1-UpdateInboxRequest) | [InboxMessage](#bytebase-v1-InboxMessage) |  |
 
  
 

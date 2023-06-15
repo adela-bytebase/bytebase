@@ -1,12 +1,10 @@
 import { Anomaly } from "./anomaly";
 import { BackupSetting } from "./backup";
-import { Bookmark } from "./bookmark";
 import { EMPTY_ID, UNKNOWN_ID } from "./const";
 import { Database } from "./database";
 import { DataSource } from "./dataSource";
 import { Environment } from "./environment";
 import { CommandId, CommandRegisterId, PrincipalId } from "./id";
-import { Inbox } from "./inbox";
 import { Instance } from "./instance";
 import { Issue } from "./issue";
 import { Pipeline, Stage, Task, TaskProgress } from "./pipeline";
@@ -94,7 +92,6 @@ export type ResourceType =
   | "TASK"
   | "ACTIVITY"
   | "INBOX"
-  | "BOOKMARK"
   | "VCS"
   | "REPOSITORY"
   | "ANOMALY"
@@ -117,8 +114,6 @@ interface ResourceMaker {
   (type: "STAGE"): Stage;
   (type: "TASK_PROGRESS"): TaskProgress;
   (type: "TASK"): Task;
-  (type: "INBOX"): Inbox;
-  (type: "BOOKMARK"): Bookmark;
   (type: "VCS"): VCS;
   (type: "ANOMALY"): Anomaly;
   (type: "SQL_REVIEW"): SQLReviewPolicy;
@@ -292,19 +287,6 @@ const makeUnknown = (type: ResourceType) => {
     progress: { ...UNKNOWN_TASK_PROGRESS },
   };
 
-  const UNKNOWN_INBOX: Inbox = {
-    id: UNKNOWN_ID,
-    activityId: UNKNOWN_ID,
-    status: "READ",
-  };
-
-  const UNKNOWN_BOOKMARK: Bookmark = {
-    id: UNKNOWN_ID,
-    creatorID: UNKNOWN_ID,
-    name: "",
-    link: "",
-  };
-
   const UNKNOWN_VCS: VCS = {
     id: UNKNOWN_ID,
     name: "",
@@ -362,10 +344,6 @@ const makeUnknown = (type: ResourceType) => {
       return UNKNOWN_TASK_PROGRESS;
     case "TASK":
       return UNKNOWN_TASK;
-    case "INBOX":
-      return UNKNOWN_INBOX;
-    case "BOOKMARK":
-      return UNKNOWN_BOOKMARK;
     case "VCS":
       return UNKNOWN_VCS;
     case "ANOMALY":
@@ -543,19 +521,6 @@ const makeEmpty = (type: ResourceType) => {
     progress: { ...EMPTY_TASK_PROGRESS },
   };
 
-  const EMPTY_INBOX: Inbox = {
-    id: EMPTY_ID,
-    activityId: EMPTY_ID,
-    status: "READ",
-  };
-
-  const EMPTY_BOOKMARK: Bookmark = {
-    id: EMPTY_ID,
-    creatorID: EMPTY_ID,
-    name: "",
-    link: "",
-  };
-
   const EMPTY_VCS: VCS = {
     id: EMPTY_ID,
     name: "",
@@ -613,10 +578,6 @@ const makeEmpty = (type: ResourceType) => {
       return EMPTY_TASK_PROGRESS;
     case "TASK":
       return EMPTY_TASK;
-    case "INBOX":
-      return EMPTY_INBOX;
-    case "BOOKMARK":
-      return EMPTY_BOOKMARK;
     case "VCS":
       return EMPTY_VCS;
     case "ANOMALY":

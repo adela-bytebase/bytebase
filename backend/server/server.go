@@ -510,15 +510,12 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	apiGroup.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return aclMiddleware(s, internalAPIPrefix, ce, next, profile.Readonly)
 	})
-	s.registerOAuthRoutes(apiGroup)
 	s.registerDatabaseRoutes(apiGroup)
 	s.registerIssueRoutes(apiGroup)
 	s.registerIssueSubscriberRoutes(apiGroup)
 	s.registerTaskRoutes(apiGroup)
 	s.registerStageRoutes(apiGroup)
 	s.registerActivityRoutes(apiGroup)
-	s.registerInboxRoutes(apiGroup)
-	s.registerBookmarkRoutes(apiGroup)
 	s.registerSQLRoutes(apiGroup)
 	s.registerAnomalyRoutes(apiGroup)
 
@@ -599,9 +596,11 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	v1pb.RegisterReviewServiceServer(s.grpcServer, v1.NewReviewService(s.store, s.ActivityManager, s.TaskScheduler, s.stateCfg))
 	v1pb.RegisterRolloutServiceServer(s.grpcServer, v1.NewRolloutService(s.store, s.licenseService, s.dbFactory, s.TaskScheduler, s.TaskCheckScheduler, s.stateCfg, s.ActivityManager))
 	v1pb.RegisterRoleServiceServer(s.grpcServer, v1.NewRoleService(s.store, s.licenseService))
-	v1pb.RegisterSheetServiceServer(s.grpcServer, v1.NewSheetService(s.store))
+	v1pb.RegisterSheetServiceServer(s.grpcServer, v1.NewSheetService(s.store, s.licenseService))
 	v1pb.RegisterCelServiceServer(s.grpcServer, v1.NewCelService())
 	v1pb.RegisterLoggingServiceServer(s.grpcServer, v1.NewLoggingService(s.store))
+	v1pb.RegisterBookmarkServiceServer(s.grpcServer, v1.NewBookmarkService(s.store))
+	v1pb.RegisterInboxServiceServer(s.grpcServer, v1.NewInboxService(s.store))
 	reflection.Register(s.grpcServer)
 
 	// REST gateway proxy.
@@ -663,6 +662,12 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		return nil, err
 	}
 	if err := v1pb.RegisterLoggingServiceHandler(ctx, mux, grpcConn); err != nil {
+		return nil, err
+	}
+	if err := v1pb.RegisterBookmarkServiceHandler(ctx, mux, grpcConn); err != nil {
+		return nil, err
+	}
+	if err := v1pb.RegisterInboxServiceHandler(ctx, mux, grpcConn); err != nil {
 		return nil, err
 	}
 	e.Any("/v1/*", echo.WrapHandler(mux))
@@ -800,6 +805,19 @@ func (s *Server) getInitSetting(ctx context.Context, datastore *store.Store) (*w
 		Name:        api.SettingPluginOpenAIEndpoint,
 		Value:       "",
 		Description: "API Endpoint for OpenAI",
+	}, api.SystemBotID); err != nil {
+		return nil, err
+	}
+
+	// initial external approval setting
+	externalApprovalSettingValue, err := protojson.Marshal(&storepb.ExternalApprovalSetting{})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal initial external approval setting")
+	}
+	if _, _, err := datastore.CreateSettingIfNotExistV2(ctx, &store.SettingMessage{
+		Name:        api.SettingWorkspaceExternalApproval,
+		Value:       string(externalApprovalSettingValue),
+		Description: "The external approval setting",
 	}, api.SystemBotID); err != nil {
 		return nil, err
 	}

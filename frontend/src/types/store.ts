@@ -1,6 +1,5 @@
 import { MigrationHistoryId, QueryHistory, OnboardingGuideType } from ".";
 import { Backup } from "./backup";
-import { Bookmark } from "./bookmark";
 import { Command } from "./common";
 import { Database } from "./database";
 import { DataSource } from "./dataSource";
@@ -10,11 +9,9 @@ import {
   DataSourceId,
   InstanceId,
   IssueId,
-  PrincipalId,
   ProjectId,
   VCSId,
 } from "./id";
-import { Inbox, InboxSummary } from "./inbox";
 import { Instance, MigrationHistory } from "./instance";
 import { InstanceUser } from "./InstanceUser";
 import { Issue } from "./issue";
@@ -28,15 +25,6 @@ import { DatabaseMetadata } from "./proto/store/database";
 
 export interface PrincipalState {
   principalList: Principal[];
-}
-
-export interface BookmarkState {
-  bookmarkList: Map<PrincipalId, Bookmark[]>;
-}
-
-export interface InboxState {
-  inboxListByUser: Map<PrincipalId, Inbox[]>;
-  inboxSummaryByUser: Map<PrincipalId, InboxSummary>;
 }
 
 export interface IssueState {
