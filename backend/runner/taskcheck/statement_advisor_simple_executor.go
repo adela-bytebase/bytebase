@@ -46,7 +46,7 @@ func (e *StatementAdvisorSimpleExecutor) Run(ctx context.Context, taskCheckRun *
 		return nil, err
 	}
 
-	sheet, err := e.store.GetSheet(ctx, &api.SheetFind{ID: &payload.SheetID}, api.SystemBotID)
+	sheet, err := e.store.GetSheetV2(ctx, &store.FindSheetMessage{UID: &payload.SheetID}, api.SystemBotID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get sheet %d", payload.SheetID)
 	}
@@ -81,6 +81,8 @@ func (e *StatementAdvisorSimpleExecutor) Run(ctx context.Context, taskCheckRun *
 			advisorType = advisor.PostgreSQLSyntax
 		case db.Oracle:
 			advisorType = advisor.OracleSyntax
+		case db.Snowflake:
+			advisorType = advisor.SnowflakeSyntax
 		default:
 			return nil, common.Errorf(common.Invalid, "invalid database type: %s for syntax statement advisor", instance.Engine)
 		}

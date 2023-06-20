@@ -15,11 +15,18 @@
         :key="index"
         class="w-full border-b mb-4 pb-4"
       >
-        <AddProjectMemberForm :project="project" :binding="binding" />
+        <AddProjectMemberForm
+          :project="project"
+          :binding="binding"
+          :allow-remove="state.bindings.length > 1"
+          @remove="handleRemove(binding, index)"
+        />
       </div>
       <div>
         <NButton @click="handleAddMore">
-          <heroicons-solid:plus class="w-5 h-auto" />Add more
+          <heroicons-solid:plus class="w-5 h-auto" />{{
+            $t("project.members.add-more")
+          }}
         </NButton>
       </div>
       <template #footer>
@@ -41,7 +48,7 @@ import { Binding } from "@/types/proto/v1/project_service";
 import { computed, onMounted } from "vue";
 import { reactive } from "vue";
 import AddProjectMemberForm from "./AddProjectMemberForm.vue";
-import { cloneDeep } from "lodash-es";
+import { cloneDeep, pullAt } from "lodash-es";
 import {
   pushNotification,
   useProjectIamPolicy,
@@ -81,6 +88,10 @@ onMounted(() => {
 
 const handleAddMore = () => {
   state.bindings.push(Binding.fromPartial({}));
+};
+
+const handleRemove = (binding: Binding, index: number) => {
+  pullAt(state.bindings, index);
 };
 
 const addMembers = async () => {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
@@ -48,10 +49,6 @@ type Driver struct {
 	binlogDir     string
 	db            *sql.DB
 	databaseName  string
-	// migrationConn is used to execute migrations.
-	// Use a single connection for executing migrations in the lifetime of the driver can keep the thread ID unchanged.
-	// So that it's easy to get the thread ID for rollback SQL.
-	migrationConn *sql.Conn
 	sshClient     *ssh.Client
 
 	replayedBinlogBytes *common.CountingReader
@@ -66,7 +63,7 @@ func newDriver(dc db.DriverConfig) db.Driver {
 }
 
 // Open opens a MySQL driver.
-func (driver *Driver) Open(ctx context.Context, dbType db.Type, connCfg db.ConnectionConfig, connCtx db.ConnectionContext) (db.Driver, error) {
+func (driver *Driver) Open(_ context.Context, dbType db.Type, connCfg db.ConnectionConfig, connCtx db.ConnectionContext) (db.Driver, error) {
 	protocol := "tcp"
 	if strings.HasPrefix(connCfg.Host, "/") {
 		protocol = "unix"
@@ -106,16 +103,12 @@ func (driver *Driver) Open(ctx context.Context, dbType db.Type, connCfg db.Conne
 	if err != nil {
 		return nil, err
 	}
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		var errList error
-		errList = multierr.Append(errList, err)
-		errList = multierr.Append(errList, db.Close())
-		return nil, errList
-	}
 	driver.dbType = dbType
 	driver.db = db
-	driver.migrationConn = conn
+	// TODO(d): remove the work-around once we have clean-up the migration connection hack.
+	db.SetConnMaxLifetime(2 * time.Hour)
+	db.SetMaxOpenConns(50)
+	db.SetMaxIdleConns(15)
 	driver.connectionCtx = connCtx
 	driver.connCfg = connCfg
 	driver.databaseName = connCfg.Database
@@ -127,7 +120,6 @@ func (driver *Driver) Open(ctx context.Context, dbType db.Type, connCfg db.Conne
 func (driver *Driver) Close(context.Context) error {
 	var err error
 	err = multierr.Append(err, driver.db.Close())
-	err = multierr.Append(err, driver.migrationConn.Close())
 	if driver.sshClient != nil {
 		err = multierr.Append(err, driver.sshClient.Close())
 	}
@@ -149,29 +141,6 @@ func (driver *Driver) GetDB() *sql.DB {
 	return driver.db
 }
 
-// getDatabases gets all databases of an instance.
-func getDatabases(ctx context.Context, txn *sql.Tx) ([]string, error) {
-	var dbNames []string
-	query := "SHOW DATABASES"
-	rows, err := txn.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		dbNames = append(dbNames, name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, util.FormatErrorWithQuery(err, query)
-	}
-	return dbNames, nil
-}
-
 // getVersion gets the version.
 func (driver *Driver) getVersion(ctx context.Context) (string, error) {
 	query := "SELECT VERSION()"
@@ -186,15 +155,25 @@ func (driver *Driver) getVersion(ctx context.Context) (string, error) {
 }
 
 // Execute executes a SQL statement.
-func (driver *Driver) Execute(ctx context.Context, statement string, _ bool) (int64, error) {
+func (driver *Driver) Execute(ctx context.Context, statement string, _ bool, opts db.ExecuteOptions) (int64, error) {
+	conn, err := driver.db.Conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	if opts.BeginFunc != nil {
+		if err := opts.BeginFunc(ctx, conn); err != nil {
+			return 0, err
+		}
+	}
 	trunks, err := splitAndTransformDelimiter(statement)
 	if err != nil {
 		return 0, err
 	}
 
-	tx, err := driver.migrationConn.BeginTx(ctx, nil)
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrapf(err, "failed to begin execute transaction")
 	}
 	defer tx.Rollback()
 
@@ -202,7 +181,7 @@ func (driver *Driver) Execute(ctx context.Context, statement string, _ bool) (in
 	for _, trunk := range trunks {
 		sqlResult, err := tx.ExecContext(ctx, trunk)
 		if err != nil {
-			return 0, err
+			return 0, errors.Wrapf(err, "failed to execute context in a transaction")
 		}
 		rowsAffected, err := sqlResult.RowsAffected()
 		if err != nil {
@@ -213,19 +192,10 @@ func (driver *Driver) Execute(ctx context.Context, statement string, _ bool) (in
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, errors.Wrapf(err, "failed to commit execute transaction")
 	}
 
 	return totalRowsAffected, nil
-}
-
-// GetMigrationConnID gets the ID of the connection executing migrations.
-func (driver *Driver) GetMigrationConnID(ctx context.Context) (string, error) {
-	var id string
-	if err := driver.migrationConn.QueryRowContext(ctx, "SELECT CONNECTION_ID();").Scan(&id); err != nil {
-		return "", errors.Wrap(err, "failed to get the connection ID")
-	}
-	return id, nil
 }
 
 // QueryConn querys a SQL statement in a given connection.

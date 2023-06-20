@@ -1471,11 +1471,13 @@
       "show-inactive": "Mostrar miembros inactivos",
       "select-users": "Seleccionar usuarios",
       "assign-role": "Asignar rol",
-      "role-never-expires": "Este rol nunca expira."
+      "never-expires": "Nunca caduca",
+      "role-never-expires": "Este rol nunca expira.",
+      "add-more": "Más información"
     },
     "mode": {
       "standard": "Modo Estándar",
-      "tenant": "Modo Inquilino"
+      "batch": "Modo Lote"
     },
     "db-name-template": "Plantilla de nombre de base de datos del inquilino",
     "select": "Seleccionar proyecto",
@@ -1891,8 +1893,8 @@
         "upgrade": "@:{'subscription.upgrade'} para obtener más cuota de instancias."
       },
       "bb-feature-multi-tenancy": {
-        "title": "Multi-tenencia",
-        "desc": "Gestión inteligente de la base de datos para inquilinos que utilizan esquemas idénticos."
+        "title": "Modo Lote",
+        "desc": "Cambio por lotes de un grupo de bases de datos de diferentes inquilinos o particiones."
       },
       "bb-feature-approval-policy": {
         "title": "Política de implementación",
@@ -2424,7 +2426,7 @@
       "external-approval": {
         "self": "Aprobación externa",
         "delete": "¿Eliminar nodo de aprobación externo?",
-        "endpoint": "punto final",
+        "endpoint": "Endpoint",
         "view-node": "Ver nodo de aprobación externo",
         "create-node": "Crear nodo de aprobación externo",
         "edit-node": "Editar nodo de aprobación externo"
@@ -2550,6 +2552,7 @@
       "edit": "Editar grupo de tablas"
     },
     "factor": {
+      "resource_instance_id": "ID de instancia",
       "resource_database_name": "Nombre de la base de datos",
       "resource_table_name": "Nombre de la tabla"
     },

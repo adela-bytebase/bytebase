@@ -362,6 +362,19 @@ func (s *DatabaseService) GetDatabaseMetadata(ctx context.Context, request *v1pb
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
+	if dbSchema == nil {
+		if err := s.schemaSyncer.SyncDatabaseSchema(ctx, database, true /* force */); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to sync database schema for database %q, error %v", databaseName, err)
+		}
+		newDBSchema, err := s.store.GetDBSchema(ctx, database.UID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, err.Error())
+		}
+		if newDBSchema == nil {
+			return nil, status.Errorf(codes.NotFound, "database schema %q not found", databaseName)
+		}
+		dbSchema = newDBSchema
+	}
 	return convertDatabaseMetadata(dbSchema.Metadata), nil
 }
 
@@ -386,7 +399,17 @@ func (s *DatabaseService) GetDatabaseSchema(ctx context.Context, request *v1pb.G
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 	if dbSchema == nil {
-		return nil, status.Errorf(codes.NotFound, "database schema %q not found", databaseName)
+		if err := s.schemaSyncer.SyncDatabaseSchema(ctx, database, true /* force */); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to sync database schema for database %q, error %v", databaseName, err)
+		}
+		newDBSchema, err := s.store.GetDBSchema(ctx, database.UID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, err.Error())
+		}
+		if newDBSchema == nil {
+			return nil, status.Errorf(codes.NotFound, "database schema %q not found", databaseName)
+		}
+		dbSchema = newDBSchema
 	}
 	instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{ResourceID: &database.InstanceID})
 	if err != nil {
@@ -1527,7 +1550,7 @@ func convertDatabaseMetadata(metadata *storepb.DatabaseMetadata) *v1pb.DatabaseM
 }
 
 func (s *DatabaseService) createTransferProjectActivity(ctx context.Context, newProject *store.ProjectMessage, updaterID int, databases ...*store.DatabaseMessage) error {
-	var creates []*api.ActivityCreate
+	var creates []*store.ActivityMessage
 	for _, database := range databases {
 		oldProject, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{ResourceID: &database.ProjectID})
 		if err != nil {
@@ -1541,25 +1564,25 @@ func (s *DatabaseService) createTransferProjectActivity(ctx context.Context, new
 			return err
 		}
 		creates = append(creates,
-			&api.ActivityCreate{
-				CreatorID:   updaterID,
-				ContainerID: oldProject.UID,
-				Type:        api.ActivityProjectDatabaseTransfer,
-				Level:       api.ActivityInfo,
-				Comment:     fmt.Sprintf("Transferred out database %q to project %q.", database.DatabaseName, newProject.Title),
-				Payload:     string(bytes),
+			&store.ActivityMessage{
+				CreatorUID:   updaterID,
+				ContainerUID: oldProject.UID,
+				Type:         api.ActivityProjectDatabaseTransfer,
+				Level:        api.ActivityInfo,
+				Comment:      fmt.Sprintf("Transferred out database %q to project %q.", database.DatabaseName, newProject.Title),
+				Payload:      string(bytes),
 			},
-			&api.ActivityCreate{
-				CreatorID:   updaterID,
-				ContainerID: newProject.UID,
-				Type:        api.ActivityProjectDatabaseTransfer,
-				Level:       api.ActivityInfo,
-				Comment:     fmt.Sprintf("Transferred in database %q from project %q.", database.DatabaseName, oldProject.Title),
-				Payload:     string(bytes),
+			&store.ActivityMessage{
+				CreatorUID:   updaterID,
+				ContainerUID: newProject.UID,
+				Type:         api.ActivityProjectDatabaseTransfer,
+				Level:        api.ActivityInfo,
+				Comment:      fmt.Sprintf("Transferred in database %q from project %q.", database.DatabaseName, oldProject.Title),
+				Payload:      string(bytes),
 			},
 		)
 	}
-	if _, err := s.store.BatchCreateActivity(ctx, creates); err != nil {
+	if _, err := s.store.BatchCreateActivityV2(ctx, creates); err != nil {
 		log.Warn("failed to create activities for database project updates", zap.Error(err))
 	}
 	return nil

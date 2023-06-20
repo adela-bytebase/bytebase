@@ -883,12 +883,18 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return SnowflakeTableNamingNoKeyword, nil
 		}
 	case SchemaRuleIdentifierNoKeyword:
-		if engine == db.Oracle {
+		switch engine {
+		case db.Oracle:
 			return OracleIdentifierNamingNoKeyword, nil
+		case db.Snowflake:
+			return SnowflakeIdentifierNamingNoKeyword, nil
 		}
 	case SchemaRuleIdentifierCase:
-		if engine == db.Oracle {
+		switch engine {
+		case db.Oracle:
 			return OracleIdentifierCase, nil
+		case db.Snowflake:
+			return SnowflakeIdentifierCase, nil
 		}
 	case SchemaRuleRequiredColumn:
 		switch engine {
@@ -898,6 +904,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return PostgreSQLColumnRequirement, nil
 		case db.Oracle:
 			return OracleColumnRequirement, nil
+		case db.Snowflake:
+			return SnowflakeColumnRequirement, nil
 		}
 	case SchemaRuleColumnNotNull:
 		switch engine {
@@ -907,6 +915,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return PostgreSQLColumnNoNull, nil
 		case db.Oracle:
 			return OracleColumnNoNull, nil
+		case db.Snowflake:
+			return SnowflakeColumnNoNull, nil
 		}
 	case SchemaRuleColumnDisallowChangeType:
 		switch engine {

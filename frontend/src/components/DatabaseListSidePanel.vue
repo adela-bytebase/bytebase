@@ -8,29 +8,51 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, watchEffect } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import { cloneDeep, uniqBy } from "lodash-es";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Action, defineAction, useRegisterActions } from "@bytebase/vue-kbar";
 import type { BBOutlineItem } from "@/bbkit/types";
 import { UNKNOWN_USER_NAME } from "@/types";
-import { databaseV1Slug, environmentV1Name, projectV1Slug } from "@/utils";
+import {
+  databaseV1Slug,
+  environmentV1Name,
+  projectV1Slug,
+  isDatabaseV1Accessible,
+} from "@/utils";
 import {
   useEnvironmentV1List,
   useDatabaseV1Store,
   useCurrentUserV1,
+  usePolicyV1Store,
 } from "@/store";
 import { State } from "@/types/proto/v1/common";
 import { TenantMode } from "@/types/proto/v1/project_service";
+import {
+  Policy,
+  PolicyResourceType,
+  PolicyType,
+} from "@/types/proto/v1/org_policy_service";
 
 const { t } = useI18n();
 const databaseV1Store = useDatabaseV1Store();
 const router = useRouter();
-
 const currentUserV1 = useCurrentUserV1();
-
 const rawEnvironmentList = useEnvironmentV1List();
+
+const policyList = ref<Policy[]>([]);
+
+const preparePolicyList = () => {
+  usePolicyV1Store()
+    .fetchPolicies({
+      resourceType: PolicyResourceType.DATABASE,
+      policyType: PolicyType.ACCESS_CONTROL,
+    })
+    .then((list) => (policyList.value = list));
+};
+
+watchEffect(preparePolicyList);
 
 // Reserve the environment list, put "Prod" to the top.
 const environmentList = computed(() =>
@@ -52,7 +74,10 @@ watchEffect(prepareList);
 const databaseList = computed(() => {
   return databaseV1Store
     .databaseListByUser(currentUserV1.value)
-    .filter((db) => db.syncState === State.ACTIVE);
+    .filter((db) => db.syncState === State.ACTIVE)
+    .filter((database) =>
+      isDatabaseV1Accessible(database, policyList.value, currentUserV1.value)
+    );
 });
 
 const databaseListByEnvironment = computed(() => {
@@ -74,7 +99,7 @@ const databaseListByEnvironment = computed(() => {
     if (dbList) {
       dbList.push({
         id: `bb.database.${database.uid}`,
-        name: database.databaseName,
+        name: `${database.databaseName} (${database.instanceEntity.title})`,
         link: `/db/${databaseV1Slug(database)}`,
       });
     }
@@ -123,7 +148,7 @@ const tenantDatabaseListByProject = computed((): BBOutlineItem[] => {
         name: project.title,
         childList: databaseList.map<BBOutlineItem>((db) => ({
           id: `bb.project.${project.uid}.database.${db.databaseName}`,
-          name: db.databaseName,
+          name: `${db.databaseName} (${db.instanceEntity.title})`,
           link: `/project/${projectV1Slug(project)}#databases`,
         })),
         childCollapse: true,

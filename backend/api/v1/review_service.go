@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -20,6 +22,7 @@ import (
 	"github.com/bytebase/bytebase/backend/component/activity"
 	"github.com/bytebase/bytebase/backend/component/state"
 	api "github.com/bytebase/bytebase/backend/legacyapi"
+	"github.com/bytebase/bytebase/backend/runner/relay"
 	"github.com/bytebase/bytebase/backend/runner/taskcheck"
 	"github.com/bytebase/bytebase/backend/runner/taskrun"
 	"github.com/bytebase/bytebase/backend/store"
@@ -35,32 +38,58 @@ type ReviewService struct {
 	activityManager    *activity.Manager
 	taskScheduler      *taskrun.Scheduler
 	taskCheckScheduler *taskcheck.Scheduler
+	relayRunner        *relay.Runner
 	stateCfg           *state.State
 }
 
 // NewReviewService creates a new ReviewService.
-func NewReviewService(store *store.Store, activityManager *activity.Manager, taskScheduler *taskrun.Scheduler, stateCfg *state.State) *ReviewService {
+func NewReviewService(store *store.Store, activityManager *activity.Manager, taskScheduler *taskrun.Scheduler, taskCheckScheduler *taskcheck.Scheduler, relayRunner *relay.Runner, stateCfg *state.State) *ReviewService {
 	return &ReviewService{
-		store:           store,
-		activityManager: activityManager,
-		taskScheduler:   taskScheduler,
-		stateCfg:        stateCfg,
+		store:              store,
+		activityManager:    activityManager,
+		taskScheduler:      taskScheduler,
+		taskCheckScheduler: taskCheckScheduler,
+		relayRunner:        relayRunner,
+		stateCfg:           stateCfg,
 	}
 }
 
 // GetReview gets a review.
 // Currently, only review.ApprovalTemplates and review.Approvers are set.
 func (s *ReviewService) GetReview(ctx context.Context, request *v1pb.GetReviewRequest) (*v1pb.Review, error) {
-	reviewID, err := getReviewID(request.Name)
+	issue, err := s.getIssue(ctx, request.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+		return nil, err
 	}
-	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
+	if request.Force {
+		externalApprovalType := api.ExternalApprovalTypeRelay
+		approvals, err := s.store.ListExternalApprovalV2(ctx, &store.ListExternalApprovalMessage{
+			Type:     &externalApprovalType,
+			IssueUID: &issue.UID,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to list external approvals, error: %v", err)
+		}
+		var errs error
+		for _, approval := range approvals {
+			msg := relay.CheckExternalApprovalChanMessage{
+				ExternalApproval: approval,
+				ErrChan:          make(chan error, 1),
+			}
+			s.relayRunner.CheckExternalApprovalChan <- msg
+			err := <-msg.ErrChan
+			if err != nil {
+				err = errors.Wrapf(err, "failed to check external approval status, issueUID %d", approval.IssueUID)
+				errs = multierr.Append(errs, err)
+			}
+		}
+		if errs != nil {
+			return nil, status.Errorf(codes.Internal, "failed to check external approval status, error: %v", errs)
+		}
+	}
+	issue, err = s.getIssue(ctx, request.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
-	}
-	if issue == nil {
-		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
+		return nil, err
 	}
 	review, err := convertToReview(ctx, s.store, issue)
 	if err != nil {
@@ -71,16 +100,9 @@ func (s *ReviewService) GetReview(ctx context.Context, request *v1pb.GetReviewRe
 
 // ApproveReview approves the approval flow of the review.
 func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.ApproveReviewRequest) (*v1pb.Review, error) {
-	reviewID, err := getReviewID(request.Name)
+	issue, err := s.getIssue(ctx, request.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
-	}
-	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
-	}
-	if issue == nil {
-		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
+		return nil, err
 	}
 	payload := &storepb.IssuePayload{}
 	if err := protojson.Unmarshal([]byte(issue.Payload), payload); err != nil {
@@ -138,6 +160,25 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 		return nil, status.Errorf(codes.Internal, "failed to check if the approval is approved, error: %v", err)
 	}
 
+	newApprovers, activityCreates, err := utils.HandleIncomingApprovalSteps(ctx, s.store, s.relayRunner.Client, issue, payload.Approval)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to handle incoming approval steps, error: %v", err)
+	}
+
+	payload.Approval.Approvers = append(payload.Approval.Approvers, newApprovers...)
+	payloadBytes, err := protojson.Marshal(payload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal issue payload, error: %v", err)
+	}
+	payloadStr := string(payloadBytes)
+
+	issue, err = s.store.UpdateIssueV2(ctx, issue.UID, &store.UpdateIssueMessage{
+		Payload: &payloadStr,
+	}, api.SystemBotID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update issue, error: %v", err)
+	}
+
 	// Grant the privilege if the issue is approved.
 	if approved && issue.Type == api.IssueGrantRequest {
 		policy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{ProjectID: &issue.Project.ResourceID})
@@ -191,34 +232,15 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 			return nil, err
 		}
 		// Post project IAM policy update activity.
-		if _, err := s.activityManager.CreateActivity(ctx, &api.ActivityCreate{
-			CreatorID:   api.SystemBotID,
-			ContainerID: issue.Project.UID,
-			Type:        api.ActivityProjectMemberCreate,
-			Level:       api.ActivityInfo,
-			Comment:     fmt.Sprintf("Granted %s to %s (%s).", newUser.Name, newUser.Email, role),
+		if _, err := s.activityManager.CreateActivity(ctx, &store.ActivityMessage{
+			CreatorUID:   api.SystemBotID,
+			ContainerUID: issue.Project.UID,
+			Type:         api.ActivityProjectMemberCreate,
+			Level:        api.ActivityInfo,
+			Comment:      fmt.Sprintf("Granted %s to %s (%s).", newUser.Name, newUser.Email, role),
 		}, &activity.Metadata{}); err != nil {
 			log.Warn("Failed to create project activity", zap.Error(err))
 		}
-	}
-
-	newApprovers, activityCreates, err := utils.HandleIncomingApprovalSteps(ctx, s.store, issue, payload.Approval)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to handle incoming approval steps, error: %v", err)
-	}
-
-	payload.Approval.Approvers = append(payload.Approval.Approvers, newApprovers...)
-	payloadBytes, err := protojson.Marshal(payload)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to marshal issue payload, error: %v", err)
-	}
-	payloadStr := string(payloadBytes)
-
-	issue, err = s.store.UpdateIssueV2(ctx, issue.UID, &store.UpdateIssueMessage{
-		Payload: &payloadStr,
-	}, api.SystemBotID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update issue, error: %v", err)
 	}
 
 	// It's ok to fail to create activity.
@@ -234,13 +256,13 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 		if err != nil {
 			return err
 		}
-		create := &api.ActivityCreate{
-			CreatorID:   principalID,
-			ContainerID: issue.UID,
-			Type:        api.ActivityIssueCommentCreate,
-			Level:       api.ActivityInfo,
-			Comment:     request.Comment,
-			Payload:     string(activityPayload),
+		create := &store.ActivityMessage{
+			CreatorUID:   principalID,
+			ContainerUID: issue.UID,
+			Type:         api.ActivityIssueCommentCreate,
+			Level:        api.ActivityInfo,
+			Comment:      request.Comment,
+			Payload:      string(activityPayload),
 		}
 		if _, err := s.activityManager.CreateActivity(ctx, create, &activity.Metadata{}); err != nil {
 			return err
@@ -278,13 +300,13 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 			return err
 		}
 
-		create := &api.ActivityCreate{
-			CreatorID:   api.SystemBotID,
-			ContainerID: issue.UID,
-			Type:        api.ActivityIssueApprovalNotify,
-			Level:       api.ActivityInfo,
-			Comment:     "",
-			Payload:     string(activityPayload),
+		create := &store.ActivityMessage{
+			CreatorUID:   api.SystemBotID,
+			ContainerUID: issue.UID,
+			Type:         api.ActivityIssueApprovalNotify,
+			Level:        api.ActivityInfo,
+			Comment:      "",
+			Payload:      string(activityPayload),
 		}
 		if _, err := s.activityManager.CreateActivity(ctx, create, &activity.Metadata{Issue: issue}); err != nil {
 			return err
@@ -306,16 +328,9 @@ func (s *ReviewService) ApproveReview(ctx context.Context, request *v1pb.Approve
 
 // RejectReview rejects a review.
 func (s *ReviewService) RejectReview(ctx context.Context, request *v1pb.RejectReviewRequest) (*v1pb.Review, error) {
-	reviewID, err := getReviewID(request.Name)
+	issue, err := s.getIssue(ctx, request.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
-	}
-	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
-	}
-	if issue == nil {
-		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
+		return nil, err
 	}
 	payload := &storepb.IssuePayload{}
 	if err := protojson.Unmarshal([]byte(issue.Payload), payload); err != nil {
@@ -357,10 +372,10 @@ func (s *ReviewService) RejectReview(ctx context.Context, request *v1pb.RejectRe
 
 	canApprove, err := isUserReviewer(step, user, policy)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to check if principal can approve step, error: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to check if principal can reject step, error: %v", err)
 	}
 	if !canApprove {
-		return nil, status.Errorf(codes.PermissionDenied, "cannot approve because the user does not have the required permission")
+		return nil, status.Errorf(codes.PermissionDenied, "cannot reject because the user does not have the required permission")
 	}
 
 	payload.Approval.Approvers = append(payload.Approval.Approvers, &storepb.IssuePayloadApproval_Approver{
@@ -394,13 +409,13 @@ func (s *ReviewService) RejectReview(ctx context.Context, request *v1pb.RejectRe
 		if err != nil {
 			return err
 		}
-		create := &api.ActivityCreate{
-			CreatorID:   principalID,
-			ContainerID: issue.UID,
-			Type:        api.ActivityIssueCommentCreate,
-			Level:       api.ActivityInfo,
-			Comment:     request.Comment,
-			Payload:     string(activityPayload),
+		create := &store.ActivityMessage{
+			CreatorUID:   principalID,
+			ContainerUID: issue.UID,
+			Type:         api.ActivityIssueCommentCreate,
+			Level:        api.ActivityInfo,
+			Comment:      request.Comment,
+			Payload:      string(activityPayload),
 		}
 		if _, err := s.activityManager.CreateActivity(ctx, create, &activity.Metadata{}); err != nil {
 			return err
@@ -419,16 +434,9 @@ func (s *ReviewService) RejectReview(ctx context.Context, request *v1pb.RejectRe
 
 // RequestReview requests a review.
 func (s *ReviewService) RequestReview(ctx context.Context, request *v1pb.RequestReviewRequest) (*v1pb.Review, error) {
-	reviewID, err := getReviewID(request.Name)
+	issue, err := s.getIssue(ctx, request.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
-	}
-	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
-	}
-	if issue == nil {
-		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
+		return nil, err
 	}
 	payload := &storepb.IssuePayload{}
 	if err := protojson.Unmarshal([]byte(issue.Payload), payload); err != nil {
@@ -472,6 +480,12 @@ func (s *ReviewService) RequestReview(ctx context.Context, request *v1pb.Request
 	}
 	payload.Approval.Approvers = newApprovers
 
+	newApprovers, activityCreates, err := utils.HandleIncomingApprovalSteps(ctx, s.store, s.relayRunner.Client, issue, payload.Approval)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to handle incoming approval steps, error: %v", err)
+	}
+
+	payload.Approval.Approvers = append(payload.Approval.Approvers, newApprovers...)
 	payloadBytes, err := protojson.Marshal(payload)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to marshal issue payload, error: %v", err)
@@ -498,20 +512,27 @@ func (s *ReviewService) RequestReview(ctx context.Context, request *v1pb.Request
 		if err != nil {
 			return err
 		}
-		create := &api.ActivityCreate{
-			CreatorID:   principalID,
-			ContainerID: issue.UID,
-			Type:        api.ActivityIssueCommentCreate,
-			Level:       api.ActivityInfo,
-			Comment:     request.Comment,
-			Payload:     string(activityPayload),
+		create := &store.ActivityMessage{
+			CreatorUID:   principalID,
+			ContainerUID: issue.UID,
+			Type:         api.ActivityIssueCommentCreate,
+			Level:        api.ActivityInfo,
+			Comment:      request.Comment,
+			Payload:      string(activityPayload),
 		}
 		if _, err := s.activityManager.CreateActivity(ctx, create, &activity.Metadata{}); err != nil {
 			return err
 		}
+
+		for _, create := range activityCreates {
+			if _, err := s.activityManager.CreateActivity(ctx, create, &activity.Metadata{}); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}(); err != nil {
-		log.Error("failed to create activity after requesting review", zap.Error(err))
+		log.Error("failed to create skipping steps activity after approving review", zap.Error(err))
 	}
 
 	review, err := convertToReview(ctx, s.store, issue)
@@ -528,16 +549,9 @@ func (s *ReviewService) UpdateReview(ctx context.Context, request *v1pb.UpdateRe
 	if request.UpdateMask == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "update_mask must be set")
 	}
-	reviewID, err := getReviewID(request.Review.Name)
+	issue, err := s.getIssue(ctx, request.Review.Name)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
-	}
-	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
-	}
-	if issue == nil {
-		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
+		return nil, err
 	}
 
 	patch := &store.UpdateIssueMessage{}
@@ -589,6 +603,94 @@ func (s *ReviewService) UpdateReview(ctx context.Context, request *v1pb.UpdateRe
 	return review, nil
 }
 
+// CreateReviewComment creates the review comment.
+func (s *ReviewService) CreateReviewComment(ctx context.Context, request *v1pb.CreateReviewCommentRequest) (*v1pb.ReviewComment, error) {
+	if request.ReviewComment.Comment == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "review comment is empty")
+	}
+	issue, err := s.getIssue(ctx, request.Parent)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: migrate to store v2
+	activityCreate := &store.ActivityMessage{
+		CreatorUID:   ctx.Value(common.PrincipalIDContextKey).(int),
+		ContainerUID: issue.UID,
+		Type:         api.ActivityIssueCommentCreate,
+		Level:        api.ActivityInfo,
+		Comment:      request.ReviewComment.Comment,
+	}
+
+	var payload api.ActivityIssueCommentCreatePayload
+	if activityCreate.Payload != "" {
+		if err := json.Unmarshal([]byte(activityCreate.Payload), &payload); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmarshal payload: %v", err.Error())
+		}
+	}
+	payload.IssueName = issue.Title
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal payload: %v", err.Error())
+	}
+	activityCreate.Payload = string(bytes)
+
+	activity, err := s.activityManager.CreateActivity(ctx, activityCreate, &activity.Metadata{Issue: issue})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create review comment: %v", err.Error())
+	}
+	return &v1pb.ReviewComment{
+		Uid:        fmt.Sprintf("%d", activity.UID),
+		Comment:    activity.Comment,
+		Payload:    activity.Payload,
+		CreateTime: timestamppb.New(time.Unix(activity.CreatedTs, 0)),
+		UpdateTime: timestamppb.New(time.Unix(activity.UpdatedTs, 0)),
+	}, nil
+}
+
+// UpdateReviewComment updates the review comment.
+func (s *ReviewService) UpdateReviewComment(ctx context.Context, request *v1pb.UpdateReviewCommentRequest) (*v1pb.ReviewComment, error) {
+	if request.UpdateMask.Paths == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "update_mask is required")
+	}
+	activityUID, err := strconv.Atoi(request.ReviewComment.Uid)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, `invalid comment id "%s": %v`, request.ReviewComment.Uid, err.Error())
+	}
+
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	update := &store.UpdateActivityMessage{
+		UID:        activityUID,
+		CreatorUID: &principalID,
+		UpdaterUID: principalID,
+	}
+
+	for _, path := range request.UpdateMask.Paths {
+		switch path {
+		case "comment":
+			update.Comment = &request.ReviewComment.Comment
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, `unsupport update_mask: "%s"`, path)
+		}
+	}
+
+	activity, err := s.store.UpdateActivityV2(ctx, update)
+	if err != nil {
+		if common.ErrorCode(err) == common.NotFound {
+			return nil, status.Errorf(codes.NotFound, "cannot found the review comment %s", request.ReviewComment.Uid)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to update the review comment with error: %v", err.Error())
+	}
+
+	return &v1pb.ReviewComment{
+		Uid:        fmt.Sprintf("%d", activity.UID),
+		Comment:    activity.Comment,
+		Payload:    activity.Payload,
+		CreateTime: timestamppb.New(time.Unix(activity.CreatedTs, 0)),
+		UpdateTime: timestamppb.New(time.Unix(activity.UpdatedTs, 0)),
+	}, nil
+}
+
 func (s *ReviewService) onReviewApproved(ctx context.Context, issue *store.IssueMessage) {
 	if issue.Type == api.IssueGrantRequest {
 		if err := func() error {
@@ -610,6 +712,21 @@ func (s *ReviewService) onReviewApproved(ctx context.Context, issue *store.Issue
 			log.Debug("failed to update issue status to done if grant request issue is approved", zap.Error(err))
 		}
 	}
+}
+
+func (s *ReviewService) getIssue(ctx context.Context, name string) (*store.IssueMessage, error) {
+	reviewID, err := getReviewID(name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	issue, err := s.store.GetIssueV2(ctx, &store.FindIssueMessage{UID: &reviewID})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get issue, error: %v", err)
+	}
+	if issue == nil {
+		return nil, status.Errorf(codes.NotFound, "issue %d not found", reviewID)
+	}
+	return issue, nil
 }
 
 func canRequestReview(issueCreator *store.UserMessage, user *store.UserMessage) bool {
@@ -658,7 +775,7 @@ func isUserReviewer(step *storepb.ApprovalStep, user *store.UserMessage, policy 
 			return true, nil
 		}
 	case *storepb.ApprovalNode_ExternalNodeId:
-		return false, nil
+		return true, nil
 	default:
 		return false, errors.Errorf("invalid node payload type")
 	}

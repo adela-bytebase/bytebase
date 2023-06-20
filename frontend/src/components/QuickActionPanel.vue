@@ -172,14 +172,14 @@
         </h3>
       </div>
 
-      <template v-if="hasCustomRoleFeature">
+      <template v-if="hasDBAWorkflowFeature">
         <div
           v-if="quickAction === 'quickaction.bb.issue.grant.request.querier'"
           class="flex flex-col items-center w-24"
         >
           <button
             class="btn-icon-primary p-3"
-            @click.prevent="createRequestQueryIssue"
+            @click.prevent="state.showRequestQueryPanel = true"
           >
             <heroicons-outline:document-search class="w-5 h-5" />
           </button>
@@ -264,6 +264,11 @@
     @cancel="state.showFeatureModal = false"
   />
 
+  <RequestQueryPanel
+    v-if="state.showRequestQueryPanel"
+    @close="state.showRequestQueryPanel = false"
+  />
+
   <RequestExportPanel
     v-if="state.showRequestExportPanel"
     @close="state.showRequestExportPanel = false"
@@ -283,7 +288,6 @@ import {
   useCurrentUserIamPolicy,
   useInstanceV1Store,
   useProjectV1ListByCurrentUser,
-  useRouterStore,
   useSubscriptionV1Store,
 } from "@/store";
 import { Drawer } from "@/components/v2";
@@ -294,11 +298,13 @@ import { CreateDatabasePrepPanel } from "@/components/CreateDatabasePrepForm";
 import TransferDatabaseForm from "@/components/TransferDatabaseForm.vue";
 import TransferOutDatabaseForm from "@/components/TransferOutDatabaseForm";
 import RequestExportPanel from "@/components/Issue/panel/RequestExportPanel/index.vue";
+import RequestQueryPanel from "@/components/Issue/panel/RequestQueryPanel/index.vue";
 
 interface LocalState {
   featureName: string;
   showFeatureModal: boolean;
   quickActionType: QuickActionType | undefined;
+  showRequestQueryPanel: boolean;
   showRequestExportPanel: boolean;
 }
 
@@ -312,18 +318,18 @@ const props = defineProps({
 const { t } = useI18n();
 const router = useRouter();
 const route = useRoute();
-const routerStore = useRouterStore();
 const commandStore = useCommandStore();
 const subscriptionStore = useSubscriptionV1Store();
 
-const hasCustomRoleFeature = computed(() => {
-  return subscriptionStore.hasFeature("bb.feature.custom-role");
+const hasDBAWorkflowFeature = computed(() => {
+  return subscriptionStore.hasFeature("bb.feature.dba-workflow");
 });
 
 const state = reactive<LocalState>({
   featureName: "",
   showFeatureModal: false,
   quickActionType: undefined,
+  showRequestQueryPanel: false,
   showRequestExportPanel: false,
 });
 
@@ -386,27 +392,6 @@ const createDatabase = () => {
 
 const createEnvironment = () => {
   commandStore.dispatchCommand("bb.environment.create");
-};
-
-const createRequestQueryIssue = () => {
-  const routeInfo = {
-    name: "workspace.issue.detail",
-    params: {
-      issueSlug: "new",
-    },
-    query: {
-      template: "bb.issue.grant.request",
-      role: "QUERIER",
-      name: "Request data query permission",
-    },
-  };
-  const routeSlug = routerStore.routeSlug(route);
-  const projectSlug = routeSlug.projectSlug;
-  if (projectSlug) {
-    const id = idFromSlug(projectSlug);
-    (routeInfo.query as any).project = id;
-  }
-  router.push(routeInfo);
 };
 
 const reorderEnvironment = () => {
