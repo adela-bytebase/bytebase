@@ -443,20 +443,6 @@ func (s *Scheduler) PatchTask(ctx context.Context, task *store.TaskMessage, task
 		if err != nil {
 			return err
 		}
-		if api.IsSyntaxCheckSupported(instance.Engine) {
-			if err := s.store.CreateTaskCheckRun(ctx, &store.TaskCheckRunMessage{
-				CreatorID: taskPatched.CreatorID,
-				TaskID:    task.ID,
-				Type:      api.TaskCheckDatabaseStatementSyntax,
-			}); err != nil {
-				// It's OK if we failed to trigger a check, just emit an error log
-				log.Error("Failed to trigger syntax check after changing the task statement",
-					zap.Int("task_id", task.ID),
-					zap.String("task_name", task.Name),
-					zap.Error(err),
-				)
-			}
-		}
 
 		if api.IsSQLReviewSupported(instance.Engine) {
 			if err := s.triggerDatabaseStatementAdviseTask(ctx, taskPatched); err != nil {
@@ -1133,7 +1119,7 @@ func (s *Scheduler) CanPrincipalBeAssignee(ctx context.Context, principalID int,
 		if user == nil {
 			return false, common.Errorf(common.NotFound, "principal not found by ID %d", principalID)
 		}
-		if !s.licenseService.IsFeatureEnabled(api.FeatureRBAC) {
+		if s.licenseService.IsFeatureEnabled(api.FeatureRBAC) != nil {
 			user.Role = api.Owner
 		}
 		if user.Role == api.Owner || user.Role == api.DBA {
@@ -1141,7 +1127,8 @@ func (s *Scheduler) CanPrincipalBeAssignee(ctx context.Context, principalID int,
 		}
 	} else if *groupValue == api.AssigneeGroupValueProjectOwner {
 		// the assignee group is the project owner.
-		if !s.licenseService.IsFeatureEnabled(api.FeatureRBAC) {
+		if s.licenseService.IsFeatureEnabled(api.FeatureRBAC) != nil {
+			// nolint:nilerr
 			return true, nil
 		}
 		policy, err := s.store.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{UID: &projectID})

@@ -54,6 +54,8 @@
     "bookmarks": "Bookmarks",
     "quick-action": "Quick Action",
     "archive": "Archive",
+    "archived": "Archived",
+    "no-license": "No license",
     "logout": "Logout",
     "close": "Close",
     "latest": "Latest",
@@ -254,7 +256,11 @@
     "expiration": "Expiration",
     "configure": "Configure",
     "database-groups": "Database Groups",
-    "members": "Members"
+    "members": "Members",
+    "warehouse": "Warehouse",
+    "schedule": "Schedule",
+    "state": "State",
+    "condition": "Condition"
   },
   "error-page": {
     "go-back-home": "Go back home"
@@ -356,6 +362,7 @@
     "update-license": "Update license",
     "license-expires": "Your license for {plan} has expired on {expireAt}.",
     "trial-expires": "Your free trial for {plan} will expire in {days} days on {expireAt}.",
+    "trial-expired": "Your free trial for {plan} has expired.",
     "extend-trial": "Extend trialing time",
     "deploy": "Self Host",
     "cloud": "Sign Up for Cloud",
@@ -544,6 +551,7 @@
             "openai-key": {
               "self": "OpenAI API Key",
               "description": "Supply OpenAI API Key to enable ChatSQL capability in SQL Editor. {viewDoc}",
+              "find-my-key": "Find my key",
               "placeholder": "An OpenAI API Key usually starts with sk-*****"
             },
             "openai-endpoint": {
@@ -559,12 +567,10 @@
       "remove-sensitive-column-tips": "Expose this column?"
     },
     "access-control": {
-      "description": "Allow developers to execute queries for the following databases in the production environments from SQL Editor. {link}",
-      "add-rule": "Add rule",
-      "remove-policy-tips": "Remove this rule?",
-      "inactive-rules": "Inactive rules",
-      "inactive-rules-description": "These rules are inactive because environment is not production.",
-      "no-database-in-production-environment": "Make sure there are databases in the {production_environment}."
+      "description": "Configure approval flow to control data query and export. {link}",
+      "skip-approval": "Skip approval",
+      "query-data": "Query Data",
+      "export-data": "Export Data"
     },
     "release": {
       "new-version-available": "New version is available",
@@ -690,6 +696,18 @@
     "add-a-comment": "Add a comment",
     "edit-comment": "Edit comment",
     "leave-a-comment": "Leave a comment...",
+    "comment-editor": {
+      "write": "Write",
+      "preview": "Preview",
+      "nothing-to-preview": "Nothing to preview",
+      "toolbar": {
+        "header": "Insert heading text",
+        "bold": "Insert bold text",
+        "code": "Insert SQL code snippet",
+        "link": "Insert a link",
+        "hashtag": "Insert issue's link by id. Type the issue id after the hashtag \"#\""
+      }
+    },
     "view-commit": "View commit",
     "search-issue-name": "Search issue name",
     "table": {
@@ -728,8 +746,8 @@
     "edit-sql-statement": "Edit SQL statement",
     "upload-sql": "Upload SQL",
     "upload-sql-as-sheet": "Upload SQL as Sheet",
-    "statement-from-sheet-warning": "The current SQL statement comes from a sheet. It is read-only and only part of it is displayed.",
-    "override-current-statement": "Override current SQL statement",
+    "statement-from-sheet-warning": "SQL is oversized and inline-editing is disallowed. You can upload a new SQL file to overwrite it.",
+    "overwrite-current-statement": "Overwrite current SQL statement",
     "upload-sql-file-max-size-exceeded": "Max file size ({size}) exceeded.",
     "waiting-earliest-allowed-time": "Will run after {time}",
     "batch-transition": {
@@ -807,12 +825,11 @@
     "troubleshoot": "Troubleshoot",
     "transfer-in-db": "Transfer in DB",
     "request-db": "Request DB",
-    "from-unassigned-databases": "From unassigned databases",
-    "from-projects": "From projects",
+    "from-unassigned-databases": "Transfer unassigned databases",
+    "from-projects": "Transfer from other projects",
     "transfer-in-db-title": "Transfer in database",
-    "default-db-hint": "Bytebase periodically syncs the instance schema. Newly synced databases are first placed in the default project.",
     "transfer-in-db-alert": "Are you sure to transfer \"{ dbName }\" into our project?",
-    "unassigned-db-hint": "Bytebase periodically syncs the instance schema. Newly synced databases are first placed in unassigned databases.",
+    "unassigned-db-hint": "Bytebase periodically syncs the instance schema. Newly synced databases are unassigned at first, and they need to be transferred to a project before they can be used.",
     "transfer-out-db": "Transfer out DB",
     "transfer-out-db-title": "Transfer out database",
     "request-query": "Request Query",
@@ -840,6 +857,8 @@
     "views": "Views",
     "extensions": "Extensions",
     "functions": "Functions",
+    "streams": "Streams",
+    "tasks": "Tasks",
     "parent": "Parent",
     "last-successful-sync": "Last successful sync",
     "sync-status": "Sync status",
@@ -952,7 +971,8 @@
     "find-gcp-project-id-and-instance-id": "To find GCP Project ID and instance ID, see",
     "create-gcp-credentials": "To create Credentials, see",
     "used-for-testing-connection": "Used for testing connections only",
-    "all": "All instances"
+    "all": "All instances",
+    "force-archive-description": "Force to archive. All releated issues will be resolved, and all related sheets will be deleted."
   },
   "environment": {
     "id": "Environment ID",
@@ -1051,7 +1071,7 @@
     },
     "environment-tier": {
       "name": "Environment tier",
-      "description": "The environment will appear differently from other environments.{newline}Developers cannot execute any query on this environment's databases \nusing SQL Editor by default. ",
+      "description": "The environment will appear differently from other environments.",
       "mark-env-as-production": "Mark as production environment"
     }
   },
@@ -1240,6 +1260,7 @@
     "doesnt-match-tenant-value": "Doesn't match label value",
     "should-follow-database-name-template": "Should follow tenant database name template",
     "all": "All databases",
+    "unassigned": "Unassigned",
     "show-schemaless-databases": "Show schemaless databases. (Alter Schema is not applicable for schemaless databases.)",
     "secret": {
       "self": "Secret",
@@ -1455,7 +1476,10 @@
       "archive": {
         "title": "Archive project",
         "description": "Archived project will not be shown on the normal interface. You can click \"Archive\" on the bottom left to find and restore it.",
-        "btn-text": "Archive this @.lower:{'common.project'}"
+        "btn-text": "Archive this @.lower:{'common.project'}",
+        "force": {
+          "description": "Force to archive. All releated issues will be resolved, and all related sheets will be deleted."
+        }
       },
       "restore": {
         "title": "Restore project",
@@ -1473,7 +1497,7 @@
       "view-by-principals": "View by principals",
       "view-by-roles": "View by roles",
       "cannot-remove-last-owner": "Cannot remove the last owner of a project",
-      "revoke-role-from-user": "Revoke '{role}' from '{user}'",
+      "revoke-role-from-user": "Revocar el '{role}' del usuario '{user}'",
       "inactive-members": "Inactive members",
       "show-inactive": "Show inactive members",
       "select-users": "Select users",
@@ -1686,8 +1710,7 @@
     "loading-data": "Loading Data...",
     "table-empty-placeholder": "Click Run to execute the query.",
     "no-rows-found": "No rows found",
-    "download-as-csv": "Download as CSV",
-    "download-as-json": "Download as JSON",
+    "download-as-file": "Download as {file}",
     "only-select-allowed": "Only {select} statements are allowed to execute.",
     "want-to-action": "If you want to {want}, click the {action} button and submit an issue.",
     "table-schema-placeholder": "Select a table to see its schema",
@@ -1748,7 +1771,10 @@
     },
     "allow-admin-mode-only": "Instance {instance} is accessible in admin mode only.",
     "run-selected": "Run selected",
-    "clear-screen": "Clear screen"
+    "clear-screen": "Clear screen",
+    "query-time": "Query time",
+    "request-query": "Request Query",
+    "connection-lost": "Connection lost. Will try to reconnect when executing next query."
   },
   "schema-editor": {
     "self": "Schema Editor",
@@ -1877,7 +1903,20 @@
     "trial-for-plan": "You can start a free trial for {plan} with {days} days - no credit card required",
     "trial-for-days": "You can start a free trial for {days} days - no credit card required",
     "upgrade-trial": "You can upgrade your free trial to this plan",
+    "contact-to-upgrade": "Contact your Workspace Owner or DBA to upgrade the plan",
     "upgrade-now": "Upgrade Now",
+    "instance-assignment": {
+      "license": "License",
+      "assign-license": "Assign License",
+      "require-license": "Require instance license",
+      "missing-license-attention": "You need to assign license to the instance to enable this feature.",
+      "n-license-remain": "remain {n}",
+      "manage-license": "Manage Instance License",
+      "used-and-total-license": "Assigned / Total Instance License",
+      "success-notification": "Successfully update license assignment",
+      "missing-license-for-instances": "You have {count} instances ({name}) missing required license to unlock this feature.",
+      "missing-license-for-feature": "Missing instance license to enable {feature}. Click to assign now."
+    },
     "update": {
       "success": {
         "title": "Successfully updated license",
@@ -1906,6 +1945,13 @@
         "runoutof": "Your have run out of your {total} instance quota.",
         "upgrade": "@:{'subscription.upgrade'} to get more instance quota."
       },
+      "bb-feature-user-count": {
+        "title": "User count limit",
+        "desc": "You have reached the maximum user count limit. Please upgrade to get unlimited user quota.",
+        "remaining": "Your total user quota is {total}, only have {count} user remained.",
+        "runoutof": "Your have run out of your {total} user quota.",
+        "upgrade": "@:{'subscription.upgrade'} to get unlimited user quota."
+      },
       "bb-feature-multi-tenancy": {
         "title": "Batch mode",
         "desc": "Batch changing a group of databases from different tenants or partitions."
@@ -1927,8 +1973,8 @@
         "desc": "Mark table columns as sensitive data and the query result of them will be displayed as \"******\"."
       },
       "bb-feature-access-control": {
-        "title": "Access control",
-        "desc": "Change query permission for databases in the production environments."
+        "title": "Data Access control",
+        "desc": "Configure approval flow to control data query and export."
       },
       "bb-feature-lgtm": {
         "title": "LGTM check",
@@ -2054,7 +2100,7 @@
     },
     "linked-issue": "Linked issue",
     "from-issue-warning": "The sheet comes from issue {issue} in read-only mode. {oversize}",
-    "content-oversize-warning": "Only display part of the sheet due to oversize."
+    "content-oversize-warning": "SQL is oversized and inline-editing is disallowed. "
   },
   "engine": {
     "mysql": "MySQL",
@@ -2348,7 +2394,9 @@
         "namespace": {
           "dml": "DML",
           "ddl": "DDL",
-          "create_database": "Create Database"
+          "create_database": "Create Database",
+          "query": "Request Query",
+          "export": "Request Export"
         },
         "factor": {
           "affected_rows": "Affected rows",
@@ -2356,7 +2404,10 @@
           "project_id": "Project ID",
           "database_name": "Database name",
           "db_engine": "DB engine",
-          "sql_type": "SQL type"
+          "sql_type": "SQL type",
+          "expiration_days": "Expiration days",
+          "export_rows": "Export rows",
+          "table_name": "Table name"
         }
       },
       "condition": {
@@ -2481,7 +2532,8 @@
       "re-request-review": "Re-request review",
       "re-request-review-issue": "Re-request review issue?",
       "sent-back-issue": "Sent back issue",
-      "re-requested-review": "re-requested issue review"
+      "re-requested-review": "re-requested issue review",
+      "no-one-matches-role": "No one matches the role, contact project owner to assign one."
     },
     "send-back": "Send back"
   },
@@ -2520,6 +2572,10 @@
       "suggestion": "Suggestion",
       "create-index": "Create Index",
       "setup-openai-key-to-enable": "Setup OpenAI key to enable index advisor"
+    },
+    "no-log-placeholder": {
+      "admin": "Click the \"Configure\" button to fetch slow queries from the database instances or click the \"Sync Now\" button to sync slow query logs immediately",
+      "developer": "Click the \"Sync Now\" button to sync slow query logs immediately or contact Bytebase owners/DBAs to configure slow queries"
     }
   },
   "principal": {
@@ -2557,7 +2613,8 @@
     "querier": {
       "description": "System defined project querier role"
     },
-    "select-role": "Select role"
+    "select-role": "Select role",
+    "expired-tip": "The role might has been expired."
   },
   "database-group": {
     "self": "Database Group",

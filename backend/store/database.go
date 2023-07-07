@@ -121,7 +121,9 @@ type DatabaseMessage struct {
 	Labels               map[string]string
 	Secrets              *storepb.Secrets
 	DataShare            bool
-	EnvironmentID        string
+	// ServiceName is the Oracle specific field.
+	ServiceName   string
+	EnvironmentID string
 }
 
 // UpdateDatabaseMessage is the mssage for updating a database.
@@ -137,6 +139,7 @@ type UpdateDatabaseMessage struct {
 	SourceBackupID       *int
 	Secrets              *storepb.Secrets
 	DataShare            *bool
+	ServiceName          *string
 	// TODO(d): allow database environment updates.
 	EnvironmentID *string
 }
@@ -276,14 +279,17 @@ func (*Store) createDatabaseDefaultImpl(ctx context.Context, tx *Tx, instanceUID
 			sync_status,
 			last_successful_sync_ts,
 			schema_version,
-			secrets
+			secrets,
+			datashare,
+			service_name
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (instance_id, name) DO UPDATE SET
 			updater_id = EXCLUDED.updater_id,
 			project_id = EXCLUDED.project_id,
 			sync_status = EXCLUDED.sync_status,
-			last_successful_sync_ts = EXCLUDED.last_successful_sync_ts
+			last_successful_sync_ts = EXCLUDED.last_successful_sync_ts,
+			datashare = EXCLUDED.datashare
 		RETURNING id`
 	var databaseUID int
 	if err := tx.QueryRowContext(ctx, query,
@@ -296,6 +302,8 @@ func (*Store) createDatabaseDefaultImpl(ctx context.Context, tx *Tx, instanceUID
 		0,             /* last_successful_sync_ts */
 		"",            /* schema_version */
 		secretsString, /* secrets */
+		create.DataShare,
+		create.ServiceName,
 	).Scan(
 		&databaseUID,
 	); err != nil {
@@ -344,9 +352,10 @@ func (s *Store) UpsertDatabase(ctx context.Context, create *DatabaseMessage) (*D
 			last_successful_sync_ts,
 			schema_version,
 			secrets,
-			datashare
+			datashare,
+			service_name
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (instance_id, name) DO UPDATE SET
 			project_id = EXCLUDED.project_id,
 			name = EXCLUDED.name,
@@ -364,6 +373,7 @@ func (s *Store) UpsertDatabase(ctx context.Context, create *DatabaseMessage) (*D
 		create.SchemaVersion,
 		secretsString,
 		create.DataShare,
+		create.ServiceName,
 	).Scan(
 		&databaseUID,
 	); err != nil {
@@ -416,6 +426,9 @@ func (s *Store) UpdateDatabase(ctx context.Context, patch *UpdateDatabaseMessage
 	if v := patch.DataShare; v != nil {
 		set, args = append(set, fmt.Sprintf("datashare = $%d", len(args)+1)), append(args, *v)
 	}
+	if v := patch.ServiceName; v != nil {
+		set, args = append(set, fmt.Sprintf("service_name = $%d", len(args)+1)), append(args, *v)
+	}
 	args = append(args, instance.UID, patch.DatabaseName)
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -443,7 +456,7 @@ func (s *Store) UpdateDatabase(ctx context.Context, patch *UpdateDatabaseMessage
 	}
 	// When we update the project ID of the database, we should update the project ID of the related sheets in the same transaction.
 	if patch.ProjectID != nil {
-		sheetList, err := s.ListSheetsV2(ctx, &FindSheetMessage{DatabaseUID: &databaseUID}, updaterID)
+		sheetList, err := s.ListSheets(ctx, &FindSheetMessage{DatabaseUID: &databaseUID}, updaterID)
 		if err != nil {
 			return nil, err
 		}
@@ -453,7 +466,7 @@ func (s *Store) UpdateDatabase(ctx context.Context, patch *UpdateDatabaseMessage
 				return nil, err
 			}
 			for _, sheet := range sheetList {
-				if _, err := patchSheetImplV2(ctx, tx, &PatchSheetMessage{UID: sheet.UID, ProjectUID: &project.UID, UpdaterID: updaterID}); err != nil {
+				if _, err := patchSheetImpl(ctx, tx, &PatchSheetMessage{UID: sheet.UID, ProjectUID: &project.UID, UpdaterID: updaterID}); err != nil {
 					return nil, err
 				}
 			}
@@ -577,7 +590,8 @@ func (*Store) listDatabaseImplV2(ctx context.Context, tx *Tx, find *FindDatabase
 				db_label.value
 			) label_values,
 			db.secrets,
-			db.datashare
+			db.datashare,
+			db.service_name
 		FROM db
 		LEFT JOIN project ON db.project_id = project.id
 		LEFT JOIN instance ON db.instance_id = instance.id
@@ -610,6 +624,7 @@ func (*Store) listDatabaseImplV2(ctx context.Context, tx *Tx, find *FindDatabase
 			pq.Array(&values),
 			&secretsString,
 			&databaseMessage.DataShare,
+			&databaseMessage.ServiceName,
 		); err != nil {
 			return nil, err
 		}

@@ -54,13 +54,13 @@
               :customize-item="true"
               @select-database-id="handleSourceDatabaseSelect"
             >
-              <template #customizeItem="{ database }">
+              <template #customizeItem="{ database: db }">
                 <div class="flex items-center">
-                  <InstanceV1EngineIcon :instance="database.instanceEntity" />
-                  <span class="mx-2">{{ database.databaseName }}</span>
+                  <InstanceV1EngineIcon :instance="db.instanceEntity" />
+                  <span class="mx-2">{{ db.databaseName }}</span>
 
                   <span class="text-gray-400">
-                    ({{ instanceV1Name(database.instanceEntity) }})
+                    ({{ instanceV1Name(db.instanceEntity) }})
                   </span>
                 </div>
               </template>
@@ -78,17 +78,29 @@
                 class="w-full"
                 :selected-item="state.sourceSchema.changeHistory"
                 :item-list="
-                databaseChangeHistoryList(state.sourceSchema.databaseId as string)
-              "
+                  databaseChangeHistoryList(state.sourceSchema.databaseId as string)
+                "
                 :placeholder="$t('change-history.select')"
                 :show-prefix-item="databaseChangeHistoryList(state.sourceSchema.databaseId as string).length > 0"
                 @select-item="(changeHistory: ChangeHistory) => handleSchemaVersionSelect(changeHistory)"
               >
                 <template
-                  #menuItem="{ item: changeHistory }: { item: ChangeHistory }"
+                  #menuItem="{
+                    item: changeHistory,
+                    index,
+                  }: {
+                    item: ChangeHistory,
+                    index: number,
+                  }"
                 >
                   <div class="flex justify-between mr-2">
-                    <NEllipsis class="pr-2" :tooltip="false">
+                    <FeatureBadge
+                      v-if="index > 0"
+                      feature="bb.feature.sync-schema-all-versions"
+                      custom-class="mr-1"
+                      :instance="database?.instanceEntity"
+                    />
+                    <NEllipsis class="flex-1 pr-2" :tooltip="false">
                       {{ changeHistory.version }} -
                       {{ changeHistory.description }}
                     </NEllipsis>
@@ -117,15 +129,16 @@
         <SelectTargetDatabasesView
           ref="targetDatabaseViewRef"
           :project-id="state.projectId!"
-          :source-schema="state.sourceSchema as any"
+          :source-schema="fullViewSourceSchema as any"
         />
       </template>
     </BBStepTab>
   </div>
 
   <FeatureModal
-    v-if="state.showFeatureModal"
     feature="bb.feature.sync-schema-all-versions"
+    :open="state.showFeatureModal"
+    :instance="database?.instanceEntity"
     @cancel="state.showFeatureModal = false"
   />
 </template>
@@ -138,10 +151,10 @@ import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import {
-  hasFeature,
   useChangeHistoryStore,
   useDatabaseV1Store,
   useProjectV1Store,
+  useSubscriptionV1Store,
 } from "@/store";
 import { UNKNOWN_ID } from "@/types";
 import DatabaseSelect from "@/components/DatabaseSelect.vue";
@@ -151,6 +164,7 @@ import { InstanceV1EngineIcon } from "@/components/v2";
 import { instanceV1Name } from "@/utils";
 import {
   ChangeHistory,
+  ChangeHistoryView,
   ChangeHistory_Type,
 } from "@/types/proto/v1/database_service";
 
@@ -185,6 +199,8 @@ const dialog = useDialog();
 const projectStore = useProjectV1Store();
 const databaseStore = useDatabaseV1Store();
 const changeHistoryStore = useChangeHistoryStore();
+const subscriptionV1Store = useSubscriptionV1Store();
+const fullViewChangeHistoryCache = ref<Map<string, ChangeHistory>>(new Map());
 const targetDatabaseViewRef =
   ref<InstanceType<typeof SelectTargetDatabasesView>>();
 const state = reactive<LocalState>({
@@ -193,13 +209,55 @@ const state = reactive<LocalState>({
   showFeatureModal: false,
 });
 
+const prepareFullViewChangeHistory = async () => {
+  const changeHistory = state.sourceSchema.changeHistory;
+  if (!changeHistory || changeHistory.uid === String(UNKNOWN_ID)) {
+    return;
+  }
+
+  const cache = fullViewChangeHistoryCache.value.get(changeHistory.name);
+  if (!cache) {
+    const fullViewChangeHistory = await changeHistoryStore.fetchChangeHistory({
+      name: changeHistory.name,
+      view: ChangeHistoryView.CHANGE_HISTORY_VIEW_FULL,
+    });
+    fullViewChangeHistoryCache.value.set(
+      fullViewChangeHistory.name,
+      fullViewChangeHistory
+    );
+  }
+};
+
+watch(() => state.sourceSchema.changeHistory, prepareFullViewChangeHistory, {
+  immediate: true,
+  deep: true,
+});
+
+const isValidId = (id: any): id is string => {
+  if (isNull(id) || isUndefined(id) || String(id) === String(UNKNOWN_ID)) {
+    return false;
+  }
+  return true;
+};
+
+const database = computed(() => {
+  const databaseId = state.sourceSchema.databaseId;
+  if (!isValidId(databaseId)) {
+    return;
+  }
+  return databaseStore.getDatabaseByUID(databaseId);
+});
+
 const hasSyncSchemaFeature = computed(() => {
-  return hasFeature("bb.feature.sync-schema-all-versions");
+  return subscriptionV1Store.hasInstanceFeature(
+    "bb.feature.sync-schema-all-versions",
+    database.value?.instanceEntity
+  );
 });
 
 const shouldShowMoreVersionButton = computed(() => {
   return (
-    !hasSyncSchemaFeature.value &&
+    hasSyncSchemaFeature.value &&
     databaseChangeHistoryList(state.sourceSchema.databaseId as string).length >
       0
   );
@@ -210,6 +268,16 @@ const stepTabList = computed(() => {
     { title: t("database.sync-schema.select-source-schema") },
     { title: t("database.sync-schema.select-target-databases") },
   ];
+});
+
+const fullViewSourceSchema = computed(() => {
+  const fullViewChangeHistory = fullViewChangeHistoryCache.value.get(
+    state.sourceSchema.changeHistory?.name || ""
+  );
+  return {
+    ...state.sourceSchema,
+    changeHistory: fullViewChangeHistory || state.sourceSchema.changeHistory,
+  };
 });
 
 const allowNext = computed(() => {
@@ -245,9 +313,6 @@ const databaseChangeHistoryList = (databaseId: string) => {
       allowedMigrationTypeList.includes(changeHistory.type)
     );
 
-  if (!hasSyncSchemaFeature.value) {
-    return list.length > 0 ? [head(list)] : [];
-  }
   return list;
 };
 
@@ -268,24 +333,27 @@ const handleSourceEnvironmentSelect = async (environmentId: string) => {
 const handleSourceDatabaseSelect = async (databaseId: string) => {
   if (isValidId(databaseId)) {
     const database = databaseStore.getDatabaseByUID(databaseId);
-    if (database) {
-      state.projectId = database.projectEntity.uid;
-      state.sourceSchema.environmentId =
-        database.instanceEntity.environmentEntity.uid;
-      state.sourceSchema.databaseId = databaseId;
+    if (!database) {
+      return;
     }
+    state.projectId = database.projectEntity.uid;
+    state.sourceSchema.environmentId =
+      database.instanceEntity.environmentEntity.uid;
+    state.sourceSchema.databaseId = databaseId;
   }
 };
 
 const handleSchemaVersionSelect = (changeHistory: ChangeHistory) => {
-  state.sourceSchema.changeHistory = changeHistory;
-};
-
-const isValidId = (id: any): id is string => {
-  if (isNull(id) || isUndefined(id) || String(id) === String(UNKNOWN_ID)) {
-    return false;
+  const list = databaseChangeHistoryList(
+    state.sourceSchema.databaseId as string
+  );
+  const index = list.findIndex((data) => data.uid === changeHistory.uid);
+  if (index > 0 && !hasSyncSchemaFeature.value) {
+    state.showFeatureModal = true;
+    state.sourceSchema.changeHistory = head(list);
+    return;
   }
-  return true;
+  state.sourceSchema.changeHistory = changeHistory;
 };
 
 const tryChangeStep = async (

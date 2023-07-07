@@ -380,6 +380,7 @@ type MigrationHistory struct {
 	Version               string
 	Description           string
 	Statement             string
+	SheetID               *int
 	Schema                string
 	SchemaPrev            string
 	ExecutionDurationNs   int64
@@ -407,12 +408,15 @@ type MigrationHistoryFind struct {
 
 // ConnectionConfig is the configuration for connections.
 type ConnectionConfig struct {
-	Host      string
-	Port      string
-	Username  string
-	Password  string
-	Database  string
-	TLSConfig TLSConfig
+	Host     string
+	Port     string
+	Username string
+	Password string
+	Database string
+	// The database used to connect.
+	// It's only set for Redshift datashare database.
+	ConnectionDatabase string
+	TLSConfig          TLSConfig
 	// ReadOnly is only supported for Postgres at the moment.
 	ReadOnly bool
 	// StrictUseDb will only set as true if the user gives only a database instead of a whole instance to access.
@@ -425,6 +429,9 @@ type ConnectionConfig struct {
 	SID         string
 	ServiceName string
 	SSHConfig   SSHConfig
+	// SchemaTenantMode is the Oracle specific mode.
+	// If true, bytebase will treat the schema as a database.
+	SchemaTenantMode bool
 }
 
 // SSHConfig is the configuration for connection over SSH.
@@ -450,9 +457,13 @@ type QueryContext struct {
 	ReadOnly              bool
 	SensitiveDataMaskType SensitiveDataMaskType
 	SensitiveSchemaInfo   *SensitiveSchemaInfo
+	// EnableSensitive will set to be true if the database instance has license.
+	EnableSensitive bool
 
 	// CurrentDatabase is for MySQL
 	CurrentDatabase string
+	// ShareDB is for Redshift.
+	ShareDB bool
 }
 
 // DatabaseRoleMessage is the API message for database role.
@@ -618,6 +629,16 @@ type SensitiveSchemaInfo struct {
 
 // DatabaseSchema is the database schema using to extract sensitive fields.
 type DatabaseSchema struct {
+	Name       string
+	SchemaList []SchemaSchema
+
+	// !!DEPRECATED!!, should use SchemaList instead.
+	// TODO(rebelice/zp): Migrate MySQL/PostgreSQL/Oracle to SchemaList.
+	TableList []TableSchema
+}
+
+// SchemaSchema is the schema of the schema using to extract sensitive fields.
+type SchemaSchema struct {
 	Name      string
 	TableList []TableSchema
 }

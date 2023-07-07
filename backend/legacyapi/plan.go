@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"math"
 )
 
 // PlanType is the type for a plan.
@@ -320,23 +319,36 @@ var FeatureMatrix = map[FeatureType][3]bool{
 	FeaturePluginOpenAI: {false, false, true},
 }
 
-// PlanLimit is the type for plan limits.
-type PlanLimit int
-
-const (
-	// PlanLimitMaximumTask is the key name for maximum number of tasks for a plan.
-	PlanLimitMaximumTask PlanLimit = iota
-	// PlanLimitMaximumEnvironment is the key name for maximum number of environments for a plan.
-	PlanLimitMaximumEnvironment
-)
-
-// PlanLimitValues is the plan limit value mapping.
-var PlanLimitValues = map[PlanLimit][3]int64{
-	PlanLimitMaximumTask:        {math.MaxInt64, math.MaxInt64, math.MaxInt64},
-	PlanLimitMaximumEnvironment: {math.MaxInt64, math.MaxInt64, math.MaxInt64},
+// InstanceLimitFeature is the map for instance feature. Only allowed to access these feature for activate instance.
+var InstanceLimitFeature = map[FeatureType]bool{
+	// Change Workflow
+	FeatureIMApproval:       true,
+	FeatureSchemaDrift:      true,
+	FeatureSQLReview:        true,
+	FeatureEncryptedSecrets: true,
+	FeatureTaskScheduleTime: true,
+	FeatureOnlineMigration:  true,
+	// VCS Integration
+	FeatureVCSSchemaWriteBack:   true,
+	FeatureVCSSQLReviewWorkflow: true,
+	FeatureMybatisSQLReview:     true,
+	// Database management
+	FeaturePITR:                  true,
+	FeatureReadReplicaConnection: true,
+	FeatureInstanceSSHConnection: true,
+	FeatureDatabaseGrouping:      true,
+	FeatureSyncSchemaAllVersions: true,
+	FeatureIndexAdvisor:          true,
+	// Policy Control
+	FeatureSensitiveData:  true,
+	FeatureCustomApproval: true,
 }
 
 // Feature returns whether a particular feature is available in a particular plan.
 func Feature(feature FeatureType, plan PlanType) bool {
-	return FeatureMatrix[feature][plan]
+	matrix, ok := FeatureMatrix[feature]
+	if !ok {
+		return false
+	}
+	return matrix[plan]
 }

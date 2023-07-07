@@ -65,6 +65,7 @@ var whitelistSettings = []api.SettingName{
 	api.SettingWorkspaceMailDelivery,
 	api.SettingWorkspaceProfile,
 	api.SettingWorkspaceExternalApproval,
+	api.SettingEnterpriseTrial,
 }
 
 var (
@@ -167,8 +168,8 @@ func (s *SettingService) SetSetting(ctx context.Context, request *v1pb.SetSettin
 		}
 		storeSettingValue = string(bytes)
 	case api.SettingWorkspaceApproval:
-		if !s.licenseService.IsFeatureEnabled(api.FeatureCustomApproval) {
-			return nil, status.Errorf(codes.PermissionDenied, api.FeatureCustomApproval.AccessErrorMessage())
+		if err := s.licenseService.IsFeatureEnabled(api.FeatureCustomApproval); err != nil {
+			return nil, status.Errorf(codes.PermissionDenied, err.Error())
 		}
 
 		payload := &storepb.WorkspaceApprovalSetting{}
@@ -275,8 +276,8 @@ func (s *SettingService) SetSetting(ctx context.Context, request *v1pb.SetSettin
 		}
 		storeSettingValue = string(bytes)
 	case api.SettingBrandingLogo:
-		if !s.licenseService.IsFeatureEnabled(api.FeatureBranding) {
-			return nil, status.Errorf(codes.PermissionDenied, api.FeatureBranding.AccessErrorMessage())
+		if err := s.licenseService.IsFeatureEnabled(api.FeatureBranding); err != nil {
+			return nil, status.Errorf(codes.PermissionDenied, err.Error())
 		}
 		storeSettingValue = request.Setting.Value.GetStringValue()
 	case api.SettingPluginAgent:
@@ -309,8 +310,8 @@ func (s *SettingService) SetSetting(ctx context.Context, request *v1pb.SetSettin
 			return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("unknown IM Type %s", payload.IMType))
 		}
 		if payload.ExternalApproval.Enabled {
-			if !s.licenseService.IsFeatureEnabled(api.FeatureIMApproval) {
-				return nil, status.Errorf(codes.PermissionDenied, api.FeatureIMApproval.AccessErrorMessage())
+			if err := s.licenseService.IsFeatureEnabled(api.FeatureIMApproval); err != nil {
+				return nil, status.Errorf(codes.PermissionDenied, err.Error())
 			}
 
 			if payload.AppID == "" || payload.AppSecret == "" {
@@ -394,6 +395,8 @@ func (s *SettingService) SetSetting(ctx context.Context, request *v1pb.SetSettin
 			return nil, status.Errorf(codes.Internal, "failed to marshal external approval setting, error: %v", err)
 		}
 		storeSettingValue = string(bytes)
+	case api.SettingEnterpriseTrial:
+		return nil, status.Errorf(codes.InvalidArgument, "cannot set setting %s", settingName)
 	default:
 		storeSettingValue = request.Setting.Value.GetStringValue()
 	}

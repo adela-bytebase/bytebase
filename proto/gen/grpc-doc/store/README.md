@@ -46,8 +46,14 @@
     - [SchemaMetadata](#bytebase-store-SchemaMetadata)
     - [SecretItem](#bytebase-store-SecretItem)
     - [Secrets](#bytebase-store-Secrets)
+    - [StreamMetadata](#bytebase-store-StreamMetadata)
     - [TableMetadata](#bytebase-store-TableMetadata)
+    - [TaskMetadata](#bytebase-store-TaskMetadata)
     - [ViewMetadata](#bytebase-store-ViewMetadata)
+  
+    - [StreamMetadata.Mode](#bytebase-store-StreamMetadata-Mode)
+    - [StreamMetadata.Type](#bytebase-store-StreamMetadata-Type)
+    - [TaskMetadata.State](#bytebase-store-TaskMetadata-State)
   
 - [store/idp.proto](#store_idp-proto)
     - [FieldMapping](#bytebase-store-FieldMapping)
@@ -57,6 +63,9 @@
     - [OIDCIdentityProviderConfig](#bytebase-store-OIDCIdentityProviderConfig)
   
     - [IdentityProviderType](#bytebase-store-IdentityProviderType)
+  
+- [store/instance.proto](#store_instance-proto)
+    - [InstanceOptions](#bytebase-store-InstanceOptions)
   
 - [store/vcs.proto](#store_vcs-proto)
     - [Commit](#bytebase-store-Commit)
@@ -84,6 +93,10 @@
     - [PlanConfig.Step](#bytebase-store-PlanConfig-Step)
   
     - [PlanConfig.ChangeDatabaseConfig.Type](#bytebase-store-PlanConfig-ChangeDatabaseConfig-Type)
+  
+- [store/policy.proto](#store_policy-proto)
+    - [Binding](#bytebase-store-Binding)
+    - [IamPolicy](#bytebase-store-IamPolicy)
   
 - [store/setting.proto](#store_setting-proto)
     - [AgentPluginSetting](#bytebase-store-AgentPluginSetting)
@@ -567,6 +580,7 @@ DatabaseMetadata is the metadata for databases.
 | collation | [string](#string) |  | The collation is the collation of a database. |
 | extensions | [ExtensionMetadata](#bytebase-store-ExtensionMetadata) | repeated | The extensions is the list of extensions in a database. |
 | datashare | [bool](#bool) |  | The database belongs to a datashare. |
+| service_name | [string](#string) |  | The service name of the database. It&#39;s the Oracle specific concept. |
 
 
 
@@ -696,6 +710,8 @@ This is the concept of schema in Postgres, but it&#39;s a no-op for MySQL.
 | tables | [TableMetadata](#bytebase-store-TableMetadata) | repeated | The tables is the list of tables in a schema. |
 | views | [ViewMetadata](#bytebase-store-ViewMetadata) | repeated | The views is the list of views in a schema. |
 | functions | [FunctionMetadata](#bytebase-store-FunctionMetadata) | repeated | The functions is the list of functions in a schema. |
+| streams | [StreamMetadata](#bytebase-store-StreamMetadata) | repeated | The streams is the list of streams in a schema, currently, only used for Snowflake. |
+| tasks | [TaskMetadata](#bytebase-store-TaskMetadata) | repeated | The routines is the list of routines in a schema, currently, only used for Snowflake. |
 
 
 
@@ -734,6 +750,28 @@ This is the concept of schema in Postgres, but it&#39;s a no-op for MySQL.
 
 
 
+<a name="bytebase-store-StreamMetadata"></a>
+
+### StreamMetadata
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name is the name of a stream. |
+| table_name | [string](#string) |  | The table_name is the name of the table/view that the stream is created on. |
+| owner | [string](#string) |  | The owner of the stream. |
+| comment | [string](#string) |  | The comment of the stream. |
+| type | [StreamMetadata.Type](#bytebase-store-StreamMetadata-Type) |  | The type of the stream. |
+| stale | [bool](#bool) |  | Indicates whether the stream was last read before the `stale_after` time. |
+| mode | [StreamMetadata.Mode](#bytebase-store-StreamMetadata-Mode) |  | The mode of the stream. |
+| definition | [string](#string) |  | The definition of the stream. |
+
+
+
+
+
+
 <a name="bytebase-store-TableMetadata"></a>
 
 ### TableMetadata
@@ -760,6 +798,30 @@ TableMetadata is the metadata for tables.
 
 
 
+<a name="bytebase-store-TaskMetadata"></a>
+
+### TaskMetadata
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name is the name of a task. |
+| id | [string](#string) |  | The id is the snowflake-generated id of a task. Example: 01ad32a0-1bb6-5e93-0000-000000000001 |
+| owner | [string](#string) |  | The owner of the task. |
+| comment | [string](#string) |  | The comment of the task. |
+| warehouse | [string](#string) |  | The warehouse of the task. |
+| schedule | [string](#string) |  | The schedule interval of the task. |
+| predecessors | [string](#string) | repeated | The predecessor tasks of the task. |
+| state | [TaskMetadata.State](#bytebase-store-TaskMetadata-State) |  | The state of the task. |
+| condition | [string](#string) |  | The condition of the task. |
+| definition | [string](#string) |  | The definition of the task. |
+
+
+
+
+
+
 <a name="bytebase-store-ViewMetadata"></a>
 
 ### ViewMetadata
@@ -778,6 +840,45 @@ ViewMetadata is the metadata for views.
 
 
  
+
+
+<a name="bytebase-store-StreamMetadata-Mode"></a>
+
+### StreamMetadata.Mode
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| MODE_UNSPECIFIED | 0 |  |
+| MODE_DEFAULT | 1 |  |
+| MODE_APPEND_ONLY | 2 |  |
+| MODE_INSERT_ONLY | 3 |  |
+
+
+
+<a name="bytebase-store-StreamMetadata-Type"></a>
+
+### StreamMetadata.Type
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TYPE_UNSPECIFIED | 0 |  |
+| TYPE_DELTA | 1 |  |
+
+
+
+<a name="bytebase-store-TaskMetadata-State"></a>
+
+### TaskMetadata.State
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| STATE_UNSPECIFIED | 0 |  |
+| STATE_STARTED | 1 |  |
+| STATE_SUSPENDED | 2 |  |
+
 
  
 
@@ -905,6 +1006,37 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 | OAUTH2 | 1 |  |
 | OIDC | 2 |  |
 
+
+ 
+
+ 
+
+ 
+
+
+
+<a name="store_instance-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## store/instance.proto
+
+
+
+<a name="bytebase-store-InstanceOptions"></a>
+
+### InstanceOptions
+InstanceOptions is the option for instances.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| schema_tenant_mode | [bool](#bool) |  | The schema tenant mode is used to determine whether the instance is in schema tenant mode. For Oracle schema tenant mode, the instance a Oracle database and the database is the Oracle schema. |
+
+
+
+
+
+ 
 
  
 
@@ -1063,6 +1195,7 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 | role | [string](#string) |  | The requested role, e.g. roles/EXPORTER. |
 | user | [string](#string) |  | The requested user, e.g. users/hello@bytebase.com. |
 | condition | [google.type.Expr](#google-type-Expr) |  |  |
+| expiration | [google.protobuf.Duration](#google-protobuf-Duration) |  |  |
 
 
 
@@ -1161,7 +1294,7 @@ OIDCIdentityProviderConfig is the structure for OIDC identity provider config.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | rollback_from_task | [string](#string) |  | rollback_from_task is the task from which the rollback SQL statement is generated for this task. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} |
-| rollback_from_review | [string](#string) |  | rollback_from_review is the review containing the original task from which the rollback SQL statement is generated for this task. Format: projects/{project}/reviews/{review} |
+| rollback_from_issue | [string](#string) |  | rollback_from_issue is the issue containing the original task from which the rollback SQL statement is generated for this task. Format: projects/{project}/issues/{issue} |
 
 
 
@@ -1278,6 +1411,56 @@ Type is the database change type.
 | BRANCH | 5 | Used when restoring from a backup (the restored database branched from the original backup). |
 | DATA | 6 | Used for DML change. |
 
+
+ 
+
+ 
+
+ 
+
+
+
+<a name="store_policy-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## store/policy.proto
+
+
+
+<a name="bytebase-store-Binding"></a>
+
+### Binding
+Reference: https://cloud.google.com/pubsub/docs/reference/rpc/google.iam.v1#binding
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| role | [string](#string) |  | Role that is assigned to the list of members. Format: roles/{role} |
+| members | [string](#string) | repeated | Specifies the principals requesting access for a Bytebase resource. `members` can have the following values:
+
+* `allUsers`: A special identifier that represents anyone. * `user:{emailid}`: An email address that represents a specific Bytebase account. For example, `alice@example.com`. |
+| condition | [google.type.Expr](#google-type-Expr) |  | The condition that is associated with this binding. If the condition evaluates to true, then this binding applies to the current request. If the condition evaluates to false, then this binding does not apply to the current request. However, a different role binding might grant the same role to one or more of the principals in this binding. |
+
+
+
+
+
+
+<a name="bytebase-store-IamPolicy"></a>
+
+### IamPolicy
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| bindings | [Binding](#bytebase-store-Binding) | repeated | Collection of binding. |
+
+
+
+
+
+ 
 
  
 

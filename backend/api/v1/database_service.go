@@ -787,10 +787,10 @@ func convertToChangeHistory(h *store.InstanceChangeHistoryMessage) (*v1pb.Change
 		PrevSchema:        h.SchemaPrev,
 		ExecutionDuration: durationpb.New(time.Duration(h.ExecutionDurationNs)),
 		PushEvent:         convertToPushEvent(h.Payload.GetPushEvent()),
-		Review:            "",
+		Issue:             "",
 	}
 	if h.IssueUID != nil {
-		v1pbHistory.Review = fmt.Sprintf("%s%s/%s%d", projectNamePrefix, h.IssueProjectID, reviewPrefix, *h.IssueUID)
+		v1pbHistory.Issue = fmt.Sprintf("%s%s/%s%d", projectNamePrefix, h.IssueProjectID, issuePrefix, *h.IssueUID)
 	}
 	return v1pbHistory, nil
 }
@@ -938,9 +938,6 @@ func (s *DatabaseService) ListSecrets(ctx context.Context, request *v1pb.ListSec
 
 // UpdateSecret updates a secret of a database.
 func (s *DatabaseService) UpdateSecret(ctx context.Context, request *v1pb.UpdateSecretRequest) (*v1pb.Secret, error) {
-	if !s.licenseService.IsFeatureEnabled(api.FeatureEncryptedSecrets) {
-		return nil, status.Errorf(codes.PermissionDenied, api.FeatureEncryptedSecrets.AccessErrorMessage())
-	}
 	if request.Secret == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "secret is required")
 	}
@@ -961,6 +958,11 @@ func (s *DatabaseService) UpdateSecret(ctx context.Context, request *v1pb.Update
 	if instance == nil {
 		return nil, status.Errorf(codes.NotFound, "instance %q not found", instanceID)
 	}
+
+	if err := s.licenseService.IsFeatureEnabledForInstance(api.FeatureEncryptedSecrets, instance); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, err.Error())
+	}
+
 	database, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 		InstanceID:   &instanceID,
 		DatabaseName: &databaseName,
@@ -1041,10 +1043,6 @@ func (s *DatabaseService) UpdateSecret(ctx context.Context, request *v1pb.Update
 
 // DeleteSecret deletes a secret of a database.
 func (s *DatabaseService) DeleteSecret(ctx context.Context, request *v1pb.DeleteSecretRequest) (*emptypb.Empty, error) {
-	if !s.licenseService.IsFeatureEnabled(api.FeatureEncryptedSecrets) {
-		return nil, status.Errorf(codes.PermissionDenied, api.FeatureEncryptedSecrets.AccessErrorMessage())
-	}
-
 	instanceID, databaseName, secretName, err := getInstanceDatabaseIDSecretName(request.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
@@ -1059,6 +1057,11 @@ func (s *DatabaseService) DeleteSecret(ctx context.Context, request *v1pb.Delete
 	if instance == nil {
 		return nil, status.Errorf(codes.NotFound, "instance %q not found", instanceID)
 	}
+
+	if err := s.licenseService.IsFeatureEnabledForInstance(api.FeatureEncryptedSecrets, instance); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, err.Error())
+	}
+
 	database, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 		InstanceID:   &instanceID,
 		DatabaseName: &databaseName,
@@ -1536,6 +1539,32 @@ func convertDatabaseMetadata(metadata *storepb.DatabaseMetadata) *v1pb.DatabaseM
 				Definition: function.Definition,
 			})
 		}
+		for _, task := range schema.Tasks {
+			s.Tasks = append(s.Tasks, &v1pb.TaskMetadata{
+				Name:         task.Name,
+				Id:           task.Id,
+				Owner:        task.Owner,
+				Comment:      task.Comment,
+				Warehouse:    task.Warehouse,
+				Schedule:     task.Schedule,
+				Predecessors: task.Predecessors,
+				State:        v1pb.TaskMetadata_State(task.State),
+				Condition:    task.Condition,
+				Definition:   task.Definition,
+			})
+		}
+		for _, stream := range schema.Streams {
+			s.Streams = append(s.Streams, &v1pb.StreamMetadata{
+				Name:       stream.Name,
+				TableName:  stream.TableName,
+				Owner:      stream.Owner,
+				Comment:    stream.Comment,
+				Type:       v1pb.StreamMetadata_Type(stream.Type),
+				Stale:      stream.Stale,
+				Mode:       v1pb.StreamMetadata_Mode(stream.Mode),
+				Definition: stream.Definition,
+			})
+		}
 		m.Schemas = append(m.Schemas, s)
 	}
 	for _, extension := range metadata.Extensions {
@@ -1794,8 +1823,8 @@ func isUpperCaseLetter(c rune) bool {
 
 // AdviseIndex advises the index of a table.
 func (s *DatabaseService) AdviseIndex(ctx context.Context, request *v1pb.AdviseIndexRequest) (*v1pb.AdviseIndexResponse, error) {
-	if !s.licenseService.IsFeatureEnabled(api.FeaturePluginOpenAI) {
-		return nil, status.Errorf(codes.PermissionDenied, api.FeaturePluginOpenAI.AccessErrorMessage())
+	if err := s.licenseService.IsFeatureEnabled(api.FeaturePluginOpenAI); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, err.Error())
 	}
 	instanceID, databaseName, err := getInstanceDatabaseID(request.Parent)
 	if err != nil {
@@ -1842,7 +1871,7 @@ func (s *DatabaseService) mysqlAdviseIndex(ctx context.Context, request *v1pb.Ad
 	var schemas []*store.DBSchema
 
 	// Deal with the cross database query
-	dbList, err := parser.ExtractDatabaseList(parser.MySQL, request.Statement)
+	dbList, err := parser.ExtractDatabaseList(parser.MySQL, request.Statement, "")
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to extract database list: %v", err)
 	}

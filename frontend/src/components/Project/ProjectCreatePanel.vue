@@ -79,10 +79,7 @@
                 <LearnMoreLink
                   url="https://www.bytebase.com/docs/concepts/batch-mode/?source=console"
                 />
-                <FeatureBadge
-                  feature="bb.feature.multi-tenancy"
-                  class="text-accent"
-                />
+                <FeatureBadge feature="bb.feature.multi-tenancy" />
               </div>
             </div>
           </div>
@@ -114,8 +111,8 @@
   </DrawerContent>
 
   <FeatureModal
-    v-if="state.showFeatureModal"
     feature="bb.feature.multi-tenancy"
+    :open="state.showFeatureModal"
     @cancel="state.showFeatureModal = false"
   />
 </template>

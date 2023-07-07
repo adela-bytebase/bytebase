@@ -2,6 +2,7 @@ import {
   createChannel,
   createClientFactory,
   FetchTransport,
+  WebsocketTransport,
 } from "nice-grpc-web";
 import {
   authInterceptorMiddleware,
@@ -17,7 +18,7 @@ import { ProjectServiceDefinition } from "@/types/proto/v1/project_service";
 import { SQLServiceDefinition } from "@/types/proto/v1/sql_service";
 import { RiskServiceDefinition } from "@/types/proto/v1/risk_service";
 import { SettingServiceDefinition } from "@/types/proto/v1/setting_service";
-import { ReviewServiceDefinition } from "@/types/proto/v1/review_service";
+import { IssueServiceDefinition } from "@/types/proto/v1/issue_service";
 import { DatabaseServiceDefinition } from "@/types/proto/v1/database_service";
 import { SheetServiceDefinition } from "@/types/proto/v1/sheet_service";
 import { InstanceRoleServiceDefinition } from "@/types/proto/v1/instance_role_service";
@@ -42,6 +43,10 @@ const channel = createChannel(
   FetchTransport({
     credentials: "include",
   })
+);
+const websocketChannel = createChannel(
+  window.location.origin,
+  WebsocketTransport()
 );
 
 const clientFactory = createClientFactory()
@@ -116,14 +121,19 @@ export const sheetServiceClient = clientFactory.create(
   channel
 );
 
-export const reviewServiceClient = clientFactory.create(
-  ReviewServiceDefinition,
+export const issueServiceClient = clientFactory.create(
+  IssueServiceDefinition,
   channel
 );
 
 export const sqlServiceClient = clientFactory.create(
   SQLServiceDefinition,
   channel
+);
+
+export const sqlStreamingServiceClient = clientFactory.create(
+  SQLServiceDefinition,
+  websocketChannel
 );
 
 export const celServiceClient = clientFactory.create(

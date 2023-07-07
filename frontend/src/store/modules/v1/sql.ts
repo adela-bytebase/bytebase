@@ -6,7 +6,7 @@ import {
   QueryRequest,
 } from "@/types/proto/v1/sql_service";
 import { extractGrpcErrorMessage } from "@/utils/grpcweb";
-import { Status } from "nice-grpc-common";
+import { ClientError, Status } from "nice-grpc-common";
 import { defineStore } from "pinia";
 
 export const useSQLStore = defineStore("sql", () => {
@@ -27,10 +27,12 @@ export const useSQLStore = defineStore("sql", () => {
       };
     } catch (err) {
       const error = extractGrpcErrorMessage(err);
+      const status = err instanceof ClientError ? err.code : Status.UNKNOWN;
       return {
         error,
         results: [],
         advices: [],
+        status,
       };
     }
   };
@@ -46,14 +48,27 @@ export const useSQLStore = defineStore("sql", () => {
 });
 
 export const getExportRequestFormat = (
-  format: "CSV" | "JSON"
+  format: "CSV" | "JSON" | "SQL"
 ): ExportRequest_Format => {
   switch (format) {
     case "CSV":
       return ExportRequest_Format.CSV;
     case "JSON":
       return ExportRequest_Format.JSON;
+    case "SQL":
+      return ExportRequest_Format.SQL;
     default:
       return ExportRequest_Format.FORMAT_UNSPECIFIED;
+  }
+};
+
+export const getExportFileType = (format: "CSV" | "JSON" | "SQL") => {
+  switch (format) {
+    case "CSV":
+      return "text/csv";
+    case "JSON":
+      return "application/json";
+    case "SQL":
+      return "application/sql";
   }
 };

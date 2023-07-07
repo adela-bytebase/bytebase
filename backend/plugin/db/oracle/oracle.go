@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	// Import go-ora Oracle driver.
 	"github.com/pkg/errors"
 	go_ora "github.com/sijms/go-ora/v2"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/bytebase/bytebase/backend/common/log"
 	"github.com/bytebase/bytebase/backend/plugin/db"
@@ -30,16 +32,18 @@ func init() {
 
 // Driver is the Oracle driver.
 type Driver struct {
-	db           *sql.DB
-	databaseName string
+	db               *sql.DB
+	databaseName     string
+	serviceName      string
+	schemaTenantMode bool
 }
 
 func newDriver(db.DriverConfig) db.Driver {
 	return &Driver{}
 }
 
-// Open opens a Snowflake driver.
-func (driver *Driver) Open(_ context.Context, _ db.Type, config db.ConnectionConfig, _ db.ConnectionContext) (db.Driver, error) {
+// Open opens a Oracle driver.
+func (driver *Driver) Open(ctx context.Context, _ db.Type, config db.ConnectionConfig, _ db.ConnectionContext) (db.Driver, error) {
 	port, err := strconv.Atoi(config.Port)
 	if err != nil {
 		return nil, errors.Errorf("invalid port %q", config.Port)
@@ -53,8 +57,15 @@ func (driver *Driver) Open(_ context.Context, _ db.Type, config db.ConnectionCon
 	if err != nil {
 		return nil, err
 	}
+	if config.SchemaTenantMode {
+		if _, err := db.ExecContext(ctx, "ALTER SESSION SET CURRENT_SCHEMA = :1", driver.databaseName); err != nil {
+			return nil, errors.Wrapf(err, "failed to set current schema to %q", driver.databaseName)
+		}
+	}
 	driver.db = db
 	driver.databaseName = config.Database
+	driver.serviceName = config.ServiceName
+	driver.schemaTenantMode = config.SchemaTenantMode
 	return driver, nil
 }
 
@@ -163,10 +174,11 @@ func getOracleStatementWithResultLimit(stmt string, limit int) string {
 }
 
 func (*Driver) querySingleSQL(ctx context.Context, conn *sql.Conn, singleSQL parser.SingleSQL, queryContext *db.QueryContext) (*v1pb.QueryResult, error) {
-	statement := singleSQL.Text
-	statement = strings.TrimRight(statement, " \n\t;")
-	if !strings.HasPrefix(strings.ToUpper(statement), "EXPLAIN") && queryContext.Limit > 0 {
-		statement = getOracleStatementWithResultLimit(statement, queryContext.Limit)
+	statement := strings.TrimRight(singleSQL.Text, " \n\t;")
+
+	stmt := statement
+	if !strings.HasPrefix(strings.ToUpper(stmt), "EXPLAIN") && queryContext.Limit > 0 {
+		stmt = getOracleStatementWithResultLimit(stmt, queryContext.Limit)
 	}
 
 	if queryContext.ReadOnly {
@@ -174,7 +186,14 @@ func (*Driver) querySingleSQL(ctx context.Context, conn *sql.Conn, singleSQL par
 		queryContext.ReadOnly = false
 	}
 
-	return util.Query2(ctx, db.Oracle, conn, statement, queryContext)
+	startTime := time.Now()
+	result, err := util.Query2(ctx, db.Oracle, conn, stmt, queryContext)
+	if err != nil {
+		return nil, err
+	}
+	result.Latency = durationpb.New(time.Since(startTime))
+	result.Statement = statement
+	return result, nil
 }
 
 // RunStatement runs a SQL statement in a given connection.

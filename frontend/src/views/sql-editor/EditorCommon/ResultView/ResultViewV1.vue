@@ -1,7 +1,7 @@
 <template>
   <NConfigProvider
     v-bind="naiveUIConfig"
-    class="relative flex flex-col justify-start items-start p-2"
+    class="relative flex flex-col justify-start items-start p-2 pb-1"
     :class="dark && 'dark bg-dark-bg'"
   >
     <template v-if="executeParams && resultSet && !showPlaceholder">
@@ -31,7 +31,14 @@
         <EmptyView />
       </template>
       <template v-else-if="viewMode === 'ERROR'">
-        <ErrorView :error="resultSet.error" />
+        <ErrorView :error="resultSet.error">
+          <template
+            v-if="resultSet.status === Status.PERMISSION_DENIED"
+            #suffix
+          >
+            <RequestQueryButton />
+          </template>
+        </ErrorView>
       </template>
     </template>
 
@@ -55,6 +62,7 @@
 import { computed, PropType, toRef } from "vue";
 import { useI18n } from "vue-i18n";
 import { darkTheme, NConfigProvider, NTabs, NTabPane } from "naive-ui";
+import { Status } from "nice-grpc-common";
 
 import { darkThemeOverrides } from "@/../naive-ui.config";
 import SingleResultViewV1 from "./SingleResultViewV1.vue";
@@ -62,6 +70,7 @@ import EmptyView from "./EmptyView.vue";
 import { ExecuteConfig, ExecuteOption, SQLResultSetV1 } from "@/types";
 import { provideSQLResultViewContext } from "./context";
 import ErrorView from "./ErrorView.vue";
+import RequestQueryButton from "./RequestQueryButton.vue";
 import { QueryResult } from "@/types/proto/v1/sql_service";
 
 type ViewMode = "SINGLE-RESULT" | "MULTI-RESULT" | "EMPTY" | "ERROR";

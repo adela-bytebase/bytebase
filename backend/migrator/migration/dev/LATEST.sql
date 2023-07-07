@@ -330,7 +330,10 @@ CREATE TABLE instance (
     engine TEXT NOT NULL,
     engine_version TEXT NOT NULL DEFAULT '',
     external_link TEXT NOT NULL DEFAULT '',
-    resource_id TEXT NOT NULL
+    resource_id TEXT NOT NULL,
+    -- activation should set to be TRUE if users assign license to this instance.
+    activation BOOLEAN NOT NULL DEFAULT false,
+    options JSONB NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX idx_instance_unique_resource_id ON instance(resource_id);
@@ -384,7 +387,9 @@ CREATE TABLE db (
     schema_version TEXT NOT NULL,
     name TEXT NOT NULL,
     secrets JSONB NOT NULL DEFAULT '{}',
-    datashare BOOLEAN NOT NULL DEFAULT FALSE
+    datashare BOOLEAN NOT NULL DEFAULT FALSE,
+    -- service_name is the Oracle specific field.
+    service_name TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX idx_db_instance_id ON db(instance_id);

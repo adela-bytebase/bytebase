@@ -21,6 +21,10 @@
 - [v1/deployment.proto](#v1_deployment-proto)
     - [DeploymentType](#bytebase-v1-DeploymentType)
   
+- [v1/iam_policy.proto](#v1_iam_policy-proto)
+    - [Binding](#bytebase-v1-Binding)
+    - [IamPolicy](#bytebase-v1-IamPolicy)
+  
 - [v1/org_policy_service.proto](#v1_org_policy_service-proto)
     - [AccessControlPolicy](#bytebase-v1-AccessControlPolicy)
     - [AccessControlRule](#bytebase-v1-AccessControlRule)
@@ -152,9 +156,11 @@
     - [SlowQueryDetails](#bytebase-v1-SlowQueryDetails)
     - [SlowQueryLog](#bytebase-v1-SlowQueryLog)
     - [SlowQueryStatistics](#bytebase-v1-SlowQueryStatistics)
+    - [StreamMetadata](#bytebase-v1-StreamMetadata)
     - [SyncDatabaseRequest](#bytebase-v1-SyncDatabaseRequest)
     - [SyncDatabaseResponse](#bytebase-v1-SyncDatabaseResponse)
     - [TableMetadata](#bytebase-v1-TableMetadata)
+    - [TaskMetadata](#bytebase-v1-TaskMetadata)
     - [UpdateBackupSettingRequest](#bytebase-v1-UpdateBackupSettingRequest)
     - [UpdateDatabaseRequest](#bytebase-v1-UpdateDatabaseRequest)
     - [UpdateSecretRequest](#bytebase-v1-UpdateSecretRequest)
@@ -166,6 +172,9 @@
     - [ChangeHistory.Status](#bytebase-v1-ChangeHistory-Status)
     - [ChangeHistory.Type](#bytebase-v1-ChangeHistory-Type)
     - [ChangeHistoryView](#bytebase-v1-ChangeHistoryView)
+    - [StreamMetadata.Mode](#bytebase-v1-StreamMetadata-Mode)
+    - [StreamMetadata.Type](#bytebase-v1-StreamMetadata-Type)
+    - [TaskMetadata.State](#bytebase-v1-TaskMetadata-State)
   
     - [DatabaseService](#bytebase-v1-DatabaseService)
   
@@ -228,6 +237,17 @@
   
     - [IdentityProviderService](#bytebase-v1-IdentityProviderService)
   
+- [v1/logging_service.proto](#v1_logging_service-proto)
+    - [GetLogRequest](#bytebase-v1-GetLogRequest)
+    - [ListLogsRequest](#bytebase-v1-ListLogsRequest)
+    - [ListLogsResponse](#bytebase-v1-ListLogsResponse)
+    - [LogEntity](#bytebase-v1-LogEntity)
+  
+    - [LogEntity.Action](#bytebase-v1-LogEntity-Action)
+    - [LogEntity.Level](#bytebase-v1-LogEntity-Level)
+  
+    - [LoggingService](#bytebase-v1-LoggingService)
+  
 - [v1/inbox_service.proto](#v1_inbox_service-proto)
     - [GetInboxSummaryRequest](#bytebase-v1-GetInboxSummaryRequest)
     - [InboxMessage](#bytebase-v1-InboxMessage)
@@ -259,6 +279,7 @@
     - [DeleteInstanceRequest](#bytebase-v1-DeleteInstanceRequest)
     - [GetInstanceRequest](#bytebase-v1-GetInstanceRequest)
     - [Instance](#bytebase-v1-Instance)
+    - [InstanceOptions](#bytebase-v1-InstanceOptions)
     - [ListInstancesRequest](#bytebase-v1-ListInstancesRequest)
     - [ListInstancesResponse](#bytebase-v1-ListInstancesResponse)
     - [RemoveDataSourceRequest](#bytebase-v1-RemoveDataSourceRequest)
@@ -273,16 +294,35 @@
   
     - [InstanceService](#bytebase-v1-InstanceService)
   
-- [v1/logging_service.proto](#v1_logging_service-proto)
-    - [GetLogRequest](#bytebase-v1-GetLogRequest)
-    - [ListLogsRequest](#bytebase-v1-ListLogsRequest)
-    - [ListLogsResponse](#bytebase-v1-ListLogsResponse)
-    - [LogEntity](#bytebase-v1-LogEntity)
+- [v1/issue_service.proto](#v1_issue_service-proto)
+    - [ApprovalFlow](#bytebase-v1-ApprovalFlow)
+    - [ApprovalNode](#bytebase-v1-ApprovalNode)
+    - [ApprovalStep](#bytebase-v1-ApprovalStep)
+    - [ApprovalTemplate](#bytebase-v1-ApprovalTemplate)
+    - [ApproveIssueRequest](#bytebase-v1-ApproveIssueRequest)
+    - [BatchUpdateIssuesRequest](#bytebase-v1-BatchUpdateIssuesRequest)
+    - [BatchUpdateIssuesResponse](#bytebase-v1-BatchUpdateIssuesResponse)
+    - [CreateIssueCommentRequest](#bytebase-v1-CreateIssueCommentRequest)
+    - [CreateIssueRequest](#bytebase-v1-CreateIssueRequest)
+    - [GetIssueRequest](#bytebase-v1-GetIssueRequest)
+    - [Issue](#bytebase-v1-Issue)
+    - [Issue.Approver](#bytebase-v1-Issue-Approver)
+    - [IssueComment](#bytebase-v1-IssueComment)
+    - [ListIssuesRequest](#bytebase-v1-ListIssuesRequest)
+    - [ListIssuesResponse](#bytebase-v1-ListIssuesResponse)
+    - [RejectIssueRequest](#bytebase-v1-RejectIssueRequest)
+    - [RequestIssueRequest](#bytebase-v1-RequestIssueRequest)
+    - [UpdateIssueCommentRequest](#bytebase-v1-UpdateIssueCommentRequest)
+    - [UpdateIssueRequest](#bytebase-v1-UpdateIssueRequest)
   
-    - [LogEntity.Action](#bytebase-v1-LogEntity-Action)
-    - [LogEntity.Level](#bytebase-v1-LogEntity-Level)
+    - [ApprovalNode.GroupValue](#bytebase-v1-ApprovalNode-GroupValue)
+    - [ApprovalNode.Type](#bytebase-v1-ApprovalNode-Type)
+    - [ApprovalStep.Type](#bytebase-v1-ApprovalStep-Type)
+    - [Issue.Approver.Status](#bytebase-v1-Issue-Approver-Status)
+    - [Issue.Type](#bytebase-v1-Issue-Type)
+    - [IssueStatus](#bytebase-v1-IssueStatus)
   
-    - [LoggingService](#bytebase-v1-LoggingService)
+    - [IssueService](#bytebase-v1-IssueService)
   
 - [v1/project_service.proto](#v1_project_service-proto)
     - [Activity](#bytebase-v1-Activity)
@@ -290,7 +330,6 @@
     - [BatchGetIamPolicyRequest](#bytebase-v1-BatchGetIamPolicyRequest)
     - [BatchGetIamPolicyResponse](#bytebase-v1-BatchGetIamPolicyResponse)
     - [BatchGetIamPolicyResponse.PolicyResult](#bytebase-v1-BatchGetIamPolicyResponse-PolicyResult)
-    - [Binding](#bytebase-v1-Binding)
     - [CreateDatabaseGroupRequest](#bytebase-v1-CreateDatabaseGroupRequest)
     - [CreateProjectRequest](#bytebase-v1-CreateProjectRequest)
     - [CreateSchemaGroupRequest](#bytebase-v1-CreateSchemaGroupRequest)
@@ -307,7 +346,6 @@
     - [GetProjectGitOpsInfoRequest](#bytebase-v1-GetProjectGitOpsInfoRequest)
     - [GetProjectRequest](#bytebase-v1-GetProjectRequest)
     - [GetSchemaGroupRequest](#bytebase-v1-GetSchemaGroupRequest)
-    - [IamPolicy](#bytebase-v1-IamPolicy)
     - [LabelSelector](#bytebase-v1-LabelSelector)
     - [LabelSelectorRequirement](#bytebase-v1-LabelSelectorRequirement)
     - [ListDatabaseGroupsRequest](#bytebase-v1-ListDatabaseGroupsRequest)
@@ -352,35 +390,6 @@
   
     - [ProjectService](#bytebase-v1-ProjectService)
   
-- [v1/review_service.proto](#v1_review_service-proto)
-    - [ApprovalFlow](#bytebase-v1-ApprovalFlow)
-    - [ApprovalNode](#bytebase-v1-ApprovalNode)
-    - [ApprovalStep](#bytebase-v1-ApprovalStep)
-    - [ApprovalTemplate](#bytebase-v1-ApprovalTemplate)
-    - [ApproveReviewRequest](#bytebase-v1-ApproveReviewRequest)
-    - [BatchUpdateReviewsRequest](#bytebase-v1-BatchUpdateReviewsRequest)
-    - [BatchUpdateReviewsResponse](#bytebase-v1-BatchUpdateReviewsResponse)
-    - [CreateReviewCommentRequest](#bytebase-v1-CreateReviewCommentRequest)
-    - [CreateReviewRequest](#bytebase-v1-CreateReviewRequest)
-    - [GetReviewRequest](#bytebase-v1-GetReviewRequest)
-    - [ListReviewsRequest](#bytebase-v1-ListReviewsRequest)
-    - [ListReviewsResponse](#bytebase-v1-ListReviewsResponse)
-    - [RejectReviewRequest](#bytebase-v1-RejectReviewRequest)
-    - [RequestReviewRequest](#bytebase-v1-RequestReviewRequest)
-    - [Review](#bytebase-v1-Review)
-    - [Review.Approver](#bytebase-v1-Review-Approver)
-    - [ReviewComment](#bytebase-v1-ReviewComment)
-    - [UpdateReviewCommentRequest](#bytebase-v1-UpdateReviewCommentRequest)
-    - [UpdateReviewRequest](#bytebase-v1-UpdateReviewRequest)
-  
-    - [ApprovalNode.GroupValue](#bytebase-v1-ApprovalNode-GroupValue)
-    - [ApprovalNode.Type](#bytebase-v1-ApprovalNode-Type)
-    - [ApprovalStep.Type](#bytebase-v1-ApprovalStep-Type)
-    - [Review.Approver.Status](#bytebase-v1-Review-Approver-Status)
-    - [ReviewStatus](#bytebase-v1-ReviewStatus)
-  
-    - [ReviewService](#bytebase-v1-ReviewService)
-  
 - [v1/risk_service.proto](#v1_risk_service-proto)
     - [CreateRiskRequest](#bytebase-v1-CreateRiskRequest)
     - [DeleteRiskRequest](#bytebase-v1-DeleteRiskRequest)
@@ -421,6 +430,7 @@
     - [Plan.Step](#bytebase-v1-Plan-Step)
     - [PlanCheckRun](#bytebase-v1-PlanCheckRun)
     - [PlanCheckRun.Result](#bytebase-v1-PlanCheckRun-Result)
+    - [PreviewRolloutRequest](#bytebase-v1-PreviewRolloutRequest)
     - [Rollout](#bytebase-v1-Rollout)
     - [Stage](#bytebase-v1-Stage)
     - [Task](#bytebase-v1-Task)
@@ -762,6 +772,55 @@ When paginating, all other parameters provided to `ListDebugLog` must match the 
 
 
 
+<a name="v1_iam_policy-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## v1/iam_policy.proto
+
+
+
+<a name="bytebase-v1-Binding"></a>
+
+### Binding
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| role | [string](#string) |  | The role that is assigned to the members. Format: roles/{role} |
+| members | [string](#string) | repeated | Specifies the principals requesting access for a Bytebase resource. |
+| condition | [google.type.Expr](#google-type-Expr) |  | The condition that is associated with this binding. If the condition evaluates to true, then this binding applies to the current request. If the condition evaluates to false, then this binding does not apply to the current request. However, a different role binding might grant the same role to one or more of the principals in this binding. |
+| parsed_expr | [google.api.expr.v1alpha1.ParsedExpr](#google-api-expr-v1alpha1-ParsedExpr) |  | The parsed expression of the condition. |
+
+
+
+
+
+
+<a name="bytebase-v1-IamPolicy"></a>
+
+### IamPolicy
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| bindings | [Binding](#bytebase-v1-Binding) | repeated | Collection of binding. A binding binds one or more project members to a single project role. |
+
+
+
+
+
+ 
+
+ 
+
+ 
+
+ 
+
+
+
 <a name="v1_org_policy_service-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
@@ -944,6 +1003,7 @@ When paginating, all other parameters provided to `GetPolicies` must match the c
 | uid | [string](#string) |  | The system-assigned, unique identifier for a resource. |
 | inherit_from_parent | [bool](#bool) |  |  |
 | type | [PolicyType](#bytebase-v1-PolicyType) |  |  |
+| workspace_iam_policy | [IamPolicy](#bytebase-v1-IamPolicy) |  |  |
 | deployment_approval_policy | [DeploymentApprovalPolicy](#bytebase-v1-DeploymentApprovalPolicy) |  |  |
 | backup_plan_policy | [BackupPlanPolicy](#bytebase-v1-BackupPlanPolicy) |  |  |
 | sensitive_data_policy | [SensitiveDataPolicy](#bytebase-v1-SensitiveDataPolicy) |  |  |
@@ -1127,12 +1187,13 @@ The policy&#39;s `name` field is used to identify the instance to update. Format
 | Name | Number | Description |
 | ---- | ------ | ----------- |
 | POLICY_TYPE_UNSPECIFIED | 0 |  |
-| DEPLOYMENT_APPROVAL | 1 |  |
-| BACKUP_PLAN | 2 |  |
-| SQL_REVIEW | 3 |  |
-| SENSITIVE_DATA | 4 |  |
-| ACCESS_CONTROL | 5 |  |
-| SLOW_QUERY | 6 |  |
+| WORKSPACE_IAM | 1 |  |
+| DEPLOYMENT_APPROVAL | 2 |  |
+| BACKUP_PLAN | 3 |  |
+| SQL_REVIEW | 4 |  |
+| SENSITIVE_DATA | 5 |  |
+| ACCESS_CONTROL | 6 |  |
+| SLOW_QUERY | 7 |  |
 
 
 
@@ -2111,7 +2172,7 @@ Default (empty): Disable automatic backup. |
 | schema | [string](#string) |  |  |
 | prev_schema | [string](#string) |  |  |
 | execution_duration | [google.protobuf.Duration](#google-protobuf-Duration) |  |  |
-| review | [string](#string) |  | Format: projects/{project}/reviews/{review} |
+| issue | [string](#string) |  | Format: projects/{project}/issues/{issue} |
 | push_event | [PushEvent](#bytebase-v1-PushEvent) |  |  |
 
 
@@ -2602,6 +2663,8 @@ This is the concept of schema in Postgres, but it&#39;s a no-op for MySQL.
 | tables | [TableMetadata](#bytebase-v1-TableMetadata) | repeated | The tables is the list of tables in a schema. |
 | views | [ViewMetadata](#bytebase-v1-ViewMetadata) | repeated | The views is the list of views in a schema. |
 | functions | [FunctionMetadata](#bytebase-v1-FunctionMetadata) | repeated | The functions is the list of functions in a schema. |
+| streams | [StreamMetadata](#bytebase-v1-StreamMetadata) | repeated | The streams is the list of streams in a schema, currently, only used for Snowflake. |
+| tasks | [TaskMetadata](#bytebase-v1-TaskMetadata) | repeated | The routines is the list of routines in a schema, currently, only used for Snowflake. |
 
 
 
@@ -2726,6 +2789,28 @@ SlowQueryStatistics is the statistics of the slow query log.
 
 
 
+<a name="bytebase-v1-StreamMetadata"></a>
+
+### StreamMetadata
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name is the name of a stream. |
+| table_name | [string](#string) |  | The table_name is the name of the table/view that the stream is created on. |
+| owner | [string](#string) |  | The owner of the stream. |
+| comment | [string](#string) |  | The comment of the stream. |
+| type | [StreamMetadata.Type](#bytebase-v1-StreamMetadata-Type) |  | The type of the stream. |
+| stale | [bool](#bool) |  | Indicates whether the stream was last read before the `stale_after` time. |
+| mode | [StreamMetadata.Mode](#bytebase-v1-StreamMetadata-Mode) |  | The mode of the stream. |
+| definition | [string](#string) |  | The definition of the stream. |
+
+
+
+
+
+
 <a name="bytebase-v1-SyncDatabaseRequest"></a>
 
 ### SyncDatabaseRequest
@@ -2771,6 +2856,30 @@ TableMetadata is the metadata for tables.
 | create_options | [string](#string) |  | The create_options is the create option of a table. |
 | comment | [string](#string) |  | The comment is the comment of a table. |
 | foreign_keys | [ForeignKeyMetadata](#bytebase-v1-ForeignKeyMetadata) | repeated | The foreign_keys is the list of foreign keys in a table. |
+
+
+
+
+
+
+<a name="bytebase-v1-TaskMetadata"></a>
+
+### TaskMetadata
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name is the name of a task. |
+| id | [string](#string) |  | The id is the snowflake-generated id of a task. Example: 01ad32a0-1bb6-5e93-0000-000000000001 |
+| owner | [string](#string) |  | The owner of the task. |
+| comment | [string](#string) |  | The comment of the task. |
+| warehouse | [string](#string) |  | The warehouse of the task. |
+| schedule | [string](#string) |  | The schedule interval of the task. |
+| predecessors | [string](#string) | repeated | The predecessor tasks of the task. |
+| state | [TaskMetadata.State](#bytebase-v1-TaskMetadata-State) |  | The state of the task. |
+| condition | [string](#string) |  | The condition of the task. |
+| definition | [string](#string) |  | The definition of the task. |
 
 
 
@@ -2930,6 +3039,45 @@ The type of the backup.
 | CHANGE_HISTORY_VIEW_UNSPECIFIED | 0 | The default / unset value. The API will default to the BASIC view. |
 | CHANGE_HISTORY_VIEW_BASIC | 1 |  |
 | CHANGE_HISTORY_VIEW_FULL | 2 |  |
+
+
+
+<a name="bytebase-v1-StreamMetadata-Mode"></a>
+
+### StreamMetadata.Mode
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| MODE_UNSPECIFIED | 0 |  |
+| MODE_DEFAULT | 1 |  |
+| MODE_APPEND_ONLY | 2 |  |
+| MODE_INSERT_ONLY | 3 |  |
+
+
+
+<a name="bytebase-v1-StreamMetadata-Type"></a>
+
+### StreamMetadata.Type
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TYPE_UNSPECIFIED | 0 |  |
+| TYPE_DELTA | 1 |  |
+
+
+
+<a name="bytebase-v1-TaskMetadata-State"></a>
+
+### TaskMetadata.State
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| STATE_UNSPECIFIED | 0 |  |
+| STATE_STARTED | 1 |  |
+| STATE_SUSPENDED | 2 |  |
 
 
  
@@ -3808,6 +3956,160 @@ The identity provider&#39;s `name` field is used to identify the identity provid
 
 
 
+<a name="v1_logging_service-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## v1/logging_service.proto
+
+
+
+<a name="bytebase-v1-GetLogRequest"></a>
+
+### GetLogRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the log to retrieve. Format: logs/{uid} |
+
+
+
+
+
+
+<a name="bytebase-v1-ListLogsRequest"></a>
+
+### ListLogsRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| filter | [string](#string) |  | filter is the filter to apply on the list logs request, follow the [ebnf](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form) syntax. The field only support in filter: - creator, example: - creator = &#34;users/{email}&#34; - resource, example: - resource = &#34;projects/{project resource id}&#34; - level, example: - level = &#34;INFO&#34; - level = &#34;ERROR | WARN&#34; - action, example: - action = &#34;ACTION_MEMBER_CREATE&#34; | &#34;ACTION_ISSUE_CREATE&#34; - create_time, example: - create_time &lt;= &#34;2022-01-01T12:00:00.000Z&#34; - create_time &gt;= &#34;2022-01-01T12:00:00.000Z&#34; For example: List the logs of type &#39;ACTION_ISSUE_COMMENT_CREATE&#39; in issue/123: &#39;action=&#34;ACTION_ISSUE_COMMENT_CREATE&#34;, resource=&#34;issue/123&#34;&#39; |
+| order_by | [string](#string) |  | The order by of the log. Only support order by create_time. For example: - order_by = &#34;create_time asc&#34; - order_by = &#34;create_time desc&#34; |
+| page_size | [int32](#int32) |  | Not used. The maximum number of logs to return. The service may return fewer than this value. If unspecified, at most 100 log entries will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
+| page_token | [string](#string) |  | Not used. A page token, received from a previous `ListLogs` call. Provide this to retrieve the subsequent page. |
+
+
+
+
+
+
+<a name="bytebase-v1-ListLogsResponse"></a>
+
+### ListLogsResponse
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| log_entities | [LogEntity](#bytebase-v1-LogEntity) | repeated | The list of log entities. |
+| next_page_token | [string](#string) |  | A token to retrieve next page of log entities. Pass this value in the page_token field in the subsequent call to `ListLogs` method to retrieve the next page of log entities. |
+
+
+
+
+
+
+<a name="bytebase-v1-LogEntity"></a>
+
+### LogEntity
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the log. Format: logs/{uid} |
+| creator | [string](#string) |  | The creator of the log entity. Format: users/{email} |
+| create_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| update_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| action | [LogEntity.Action](#bytebase-v1-LogEntity-Action) |  |  |
+| level | [LogEntity.Level](#bytebase-v1-LogEntity-Level) |  |  |
+| resource | [string](#string) |  | The name of the resource associated with this log entity. For example, the resource user associated with log entity type of &#34;ACTION_MEMBER_CREATE&#34;. Format: For ACTION_MEMBER_*: users/{email} For ACTION_ISSUE_*: issues/{issue uid} For ACTION_PIPELINE_*: pipelines/{pipeline uid} For ACTION_PROJECT_*: projects/{project resource id} For ACTION_DATABASE_*: instances/{instance resource id} |
+| payload | [string](#string) |  | The payload of the log entity. TODO: use oneof |
+| comment | [string](#string) |  |  |
+
+
+
+
+
+ 
+
+
+<a name="bytebase-v1-LogEntity-Action"></a>
+
+### LogEntity.Action
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ACTION_UNSPECIFIED | 0 | In worksapce resource only. |
+| ACTION_MEMBER_CREATE | 1 | Member related activity types. Enum value 1 - 20
+
+ACTION_MEMBER_CREATE is the type for creating a new member. |
+| ACTION_MEMBER_ROLE_UPDATE | 2 | ACTION_MEMBER_ROLE_UPDATE is the type for updating a member&#39;s role. |
+| ACTION_MEMBER_ACTIVATE | 3 | ACTION_MEMBER_ACTIVATE_UPDATE is the type for activating members. |
+| ACTION_MEMBER_DEACTIVE | 4 | ACTION_MEMBER_DEACTIVE is the type for deactiving members. |
+| ACTION_ISSUE_CREATE | 21 | Issue related activity types. Enum value 21 - 40
+
+ACTION_ISSUE_CREATE is the type for creating a new issue. |
+| ACTION_ISSUE_COMMENT_CREATE | 22 | ACTION_ISSUE_COMMENT_CREATE is the type for creating a new comment on an issue. |
+| ACTION_ISSUE_FIELD_UPDATE | 23 | ACTION_ISSUE_FIELD_UPDATE is the type for updating an issue&#39;s field. |
+| ACTION_ISSUE_STATUS_UPDATE | 24 | ACTION_ISSUE_STATUS_UPDATE is the type for updating an issue&#39;s status. |
+| ACTION_ISSUE_APPROVAL_NOTIFY | 25 | ACTION_ISSUE_APPROVAL_NOTIFY is the type for notifying issue approval. |
+| ACTION_PIPELINE_STAGE_STATUS_UPDATE | 31 | ACTION_PIPELINE_STAGE_STATUS_UPDATE represents the pipeline stage status change, including BEGIN, END for now. |
+| ACTION_PIPELINE_TASK_STATUS_UPDATE | 32 | ACTION_PIPELINE_TASK_STATUS_UPDATE represents the pipeline task status change, including PENDING, PENDING_APPROVAL, RUNNING, SUCCESS, FAILURE, CANCELED for now. |
+| ACTION_PIPELINE_TASK_FILE_COMMIT | 33 | ACTION_PIPELINE_TASK_FILE_COMMIT represents the VCS trigger to commit a file to update the task statement. |
+| ACTION_PIPELINE_TASK_STATEMENT_UPDATE | 34 | ACTION_PIPELINE_TASK_STATEMENT_UPDATE represents the manual update of the task statement. |
+| ACTION_PIPELINE_TASK_EARLIEST_ALLOWED_TIME_UPDATE | 35 | ACTION_PIPELINE_TASK_EARLIEST_ALLOWED_TIME_UPDATE represents the manual update of the task earliest allowed time. |
+| ACTION_PROJECT_REPOSITORY_PUSH | 41 | Project related activity types. Enum value 41 - 60
+
+ACTION_PROJECT_REPOSITORY_PUSH represents Bytebase receiving a push event from the project repository. |
+| ACTION_PROJECT_MEMBER_CREATE | 42 | ACTION_PROJECT_MEMBER_CREATE represents adding a member to the project. |
+| ACTION_PROJECT_MEMBER_DELETE | 43 | ACTION_PROJECT_MEMBER_DELETE represents removing a member from the project. |
+| ACTION_PROJECT_MEMBER_ROLE_UPDATE | 44 | ACTION_PROJECT_MEMBER_ROLE_UPDATE represents updating the member role, for example, from ADMIN to MEMBER. |
+| ACTION_PROJECT_DATABASE_RECOVERY_PITR_DONE | 45 | ACTION_PROJECT_DATABASE_RECOVERY_PITR_DONE is the type for database PITR recovery done. |
+| ACTION_PROJECT_DATABASE_TRANSFER | 46 | ACTION_PROJECT_DATABASE_TRANSFER represents transfering the database from one project to another. |
+| ACTION_DATABASE_SQL_EDITOR_QUERY | 61 | Database related activity types. Enum value 61 - 80
+
+ACTION_DATABASE_SQL_EDITOR_QUERY is the type for SQL editor query. |
+| ACTION_DATABASE_SQL_EXPORT | 62 | ACTION_DATABASE_SQL_EXPORT is the type for exporting SQL. |
+
+
+
+<a name="bytebase-v1-LogEntity-Level"></a>
+
+### LogEntity.Level
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| LEVEL_UNSPECIFIED | 0 |  |
+| LEVEL_INFO | 1 | LEVEL_INFO is the type for information. |
+| LEVEL_WARNING | 2 | LEVEL_WARNING is the type for warning. |
+| LEVEL_ERROR | 3 | LEVEL_ERROR is the type for error. |
+
+
+ 
+
+ 
+
+
+<a name="bytebase-v1-LoggingService"></a>
+
+### LoggingService
+
+
+| Method Name | Request Type | Response Type | Description |
+| ----------- | ------------ | ------------- | ------------|
+| ListLogs | [ListLogsRequest](#bytebase-v1-ListLogsRequest) | [ListLogsResponse](#bytebase-v1-ListLogsResponse) |  |
+| GetLog | [GetLogRequest](#bytebase-v1-GetLogRequest) | [LogEntity](#bytebase-v1-LogEntity) |  |
+
+ 
+
+
+
 <a name="v1_inbox_service-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
@@ -3836,6 +4138,7 @@ The identity provider&#39;s `name` field is used to identify the identity provid
 | name | [string](#string) |  | The message name in inbox/{uid} format. |
 | activity_uid | [string](#string) |  |  |
 | status | [InboxMessage.Status](#bytebase-v1-InboxMessage-Status) |  |  |
+| activity | [LogEntity](#bytebase-v1-LogEntity) |  |  |
 
 
 
@@ -4231,6 +4534,23 @@ This value should be 4-63 characters, and valid characters are /[a-z][0-9]-/. |
 | external_link | [string](#string) |  |  |
 | data_sources | [DataSource](#bytebase-v1-DataSource) | repeated |  |
 | environment | [string](#string) |  | The environment resource. Format: environments/prod where prod is the environment resource ID. |
+| activation | [bool](#bool) |  |  |
+| options | [InstanceOptions](#bytebase-v1-InstanceOptions) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-InstanceOptions"></a>
+
+### InstanceOptions
+InstanceOptions is the option for instances.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| schema_tenant_mode | [bool](#bool) |  | The schema tenant mode is used to determine whether the instance is in schema tenant mode. For Oracle schema tenant mode, the instance a Oracle database and the database is the Oracle schema. |
 
 
 
@@ -4421,139 +4741,433 @@ The instance&#39;s `name` field is used to identify the instance to update. Form
 
 
 
-<a name="v1_logging_service-proto"></a>
+<a name="v1_issue_service-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
-## v1/logging_service.proto
+## v1/issue_service.proto
 
 
 
-<a name="bytebase-v1-GetLogRequest"></a>
+<a name="bytebase-v1-ApprovalFlow"></a>
 
-### GetLogRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the log to retrieve. Format: logs/{uid} |
-
-
-
-
-
-
-<a name="bytebase-v1-ListLogsRequest"></a>
-
-### ListLogsRequest
+### ApprovalFlow
 
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| filter | [string](#string) |  | filter is the filter to apply on the list logs request, follow the [ebnf](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form) syntax. The field only support in filter: - creator, example: - creator = &#34;users/{email}&#34; - resource, example: - resource = &#34;projects/{project resource id}&#34; - level, example: - level = &#34;INFO&#34; - level = &#34;ERROR | WARN&#34; - action, example: - action = &#34;ACTION_MEMBER_CREATE&#34; | &#34;ACTION_ISSUE_CREATE&#34; - create_time, example: - create_time &lt;= &#34;2022-01-01T12:00:00.000Z&#34; - create_time &gt;= &#34;2022-01-01T12:00:00.000Z&#34; For example: List the logs of type &#39;ACTION_ISSUE_COMMENT_CREATE&#39; in issue/123: &#39;action=&#34;ACTION_ISSUE_COMMENT_CREATE&#34;, resource=&#34;issue/123&#34;&#39; |
-| order_by | [string](#string) |  | The order by of the log. Only support order by create_time. For example: - order_by = &#34;create_time asc&#34; - order_by = &#34;create_time desc&#34; |
-| page_size | [int32](#int32) |  | Not used. The maximum number of logs to return. The service may return fewer than this value. If unspecified, at most 100 log entries will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
-| page_token | [string](#string) |  | Not used. A page token, received from a previous `ListLogs` call. Provide this to retrieve the subsequent page. |
+| steps | [ApprovalStep](#bytebase-v1-ApprovalStep) | repeated |  |
 
 
 
 
 
 
-<a name="bytebase-v1-ListLogsResponse"></a>
+<a name="bytebase-v1-ApprovalNode"></a>
 
-### ListLogsResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| log_entities | [LogEntity](#bytebase-v1-LogEntity) | repeated | The list of log entities. |
-| next_page_token | [string](#string) |  | A token to retrieve next page of log entities. Pass this value in the page_token field in the subsequent call to `ListLogs` method to retrieve the next page of log entities. |
-
-
-
-
-
-
-<a name="bytebase-v1-LogEntity"></a>
-
-### LogEntity
+### ApprovalNode
 
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the log. Format: logs/{uid} |
-| creator | [string](#string) |  | The creator of the log entity. Format: users/{email} |
-| create_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-| update_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-| action | [LogEntity.Action](#bytebase-v1-LogEntity-Action) |  |  |
-| level | [LogEntity.Level](#bytebase-v1-LogEntity-Level) |  |  |
-| resource | [string](#string) |  | The name of the resource associated with this log entity. For example, the resource user associated with log entity type of &#34;ACTION_MEMBER_CREATE&#34;. Format: For ACTION_MEMBER_*: users/{email} For ACTION_ISSUE_*: issues/{issue uid} For ACTION_PIPELINE_*: pipelines/{pipeline uid} For ACTION_PROJECT_*: projects/{project resource id} For ACTION_DATABASE_*: instances/{instance resource id} |
-| payload | [string](#string) |  | The payload of the log entity. TODO: use oneof |
+| type | [ApprovalNode.Type](#bytebase-v1-ApprovalNode-Type) |  |  |
+| group_value | [ApprovalNode.GroupValue](#bytebase-v1-ApprovalNode-GroupValue) |  |  |
+| role | [string](#string) |  | Format: roles/{role} |
+| external_node_id | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-ApprovalStep"></a>
+
+### ApprovalStep
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| type | [ApprovalStep.Type](#bytebase-v1-ApprovalStep-Type) |  |  |
+| nodes | [ApprovalNode](#bytebase-v1-ApprovalNode) | repeated |  |
+
+
+
+
+
+
+<a name="bytebase-v1-ApprovalTemplate"></a>
+
+### ApprovalTemplate
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| flow | [ApprovalFlow](#bytebase-v1-ApprovalFlow) |  |  |
+| title | [string](#string) |  |  |
+| description | [string](#string) |  |  |
+| creator | [string](#string) |  | The name of the creator in users/{email} format. TODO: we should mark it as OUTPUT_ONLY, but currently the frontend will post the approval setting with creator. |
+
+
+
+
+
+
+<a name="bytebase-v1-ApproveIssueRequest"></a>
+
+### ApproveIssueRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the issue to add an approver. Format: projects/{project}/issues/{issue} |
 | comment | [string](#string) |  |  |
 
 
 
 
 
+
+<a name="bytebase-v1-BatchUpdateIssuesRequest"></a>
+
+### BatchUpdateIssuesRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The parent resource shared by all issues being updated. Format: projects/{project} If the operation spans parents, a dash (-) may be accepted as a wildcard. We only support updating the status of databases for now. |
+| requests | [UpdateIssueRequest](#bytebase-v1-UpdateIssueRequest) | repeated | The request message specifying the resources to update. A maximum of 1000 databases can be modified in a batch. |
+
+
+
+
+
+
+<a name="bytebase-v1-BatchUpdateIssuesResponse"></a>
+
+### BatchUpdateIssuesResponse
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| issues | [Issue](#bytebase-v1-Issue) | repeated | Issues updated. |
+
+
+
+
+
+
+<a name="bytebase-v1-CreateIssueCommentRequest"></a>
+
+### CreateIssueCommentRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The issue name Format: projects/{project}/issues/{issue} |
+| issue_comment | [IssueComment](#bytebase-v1-IssueComment) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-CreateIssueRequest"></a>
+
+### CreateIssueRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The parent, which owns this collection of issues. Format: projects/{project} |
+| issue | [Issue](#bytebase-v1-Issue) |  | The issue to create. |
+
+
+
+
+
+
+<a name="bytebase-v1-GetIssueRequest"></a>
+
+### GetIssueRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the issue to retrieve. Format: projects/{project}/issues/{issue} |
+| force | [bool](#bool) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-Issue"></a>
+
+### Issue
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the issue. Format: projects/{project}/issues/{issue} |
+| uid | [string](#string) |  | The system-assigned, unique identifier for a resource. |
+| title | [string](#string) |  |  |
+| description | [string](#string) |  |  |
+| type | [Issue.Type](#bytebase-v1-Issue-Type) |  |  |
+| status | [IssueStatus](#bytebase-v1-IssueStatus) |  |  |
+| assignee | [string](#string) |  | Format: users/hello@world.com |
+| assignee_attention | [bool](#bool) |  |  |
+| approvers | [Issue.Approver](#bytebase-v1-Issue-Approver) | repeated |  |
+| approval_templates | [ApprovalTemplate](#bytebase-v1-ApprovalTemplate) | repeated |  |
+| approval_finding_done | [bool](#bool) |  | If the value is `false`, it means that the backend is still finding matching approval templates. If `true`, approval_templates &amp; approvers &amp; approval_finding_error are available. |
+| approval_finding_error | [string](#string) |  |  |
+| subscribers | [string](#string) | repeated | The subscribers. Format: users/hello@world.com |
+| creator | [string](#string) |  | Format: users/hello@world.com |
+| create_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| update_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| plan | [string](#string) |  | The plan associated with the issue. Can be empty. Format: projects/{project}/plans/{plan} |
+| rollout | [string](#string) |  | The rollout associated with the issue. Can be empty. Format: projects/{project}/rollouts/{rollout} |
+
+
+
+
+
+
+<a name="bytebase-v1-Issue-Approver"></a>
+
+### Issue.Approver
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| status | [Issue.Approver.Status](#bytebase-v1-Issue-Approver-Status) |  | The new status. |
+| principal | [string](#string) |  | Format: users/hello@world.com |
+
+
+
+
+
+
+<a name="bytebase-v1-IssueComment"></a>
+
+### IssueComment
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| uid | [string](#string) |  |  |
+| comment | [string](#string) |  |  |
+| payload | [string](#string) |  | TODO: use struct message instead. |
+| create_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| update_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-ListIssuesRequest"></a>
+
+### ListIssuesRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The parent, which owns this collection of issues. Format: projects/{project} Use &#34;projects/-&#34; to list all issues from all projects. |
+| page_size | [int32](#int32) |  | The maximum number of issues to return. The service may return fewer than this value. If unspecified, at most 50 issues will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
+| page_token | [string](#string) |  | A page token, received from a previous `ListIssues` call. Provide this to retrieve the subsequent page.
+
+When paginating, all other parameters provided to `ListIssues` must match the call that provided the page token. |
+
+
+
+
+
+
+<a name="bytebase-v1-ListIssuesResponse"></a>
+
+### ListIssuesResponse
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| issues | [Issue](#bytebase-v1-Issue) | repeated | The issues from the specified request. |
+| next_page_token | [string](#string) |  | A token, which can be sent as `page_token` to retrieve the next page. If this field is omitted, there are no subsequent pages. |
+
+
+
+
+
+
+<a name="bytebase-v1-RejectIssueRequest"></a>
+
+### RejectIssueRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the issue to add an rejection. Format: projects/{project}/issues/{issue} |
+| comment | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-RequestIssueRequest"></a>
+
+### RequestIssueRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The name of the issue to request a issue. Format: projects/{project}/issues/{issue} |
+| comment | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-UpdateIssueCommentRequest"></a>
+
+### UpdateIssueCommentRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The issue name Format: projects/{project}/issues/{issue} |
+| issue_comment | [IssueComment](#bytebase-v1-IssueComment) |  |  |
+| update_mask | [google.protobuf.FieldMask](#google-protobuf-FieldMask) |  | The list of fields to update. |
+
+
+
+
+
+
+<a name="bytebase-v1-UpdateIssueRequest"></a>
+
+### UpdateIssueRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| issue | [Issue](#bytebase-v1-Issue) |  | The issue to update.
+
+The issue&#39;s `name` field is used to identify the issue to update. Format: projects/{project}/issues/{issue} |
+| update_mask | [google.protobuf.FieldMask](#google-protobuf-FieldMask) |  | The list of fields to update. |
+
+
+
+
+
  
 
 
-<a name="bytebase-v1-LogEntity-Action"></a>
+<a name="bytebase-v1-ApprovalNode-GroupValue"></a>
 
-### LogEntity.Action
+### ApprovalNode.GroupValue
+The predefined user groups are:
+- WORKSPACE_OWNER
+- WORKSPACE_DBA
+- PROJECT_OWNER
+- PROJECT_MEMBER
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| GROUP_VALUE_UNSPECIFILED | 0 |  |
+| WORKSPACE_OWNER | 1 |  |
+| WORKSPACE_DBA | 2 |  |
+| PROJECT_OWNER | 3 |  |
+| PROJECT_MEMBER | 4 |  |
+
+
+
+<a name="bytebase-v1-ApprovalNode-Type"></a>
+
+### ApprovalNode.Type
+Type of the ApprovalNode.
+type determines who should approve this node.
+ANY_IN_GROUP means the ApprovalNode can be approved by an user from our predefined user group.
+See GroupValue below for the predefined user groups.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TYPE_UNSPECIFIED | 0 |  |
+| ANY_IN_GROUP | 1 |  |
+
+
+
+<a name="bytebase-v1-ApprovalStep-Type"></a>
+
+### ApprovalStep.Type
+Type of the ApprovalStep
+ALL means every node must be approved to proceed.
+ANY means approving any node will proceed.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TYPE_UNSPECIFIED | 0 |  |
+| ALL | 1 |  |
+| ANY | 2 |  |
+
+
+
+<a name="bytebase-v1-Issue-Approver-Status"></a>
+
+### Issue.Approver.Status
 
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
-| ACTION_UNSPECIFIED | 0 | In worksapce resource only. |
-| ACTION_MEMBER_CREATE | 1 | Member related activity types. Enum value 1 - 20
-
-ACTION_MEMBER_CREATE is the type for creating a new member. |
-| ACTION_MEMBER_ROLE_UPDATE | 2 | ACTION_MEMBER_ROLE_UPDATE is the type for updating a member&#39;s role. |
-| ACTION_MEMBER_ACTIVATE | 3 | ACTION_MEMBER_ACTIVATE_UPDATE is the type for activating members. |
-| ACTION_MEMBER_DEACTIVE | 4 | ACTION_MEMBER_DEACTIVE is the type for deactiving members. |
-| ACTION_ISSUE_CREATE | 21 | Issue related activity types. Enum value 21 - 40
-
-ACTION_ISSUE_CREATE is the type for creating a new issue. |
-| ACTION_ISSUE_COMMENT_CREATE | 22 | ACTION_ISSUE_COMMENT_CREATE is the type for creating a new comment on an issue. |
-| ACTION_ISSUE_FIELD_UPDATE | 23 | ACTION_ISSUE_FIELD_UPDATE is the type for updating an issue&#39;s field. |
-| ACTION_ISSUE_STATUS_UPDATE | 24 | ACTION_ISSUE_STATUS_UPDATE is the type for updating an issue&#39;s status. |
-| ACTION_ISSUE_APPROVAL_NOTIFY | 25 | ACTION_ISSUE_APPROVAL_NOTIFY is the type for notifying issue approval. |
-| ACTION_PIPELINE_STAGE_STATUS_UPDATE | 31 | ACTION_PIPELINE_STAGE_STATUS_UPDATE represents the pipeline stage status change, including BEGIN, END for now. |
-| ACTION_PIPELINE_TASK_STATUS_UPDATE | 32 | ACTION_PIPELINE_TASK_STATUS_UPDATE represents the pipeline task status change, including PENDING, PENDING_APPROVAL, RUNNING, SUCCESS, FAILURE, CANCELED for now. |
-| ACTION_PIPELINE_TASK_FILE_COMMIT | 33 | ACTION_PIPELINE_TASK_FILE_COMMIT represents the VCS trigger to commit a file to update the task statement. |
-| ACTION_PIPELINE_TASK_STATEMENT_UPDATE | 34 | ACTION_PIPELINE_TASK_STATEMENT_UPDATE represents the manual update of the task statement. |
-| ACTION_PIPELINE_TASK_EARLIEST_ALLOWED_TIME_UPDATE | 35 | ACTION_PIPELINE_TASK_EARLIEST_ALLOWED_TIME_UPDATE represents the manual update of the task earliest allowed time. |
-| ACTION_PROJECT_REPOSITORY_PUSH | 41 | Project related activity types. Enum value 41 - 60
-
-ACTION_PROJECT_REPOSITORY_PUSH represents Bytebase receiving a push event from the project repository. |
-| ACTION_PROJECT_MEMBER_CREATE | 42 | ACTION_PROJECT_MEMBER_CREATE represents adding a member to the project. |
-| ACTION_PROJECT_MEMBER_DELETE | 43 | ACTION_PROJECT_MEMBER_DELETE represents removing a member from the project. |
-| ACTION_PROJECT_MEMBER_ROLE_UPDATE | 44 | ACTION_PROJECT_MEMBER_ROLE_UPDATE represents updating the member role, for example, from ADMIN to MEMBER. |
-| ACTION_PROJECT_DATABASE_RECOVERY_PITR_DONE | 45 | ACTION_PROJECT_DATABASE_RECOVERY_PITR_DONE is the type for database PITR recovery done. |
-| ACTION_PROJECT_DATABASE_TRANSFER | 46 | ACTION_PROJECT_DATABASE_TRANSFER represents transfering the database from one project to another. |
-| ACTION_DATABASE_SQL_EDITOR_QUERY | 61 | Database related activity types. Enum value 61 - 80
-
-ACTION_DATABASE_SQL_EDITOR_QUERY is the type for SQL editor query. |
-| ACTION_DATABASE_SQL_EXPORT | 62 | ACTION_DATABASE_SQL_EXPORT is the type for exporting SQL. |
+| STATUS_UNSPECIFIED | 0 |  |
+| PENDING | 1 |  |
+| APPROVED | 2 |  |
+| REJECTED | 3 |  |
 
 
 
-<a name="bytebase-v1-LogEntity-Level"></a>
+<a name="bytebase-v1-Issue-Type"></a>
 
-### LogEntity.Level
+### Issue.Type
 
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
-| LEVEL_UNSPECIFIED | 0 |  |
-| LEVEL_INFO | 1 | LEVEL_INFO is the type for information. |
-| LEVEL_WARNING | 2 | LEVEL_WARNING is the type for warning. |
-| LEVEL_ERROR | 3 | LEVEL_ERROR is the type for error. |
+| TYPE_UNSPECIFIED | 0 |  |
+| DATABASE_CHANGE | 1 |  |
+| GRANT_REQUEST | 2 |  |
+
+
+
+<a name="bytebase-v1-IssueStatus"></a>
+
+### IssueStatus
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ISSUE_STATUS_UNSPECIFIED | 0 |  |
+| OPEN | 1 |  |
+| DONE | 2 |  |
+| CANCELED | 3 |  |
 
 
  
@@ -4561,15 +5175,23 @@ ACTION_DATABASE_SQL_EDITOR_QUERY is the type for SQL editor query. |
  
 
 
-<a name="bytebase-v1-LoggingService"></a>
+<a name="bytebase-v1-IssueService"></a>
 
-### LoggingService
+### IssueService
 
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| ListLogs | [ListLogsRequest](#bytebase-v1-ListLogsRequest) | [ListLogsResponse](#bytebase-v1-ListLogsResponse) |  |
-| GetLog | [GetLogRequest](#bytebase-v1-GetLogRequest) | [LogEntity](#bytebase-v1-LogEntity) |  |
+| GetIssue | [GetIssueRequest](#bytebase-v1-GetIssueRequest) | [Issue](#bytebase-v1-Issue) |  |
+| CreateIssue | [CreateIssueRequest](#bytebase-v1-CreateIssueRequest) | [Issue](#bytebase-v1-Issue) |  |
+| ListIssues | [ListIssuesRequest](#bytebase-v1-ListIssuesRequest) | [ListIssuesResponse](#bytebase-v1-ListIssuesResponse) |  |
+| UpdateIssue | [UpdateIssueRequest](#bytebase-v1-UpdateIssueRequest) | [Issue](#bytebase-v1-Issue) |  |
+| CreateIssueComment | [CreateIssueCommentRequest](#bytebase-v1-CreateIssueCommentRequest) | [IssueComment](#bytebase-v1-IssueComment) |  |
+| UpdateIssueComment | [UpdateIssueCommentRequest](#bytebase-v1-UpdateIssueCommentRequest) | [IssueComment](#bytebase-v1-IssueComment) |  |
+| BatchUpdateIssues | [BatchUpdateIssuesRequest](#bytebase-v1-BatchUpdateIssuesRequest) | [BatchUpdateIssuesResponse](#bytebase-v1-BatchUpdateIssuesResponse) |  |
+| ApproveIssue | [ApproveIssueRequest](#bytebase-v1-ApproveIssueRequest) | [Issue](#bytebase-v1-Issue) |  |
+| RejectIssue | [RejectIssueRequest](#bytebase-v1-RejectIssueRequest) | [Issue](#bytebase-v1-Issue) |  |
+| RequestIssue | [RequestIssueRequest](#bytebase-v1-RequestIssueRequest) | [Issue](#bytebase-v1-Issue) |  |
 
  
 
@@ -4649,26 +5271,6 @@ TODO(zp): move to activity later.
 | ----- | ---- | ----- | ----------- |
 | project | [string](#string) |  |  |
 | policy | [IamPolicy](#bytebase-v1-IamPolicy) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-Binding"></a>
-
-### Binding
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| role | [string](#string) |  | The project role that is assigned to the members. Format: roles/{role} |
-| members | [string](#string) | repeated | Specifies the principals requesting access for a Bytebase resource. `members` can have the following values:
-
-* `user:{emailid}`: An email address that represents a specific Bytebase account. For example, `alice@example.com` . |
-| condition | [google.type.Expr](#google-type-Expr) |  | The condition that is associated with this binding. If the condition evaluates to true, then this binding applies to the current request. If the condition evaluates to false, then this binding does not apply to the current request. However, a different role binding might grant the same role to one or more of the principals in this binding. |
-| parsed_expr | [google.api.expr.v1alpha1.ParsedExpr](#google-api-expr-v1alpha1-ParsedExpr) |  | The parsed expression of the condition. |
 
 
 
@@ -4931,21 +5533,6 @@ This value should be 4-63 characters, and valid characters are /[a-z][0-9]-/. |
 | ----- | ---- | ----- | ----------- |
 | name | [string](#string) |  | The name of the database group to retrieve. Format: projects/{project}/databaseGroups/{databaseGroup}/schemaGroups/{schemaGroup} |
 | view | [SchemaGroupView](#bytebase-v1-SchemaGroupView) |  | The view to return. Defaults to SCHEMA_GROUP_VIEW_BASIC. |
-
-
-
-
-
-
-<a name="bytebase-v1-IamPolicy"></a>
-
-### IamPolicy
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| bindings | [Binding](#bytebase-v1-Binding) | repeated | Collection of binding. A binding binds one or more project members to a single project role. |
 
 
 
@@ -5670,448 +6257,6 @@ TYPE_PROJECT_REPOSITORY_PUSH represents Bytebase receiving a push event from the
 
 
 
-<a name="v1_review_service-proto"></a>
-<p align="right"><a href="#top">Top</a></p>
-
-## v1/review_service.proto
-
-
-
-<a name="bytebase-v1-ApprovalFlow"></a>
-
-### ApprovalFlow
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| steps | [ApprovalStep](#bytebase-v1-ApprovalStep) | repeated |  |
-
-
-
-
-
-
-<a name="bytebase-v1-ApprovalNode"></a>
-
-### ApprovalNode
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| type | [ApprovalNode.Type](#bytebase-v1-ApprovalNode-Type) |  |  |
-| group_value | [ApprovalNode.GroupValue](#bytebase-v1-ApprovalNode-GroupValue) |  |  |
-| role | [string](#string) |  | Format: roles/{role} |
-| external_node_id | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-ApprovalStep"></a>
-
-### ApprovalStep
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| type | [ApprovalStep.Type](#bytebase-v1-ApprovalStep-Type) |  |  |
-| nodes | [ApprovalNode](#bytebase-v1-ApprovalNode) | repeated |  |
-
-
-
-
-
-
-<a name="bytebase-v1-ApprovalTemplate"></a>
-
-### ApprovalTemplate
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| flow | [ApprovalFlow](#bytebase-v1-ApprovalFlow) |  |  |
-| title | [string](#string) |  |  |
-| description | [string](#string) |  |  |
-| creator | [string](#string) |  | The name of the creator in users/{email} format. TODO: we should mark it as OUTPUT_ONLY, but currently the frontend will post the approval setting with creator. |
-
-
-
-
-
-
-<a name="bytebase-v1-ApproveReviewRequest"></a>
-
-### ApproveReviewRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the review to add an approver. Format: projects/{project}/reviews/{review} |
-| comment | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-BatchUpdateReviewsRequest"></a>
-
-### BatchUpdateReviewsRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| parent | [string](#string) |  | The parent resource shared by all reviews being updated. Format: projects/{project} If the operation spans parents, a dash (-) may be accepted as a wildcard. We only support updating the status of databases for now. |
-| requests | [UpdateReviewRequest](#bytebase-v1-UpdateReviewRequest) | repeated | The request message specifying the resources to update. A maximum of 1000 databases can be modified in a batch. |
-
-
-
-
-
-
-<a name="bytebase-v1-BatchUpdateReviewsResponse"></a>
-
-### BatchUpdateReviewsResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| reviews | [Review](#bytebase-v1-Review) | repeated | Reviews updated. |
-
-
-
-
-
-
-<a name="bytebase-v1-CreateReviewCommentRequest"></a>
-
-### CreateReviewCommentRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| parent | [string](#string) |  | The review name Format: projects/{project}/reviews/{review} |
-| review_comment | [ReviewComment](#bytebase-v1-ReviewComment) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-CreateReviewRequest"></a>
-
-### CreateReviewRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| parent | [string](#string) |  | The parent, which owns this collection of reviews. Format: projects/{project} |
-| review | [Review](#bytebase-v1-Review) |  | The review to create. |
-
-
-
-
-
-
-<a name="bytebase-v1-GetReviewRequest"></a>
-
-### GetReviewRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the review to retrieve. Format: projects/{project}/reviews/{review} |
-| force | [bool](#bool) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-ListReviewsRequest"></a>
-
-### ListReviewsRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| parent | [string](#string) |  | The parent, which owns this collection of reviews. Format: projects/{project} Use &#34;projects/-&#34; to list all reviews from all projects. |
-| page_size | [int32](#int32) |  | The maximum number of reviews to return. The service may return fewer than this value. If unspecified, at most 50 reviews will be returned. The maximum value is 1000; values above 1000 will be coerced to 1000. |
-| page_token | [string](#string) |  | A page token, received from a previous `ListReviews` call. Provide this to retrieve the subsequent page.
-
-When paginating, all other parameters provided to `ListReviews` must match the call that provided the page token. |
-
-
-
-
-
-
-<a name="bytebase-v1-ListReviewsResponse"></a>
-
-### ListReviewsResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| reviews | [Review](#bytebase-v1-Review) | repeated | The reviews from the specified request. |
-| next_page_token | [string](#string) |  | A token, which can be sent as `page_token` to retrieve the next page. If this field is omitted, there are no subsequent pages. |
-
-
-
-
-
-
-<a name="bytebase-v1-RejectReviewRequest"></a>
-
-### RejectReviewRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the review to add an rejecting reviewer. Format: projects/{project}/reviews/{review} |
-| comment | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-RequestReviewRequest"></a>
-
-### RequestReviewRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the review to request a review. Format: projects/{project}/reviews/{review} |
-| comment | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-Review"></a>
-
-### Review
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | The name of the review. `review` is a system generated ID. Format: projects/{project}/reviews/{review} |
-| uid | [string](#string) |  | The system-assigned, unique identifier for a resource. |
-| title | [string](#string) |  |  |
-| plan | [string](#string) |  | The plan associated with the review. Can be empty. Format: projects/{project}/plans/{plan} |
-| rollout | [string](#string) |  | The rollout associated with the review. Can be empty. Format: projects/{project}/rollouts/{rollout} |
-| description | [string](#string) |  |  |
-| status | [ReviewStatus](#bytebase-v1-ReviewStatus) |  |  |
-| assignee | [string](#string) |  | Format: users/hello@world.com |
-| assignee_attention | [bool](#bool) |  |  |
-| approval_templates | [ApprovalTemplate](#bytebase-v1-ApprovalTemplate) | repeated |  |
-| approvers | [Review.Approver](#bytebase-v1-Review-Approver) | repeated |  |
-| approval_finding_done | [bool](#bool) |  | If the value is `false`, it means that the backend is still finding matching approval templates. If `true`, approval_templates &amp; approvers &amp; approval_finding_error are available. |
-| approval_finding_error | [string](#string) |  |  |
-| subscribers | [string](#string) | repeated | The subscribers. Format: users/hello@world.com |
-| creator | [string](#string) |  | Format: users/hello@world.com |
-| create_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-| update_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-Review-Approver"></a>
-
-### Review.Approver
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| status | [Review.Approver.Status](#bytebase-v1-Review-Approver-Status) |  | The new status. |
-| principal | [string](#string) |  | Format: users/hello@world.com |
-
-
-
-
-
-
-<a name="bytebase-v1-ReviewComment"></a>
-
-### ReviewComment
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| uid | [string](#string) |  |  |
-| comment | [string](#string) |  |  |
-| payload | [string](#string) |  | TODO: use struct message instead. |
-| create_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-| update_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-
-
-
-
-
-
-<a name="bytebase-v1-UpdateReviewCommentRequest"></a>
-
-### UpdateReviewCommentRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| parent | [string](#string) |  | The review name Format: projects/{project}/reviews/{review} |
-| review_comment | [ReviewComment](#bytebase-v1-ReviewComment) |  |  |
-| update_mask | [google.protobuf.FieldMask](#google-protobuf-FieldMask) |  | The list of fields to update. |
-
-
-
-
-
-
-<a name="bytebase-v1-UpdateReviewRequest"></a>
-
-### UpdateReviewRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| review | [Review](#bytebase-v1-Review) |  | The review to update.
-
-The review&#39;s `name` field is used to identify the review to update. Format: projects/{project}/reviews/{review} |
-| update_mask | [google.protobuf.FieldMask](#google-protobuf-FieldMask) |  | The list of fields to update. |
-
-
-
-
-
- 
-
-
-<a name="bytebase-v1-ApprovalNode-GroupValue"></a>
-
-### ApprovalNode.GroupValue
-The predefined user groups are:
-- WORKSPACE_OWNER
-- WORKSPACE_DBA
-- PROJECT_OWNER
-- PROJECT_MEMBER
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| GROUP_VALUE_UNSPECIFILED | 0 |  |
-| WORKSPACE_OWNER | 1 |  |
-| WORKSPACE_DBA | 2 |  |
-| PROJECT_OWNER | 3 |  |
-| PROJECT_MEMBER | 4 |  |
-
-
-
-<a name="bytebase-v1-ApprovalNode-Type"></a>
-
-### ApprovalNode.Type
-Type of the ApprovalNode.
-type determines who should approve this node.
-ANY_IN_GROUP means the ApprovalNode can be approved by an user from our predefined user group.
-See GroupValue below for the predefined user groups.
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| TYPE_UNSPECIFIED | 0 |  |
-| ANY_IN_GROUP | 1 |  |
-
-
-
-<a name="bytebase-v1-ApprovalStep-Type"></a>
-
-### ApprovalStep.Type
-Type of the ApprovalStep
-ALL means every node must be approved to proceed.
-ANY means approving any node will proceed.
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| TYPE_UNSPECIFIED | 0 |  |
-| ALL | 1 |  |
-| ANY | 2 |  |
-
-
-
-<a name="bytebase-v1-Review-Approver-Status"></a>
-
-### Review.Approver.Status
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| STATUS_UNSPECIFIED | 0 |  |
-| PENDING | 1 |  |
-| APPROVED | 2 |  |
-| REJECTED | 3 |  |
-
-
-
-<a name="bytebase-v1-ReviewStatus"></a>
-
-### ReviewStatus
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| REVIEW_STATUS_UNSPECIFIED | 0 |  |
-| OPEN | 1 |  |
-| DONE | 2 |  |
-| CANCELED | 3 |  |
-
-
- 
-
- 
-
-
-<a name="bytebase-v1-ReviewService"></a>
-
-### ReviewService
-
-
-| Method Name | Request Type | Response Type | Description |
-| ----------- | ------------ | ------------- | ------------|
-| GetReview | [GetReviewRequest](#bytebase-v1-GetReviewRequest) | [Review](#bytebase-v1-Review) |  |
-| CreateReview | [CreateReviewRequest](#bytebase-v1-CreateReviewRequest) | [Review](#bytebase-v1-Review) |  |
-| ListReviews | [ListReviewsRequest](#bytebase-v1-ListReviewsRequest) | [ListReviewsResponse](#bytebase-v1-ListReviewsResponse) |  |
-| UpdateReview | [UpdateReviewRequest](#bytebase-v1-UpdateReviewRequest) | [Review](#bytebase-v1-Review) |  |
-| CreateReviewComment | [CreateReviewCommentRequest](#bytebase-v1-CreateReviewCommentRequest) | [ReviewComment](#bytebase-v1-ReviewComment) |  |
-| UpdateReviewComment | [UpdateReviewCommentRequest](#bytebase-v1-UpdateReviewCommentRequest) | [ReviewComment](#bytebase-v1-ReviewComment) |  |
-| BatchUpdateReviews | [BatchUpdateReviewsRequest](#bytebase-v1-BatchUpdateReviewsRequest) | [BatchUpdateReviewsResponse](#bytebase-v1-BatchUpdateReviewsResponse) |  |
-| ApproveReview | [ApproveReviewRequest](#bytebase-v1-ApproveReviewRequest) | [Review](#bytebase-v1-Review) |  |
-| RejectReview | [RejectReviewRequest](#bytebase-v1-RejectReviewRequest) | [Review](#bytebase-v1-Review) |  |
-| RequestReview | [RequestReviewRequest](#bytebase-v1-RequestReviewRequest) | [Review](#bytebase-v1-Review) |  |
-
- 
-
-
-
 <a name="v1_risk_service-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
@@ -6522,7 +6667,7 @@ When paginating, all other parameters provided to `ListPlans` must match the cal
 | ----- | ---- | ----- | ----------- |
 | name | [string](#string) |  | The name of the plan. `plan` is a system generated ID. Format: projects/{project}/plans/{plan} |
 | uid | [string](#string) |  | The system-assigned, unique identifier for a resource. |
-| review | [string](#string) |  | The resource name of the review associated with this plan. Format: projects/{project}/reviews/{review} |
+| issue | [string](#string) |  | The resource name of the issue associated with this plan. Format: projects/{project}/issues/{issue} |
 | title | [string](#string) |  |  |
 | description | [string](#string) |  |  |
 | steps | [Plan.Step](#bytebase-v1-Plan-Step) | repeated |  |
@@ -6561,7 +6706,7 @@ When paginating, all other parameters provided to `ListPlans` must match the cal
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | rollback_from_task | [string](#string) |  | rollback_from_task is the task from which the rollback SQL statement is generated for this task. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} |
-| rollback_from_review | [string](#string) |  | rollback_from_review is the review containing the original task from which the rollback SQL statement is generated for this task. Format: projects/{project}/reviews/{review} |
+| rollback_from_issue | [string](#string) |  | rollback_from_issue is the issue containing the original task from which the rollback SQL statement is generated for this task. Format: projects/{project}/issues/{issue} |
 
 
 
@@ -6702,6 +6847,22 @@ FIXME(d/xz): support spec with deployment config
 
 
 
+<a name="bytebase-v1-PreviewRolloutRequest"></a>
+
+### PreviewRolloutRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| project | [string](#string) |  | The name of the project. Format: projects/{project} |
+| plan | [Plan](#bytebase-v1-Plan) |  | The plan used to preview rollout. |
+
+
+
+
+
+
 <a name="bytebase-v1-Rollout"></a>
 
 ### Rollout
@@ -6834,7 +6995,7 @@ FIXME(d/xz): support spec with deployment config
 | rollback_sql_status | [Task.DatabaseDataUpdate.RollbackSqlStatus](#bytebase-v1-Task-DatabaseDataUpdate-RollbackSqlStatus) |  | The status of the rollback SQL generation. |
 | rollback_error | [string](#string) |  |  |
 | rollback_sheet | [string](#string) |  | rollback_sheet is the resource name of the sheet that stores the generated rollback SQL statement. Format: projects/{project}/sheets/{sheet} |
-| rollback_from_review | [string](#string) |  | rollback_from_review is the resource name of the review that the rollback SQL statement is generated from. Format: projects/{project}/reviews/{review} |
+| rollback_from_issue | [string](#string) |  | rollback_from_issue is the resource name of the issue that the rollback SQL statement is generated from. Format: projects/{project}/issues/{issue} |
 | rollback_from_task | [string](#string) |  | rollback_from_task is the resource name of the task that the rollback SQL statement is generated from. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} |
 
 
@@ -7102,6 +7263,7 @@ Type is the database change type.
 | CreatePlan | [CreatePlanRequest](#bytebase-v1-CreatePlanRequest) | [Plan](#bytebase-v1-Plan) |  |
 | UpdatePlan | [UpdatePlanRequest](#bytebase-v1-UpdatePlanRequest) | [Plan](#bytebase-v1-Plan) |  |
 | GetRollout | [GetRolloutRequest](#bytebase-v1-GetRolloutRequest) | [Rollout](#bytebase-v1-Rollout) |  |
+| PreviewRollout | [PreviewRolloutRequest](#bytebase-v1-PreviewRolloutRequest) | [Rollout](#bytebase-v1-Rollout) |  |
 | ListRolloutTaskRuns | [ListPlansRequest](#bytebase-v1-ListPlansRequest) | [ListPlansResponse](#bytebase-v1-ListPlansResponse) |  |
 | ListPlanCheckRuns | [ListPlanCheckRunsRequest](#bytebase-v1-ListPlanCheckRunsRequest) | [ListPlanCheckRunsResponse](#bytebase-v1-ListPlanCheckRunsResponse) |  |
 
@@ -7943,6 +8105,7 @@ The sheet&#39;s `name` field is used to identify the sheet to update. Format: pr
 | connection_database | [string](#string) |  | The connection database name to execute the query against. For PostgreSQL, it&#39;s required. For other database engines, it&#39;s optional. Use empty string to execute against without specifying a database. |
 | statement | [string](#string) |  | The SQL statement to execute. |
 | limit | [int32](#int32) |  | The maximum number of rows to return. |
+| timeout | [google.protobuf.Duration](#google-protobuf-Duration) |  | The timeout for the request. |
 
 
 
@@ -7997,6 +8160,7 @@ The sheet&#39;s `name` field is used to identify the sheet to update. Format: pr
 | statement | [string](#string) |  | The SQL statement to execute. |
 | limit | [int32](#int32) |  | The maximum number of rows to return. |
 | format | [ExportRequest.Format](#bytebase-v1-ExportRequest-Format) |  | The export format. |
+| admin | [bool](#bool) |  | The admin is used for workspace owner and DBA for exporting data from SQL Editor Admin mode. The exported data is not anonymized. |
 
 
 
@@ -8063,6 +8227,7 @@ The sheet&#39;s `name` field is used to identify the sheet to update. Format: pr
 | connection_database | [string](#string) |  | The connection database name to execute the query against. For PostgreSQL, it&#39;s required. For other database engines, it&#39;s optional. Use empty string to execute against without specifying a database. |
 | statement | [string](#string) |  | The SQL statement to execute. |
 | limit | [int32](#int32) |  | The maximum number of rows to return. |
+| timeout | [google.protobuf.Duration](#google-protobuf-Duration) |  | The timeout for the request. |
 
 
 
@@ -8097,7 +8262,10 @@ The sheet&#39;s `name` field is used to identify the sheet to update. Format: pr
 | column_type_names | [string](#string) | repeated | Column types of the query result. The types come from the Golang SQL driver. |
 | rows | [QueryRow](#bytebase-v1-QueryRow) | repeated | Rows of the query result. |
 | masked | [bool](#bool) | repeated | Columns are masked or not. |
+| sensitive | [bool](#bool) | repeated | Columns are sensitive or not. |
 | error | [string](#string) |  | The error message if the query failed. |
+| latency | [google.protobuf.Duration](#google-protobuf-Duration) |  | The time it takes to execute the query. |
+| statement | [string](#string) |  | The query statement for the result. |
 
 
 
@@ -8170,6 +8338,7 @@ The sheet&#39;s `name` field is used to identify the sheet to update. Format: pr
 | FORMAT_UNSPECIFIED | 0 |  |
 | CSV | 1 |  |
 | JSON | 2 |  |
+| SQL | 3 |  |
 
 
  

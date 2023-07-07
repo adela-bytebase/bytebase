@@ -31,6 +31,8 @@ const (
 	// DefaultPolicyID is the ID of the default policy.
 	DefaultPolicyID int = 0
 
+	// PolicyTypeWorkspaceIAM is the workspace IAM policy type.
+	PolicyTypeWorkspaceIAM PolicyType = "bb.policy.workspace-iam"
 	// PolicyTypePipelineApproval is the approval policy type.
 	PolicyTypePipelineApproval PolicyType = "bb.policy.pipeline-approval"
 	// PolicyTypeBackupPlan is the backup plan policy type.
@@ -85,6 +87,7 @@ const (
 var (
 	// AllowedResourceTypes includes allowed resource types for each policy type.
 	AllowedResourceTypes = map[PolicyType][]PolicyResourceType{
+		PolicyTypeWorkspaceIAM:     {PolicyResourceTypeWorkspace},
 		PolicyTypePipelineApproval: {PolicyResourceTypeEnvironment},
 		PolicyTypeBackupPlan:       {PolicyResourceTypeEnvironment},
 		PolicyTypeSQLReview:        {PolicyResourceTypeEnvironment},
@@ -221,7 +224,7 @@ func (p *SensitiveDataPolicy) String() (string, error) {
 	return string(s), nil
 }
 
-// AccessControlPolicy is the policy configuration for database access control.
+// AccessControlPolicy is the policy configuration for data access control.
 // It is only applicable to database and environment resource type.
 // For environment resource type, DisallowRuleList defines the access control rule.
 // For database resource type, the AccessControlPolicy struct itself means allow to access.

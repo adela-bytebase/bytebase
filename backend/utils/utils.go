@@ -410,16 +410,6 @@ func PassAllCheck(task *store.TaskMessage, allowedStatus api.TaskCheckStatus, ta
 			return false, nil
 		}
 
-		if api.IsSyntaxCheckSupported(engine) {
-			ok, err := passCheck(runs, api.TaskCheckDatabaseStatementSyntax, allowedStatus)
-			if err != nil {
-				return false, err
-			}
-			if !ok {
-				return false, nil
-			}
-		}
-
 		if api.IsSQLReviewSupported(engine) {
 			ok, err := passCheck(runs, api.TaskCheckDatabaseStatementAdvise, allowedStatus)
 			if err != nil {
@@ -485,18 +475,18 @@ func passCheck(taskCheckRunList []*store.TaskCheckRunMessage, checkType api.Task
 }
 
 // ExecuteMigrationDefault executes migration.
-func ExecuteMigrationDefault(ctx context.Context, store *store.Store, driver db.Driver, mi *db.MigrationInfo, statement string, opts db.ExecuteOptions) (migrationHistoryID string, updatedSchema string, resErr error) {
+func ExecuteMigrationDefault(ctx context.Context, store *store.Store, driver db.Driver, mi *db.MigrationInfo, statement string, sheetID *int, opts db.ExecuteOptions) (migrationHistoryID string, updatedSchema string, resErr error) {
 	execFunc := func(execStatement string) error {
 		if _, err := driver.Execute(ctx, execStatement, false /* createDatabase */, opts); err != nil {
 			return err
 		}
 		return nil
 	}
-	return ExecuteMigrationWithFunc(ctx, store, driver, mi, statement, execFunc)
+	return ExecuteMigrationWithFunc(ctx, store, driver, mi, statement, sheetID, execFunc)
 }
 
 // ExecuteMigrationWithFunc executes the migration with custom migration function.
-func ExecuteMigrationWithFunc(ctx context.Context, s *store.Store, driver db.Driver, m *db.MigrationInfo, statement string, execFunc func(execStatement string) error) (migrationHistoryID string, updatedSchema string, resErr error) {
+func ExecuteMigrationWithFunc(ctx context.Context, s *store.Store, driver db.Driver, m *db.MigrationInfo, statement string, sheetID *int, execFunc func(execStatement string) error) (migrationHistoryID string, updatedSchema string, resErr error) {
 	var prevSchemaBuf bytes.Buffer
 	// Don't record schema if the database hasn't existed yet or is schemaless, e.g. MongoDB.
 	// For baseline migration, we also record the live schema to detect the schema drift.
@@ -505,7 +495,7 @@ func ExecuteMigrationWithFunc(ctx context.Context, s *store.Store, driver db.Dri
 		return "", "", err
 	}
 
-	insertedID, err := BeginMigration(ctx, s, m, prevSchemaBuf.String(), statement)
+	insertedID, err := BeginMigration(ctx, s, m, prevSchemaBuf.String(), statement, sheetID)
 	if err != nil {
 		if common.ErrorCode(err) == common.MigrationAlreadyApplied {
 			return insertedID, prevSchemaBuf.String(), nil
@@ -568,7 +558,7 @@ func ExecuteMigrationWithFunc(ctx context.Context, s *store.Store, driver db.Dri
 }
 
 // BeginMigration checks before executing migration and inserts a migration history record with pending status.
-func BeginMigration(ctx context.Context, store *store.Store, m *db.MigrationInfo, prevSchema string, statement string) (string, error) {
+func BeginMigration(ctx context.Context, store *store.Store, m *db.MigrationInfo, prevSchema, statement string, sheetID *int) (string, error) {
 	// Convert version to stored version.
 	storedVersion, err := util.ToStoredVersion(m.UseSemanticVersion, m.Version, m.SemanticVersionSuffix)
 	if err != nil {
@@ -615,7 +605,7 @@ func BeginMigration(ctx context.Context, store *store.Store, m *db.MigrationInfo
 	// Thus we sort of doing a 2-phase commit, where we first write a PENDING migration record, and after migration completes, we then
 	// update the record to DONE together with the updated schema.
 	statementRecord, _ := common.TruncateString(statement, common.MaxSheetSize)
-	insertedID, err := store.CreatePendingInstanceChangeHistory(ctx, prevSchema, m, storedVersion, statementRecord)
+	insertedID, err := store.CreatePendingInstanceChangeHistory(ctx, prevSchema, m, storedVersion, statementRecord, sheetID)
 	if err != nil {
 		return "", err
 	}
@@ -695,7 +685,7 @@ func CheckIssueApproved(issue *store.IssueMessage) (bool, error) {
 }
 
 // HandleIncomingApprovalSteps handles incoming approval steps.
-// - skips approval steps if no user can approve the step
+// - Blocks approval steps if no user can approve the step.
 // - creates external approvals for external approval nodes.
 func HandleIncomingApprovalSteps(ctx context.Context, s *store.Store, relayClient *relay.Client, issue *store.IssueMessage, approval *storepb.IssuePayloadApproval) ([]*storepb.IssuePayloadApproval_Approver, []*store.ActivityMessage, error) {
 	if len(approval.ApprovalTemplates) == 0 {
@@ -727,73 +717,29 @@ func HandleIncomingApprovalSteps(ctx context.Context, s *store.Store, relayClien
 	var approvers []*storepb.IssuePayloadApproval_Approver
 	var activities []*store.ActivityMessage
 
-	policy, err := s.GetProjectPolicy(ctx, &store.GetProjectPolicyMessage{UID: &issue.Project.UID})
-	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to get project policy for project %d", issue.Project.UID)
+	step := FindNextPendingStep(approval.ApprovalTemplates[0], approval.Approvers)
+	if step == nil {
+		return nil, nil, nil
 	}
-
-	var users []*store.UserMessage
-	roles := []api.Role{api.Owner, api.DBA}
-	for _, role := range roles {
-		principalType := api.EndUser
-		limit := 1
-		role := role
-		userMessages, err := s.ListUsers(ctx, &store.FindUserMessage{
-			Role:  &role,
-			Type:  &principalType,
-			Limit: &limit,
-		})
-		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to list users for role %s", role)
-		}
-		if len(userMessages) != 0 {
-			users = append(users, userMessages[0])
-		}
+	if len(step.Nodes) != 1 {
+		return nil, nil, errors.Errorf("expecting one node but got %v", len(step.Nodes))
 	}
-	for {
-		step := FindNextPendingStep(approval.ApprovalTemplates[0], approval.Approvers)
-		if step == nil {
-			break
-		}
-		if len(step.Nodes) != 1 {
-			return nil, nil, errors.Errorf("expecting one node but got %v", len(step.Nodes))
-		}
-		if step.Type != storepb.ApprovalStep_ANY {
-			return nil, nil, errors.Errorf("expecting ANY step type but got %v", step.Type)
-		}
-		node := step.Nodes[0]
-		if v, ok := node.GetPayload().(*storepb.ApprovalNode_ExternalNodeId); ok {
-			if err := handleApprovalNodeExternalNode(ctx, s, relayClient, issue, v.ExternalNodeId); err != nil {
-				approvers = append(approvers, &storepb.IssuePayloadApproval_Approver{
-					Status:      storepb.IssuePayloadApproval_Approver_REJECTED,
-					PrincipalId: api.SystemBotID,
-				})
-				activity, err := getActivityCreate(storepb.ActivityIssueCommentCreatePayload_ApprovalEvent_REJECTED, fmt.Sprintf("failed to handle external node, err: %v", err))
-				if err != nil {
-					return nil, nil, err
-				}
-				activities = append(activities, activity)
+	if step.Type != storepb.ApprovalStep_ANY {
+		return nil, nil, errors.Errorf("expecting ANY step type but got %v", step.Type)
+	}
+	node := step.Nodes[0]
+	if v, ok := node.GetPayload().(*storepb.ApprovalNode_ExternalNodeId); ok {
+		if err := handleApprovalNodeExternalNode(ctx, s, relayClient, issue, v.ExternalNodeId); err != nil {
+			approvers = append(approvers, &storepb.IssuePayloadApproval_Approver{
+				Status:      storepb.IssuePayloadApproval_Approver_REJECTED,
+				PrincipalId: api.SystemBotID,
+			})
+			activity, err := getActivityCreate(storepb.ActivityIssueCommentCreatePayload_ApprovalEvent_REJECTED, fmt.Sprintf("failed to handle external node, err: %v", err))
+			if err != nil {
+				return nil, nil, err
 			}
-			break
+			activities = append(activities, activity)
 		}
-
-		hasApprover, err := userCanApprove(node, users, policy)
-		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to check if user can approve")
-		}
-		if hasApprover {
-			break
-		}
-
-		approvers = append(approvers, &storepb.IssuePayloadApproval_Approver{
-			Status:      storepb.IssuePayloadApproval_Approver_APPROVED,
-			PrincipalId: api.SystemBotID,
-		})
-		activity, err := getActivityCreate(storepb.ActivityIssueCommentCreatePayload_ApprovalEvent_APPROVED, "")
-		if err != nil {
-			return nil, nil, err
-		}
-		activities = append(activities, activity)
 	}
 	return approvers, activities, nil
 }
@@ -818,13 +764,21 @@ func handleApprovalNodeExternalNode(ctx context.Context, s *store.Store, relayCl
 	if node == nil {
 		return errors.Errorf("external approval node %s not found", externalNodeID)
 	}
-	uri, err := relayClient.Create(node.Endpoint, relay.CreatePayload{})
+	id, err := relayClient.Create(node.Endpoint, &relay.CreatePayload{
+		IssueID:     fmt.Sprintf("%d", issue.UID),
+		Title:       issue.Title,
+		Description: issue.Description,
+		Project:     issue.Project.ResourceID,
+		CreateTime:  issue.CreatedTime,
+		Creator:     issue.Creator.Email,
+		Assignee:    issue.Assignee.Email,
+	})
 	if err != nil {
 		return errors.Wrapf(err, "failed to create external approval")
 	}
 	payload, err := json.Marshal(&api.ExternalApprovalPayloadRelay{
 		ExternalApprovalNodeID: node.Id,
-		URI:                    uri,
+		ID:                     id,
 	})
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal external approval payload")
@@ -839,61 +793,6 @@ func handleApprovalNodeExternalNode(ctx context.Context, s *store.Store, relayCl
 		return errors.Wrapf(err, "failed to create external approval")
 	}
 	return nil
-}
-
-func userCanApprove(node *storepb.ApprovalNode, users []*store.UserMessage, policy *store.IAMPolicyMessage) (bool, error) {
-	if node.Type != storepb.ApprovalNode_ANY_IN_GROUP {
-		return false, errors.Errorf("expecting ANY_IN_GROUP node type but got %v", node.Type)
-	}
-
-	hasOwner := false
-	hasDBA := false
-	for _, user := range users {
-		if user.Role == api.Owner {
-			hasOwner = true
-		}
-		if user.Role == api.DBA {
-			hasDBA = true
-		}
-		if hasOwner && hasDBA {
-			break
-		}
-	}
-
-	projectRoleExist := make(map[string]bool)
-	for _, binding := range policy.Bindings {
-		if len(binding.Members) > 0 {
-			projectRoleExist[convertToRoleName(binding.Role)] = true
-		}
-	}
-
-	switch val := node.Payload.(type) {
-	case *storepb.ApprovalNode_GroupValue_:
-		switch val.GroupValue {
-		case storepb.ApprovalNode_GROUP_VALUE_UNSPECIFILED:
-			return false, errors.Errorf("invalid group value")
-		case storepb.ApprovalNode_WORKSPACE_OWNER:
-			return hasOwner, nil
-		case storepb.ApprovalNode_WORKSPACE_DBA:
-			return hasDBA, nil
-		case storepb.ApprovalNode_PROJECT_OWNER:
-			return projectRoleExist[convertToRoleName(api.Owner)], nil
-		case storepb.ApprovalNode_PROJECT_MEMBER:
-			return projectRoleExist[convertToRoleName(api.Developer)], nil
-		default:
-			return false, errors.Errorf("invalid group value")
-		}
-	case *storepb.ApprovalNode_Role:
-		return projectRoleExist[val.Role], nil
-	case *storepb.ApprovalNode_ExternalNodeId:
-		return true, nil
-	default:
-		return false, errors.Errorf("invalid node payload type")
-	}
-}
-
-func convertToRoleName(role api.Role) string {
-	return fmt.Sprintf("roles/%s", role)
 }
 
 // RenderStatement renders the given template statement with the given key-value map.

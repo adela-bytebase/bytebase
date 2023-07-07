@@ -77,10 +77,7 @@
             <LearnMoreLink
               url="https://www.bytebase.com/docs/concepts/batch-mode/?source=console"
             />
-            <FeatureBadge
-              feature="bb.feature.multi-tenancy"
-              class="text-accent"
-            />
+            <FeatureBadge feature="bb.feature.multi-tenancy" />
           </label>
         </div>
       </div>
@@ -98,7 +95,7 @@
     </div>
 
     <FeatureModal
-      v-if="state.requiredFeature"
+      :open="state.requiredFeature"
       :feature="state.requiredFeature"
       @cancel="state.requiredFeature = undefined"
     />
@@ -112,7 +109,6 @@ import { useI18n } from "vue-i18n";
 
 import { DEFAULT_PROJECT_ID, FeatureType } from "@/types";
 import { hasFeature, pushNotification, useProjectV1Store } from "@/store";
-import FeatureModal from "@/components/FeatureModal.vue";
 import ResourceIdField from "@/components/v2/Form/ResourceIdField.vue";
 import { Project, TenantMode } from "@/types/proto/v1/project_service";
 import { extractProjectResourceName } from "@/utils";

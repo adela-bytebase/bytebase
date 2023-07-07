@@ -89,6 +89,10 @@ func (s *AuthService) ListUsers(ctx context.Context, request *v1pb.ListUsersRequ
 
 // CreateUser creates a user.
 func (s *AuthService) CreateUser(ctx context.Context, request *v1pb.CreateUserRequest) (*v1pb.User, error) {
+	if err := s.userCountGuard(ctx); err != nil {
+		return nil, err
+	}
+
 	setting, err := s.store.GetWorkspaceGeneralSetting(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to find workspace setting, error: %v", err)
@@ -572,7 +576,7 @@ func (s *AuthService) Login(ctx context.Context, request *v1pb.LoginRequest) (*v
 
 	userMFAEnabled := loginUser.MFAConfig != nil && loginUser.MFAConfig.OtpSecret != ""
 	// We only allow MFA login (2-step) when the feature is enabled and user has enabled MFA.
-	if s.licenseService.IsFeatureEnabled(api.Feature2FA) && !mfaSecondLogin && userMFAEnabled {
+	if s.licenseService.IsFeatureEnabled(api.Feature2FA) == nil && !mfaSecondLogin && userMFAEnabled {
 		mfaTempToken, err := auth.GenerateMFATempToken(loginUser.Name, loginUser.ID, s.profile.Mode, s.secret)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to generate MFA temp token")
@@ -757,8 +761,8 @@ func (s *AuthService) getOrCreateUserWithIDP(ctx context.Context, request *v1pb.
 
 	var user *store.UserMessage
 	if len(users) == 0 {
-		if !s.licenseService.IsFeatureEnabled(api.FeatureSSO) {
-			return nil, status.Errorf(codes.PermissionDenied, "SSO is not available in your license")
+		if err := s.licenseService.IsFeatureEnabled(api.FeatureSSO); err != nil {
+			return nil, status.Errorf(codes.PermissionDenied, err.Error())
 		}
 		// Create new user from identity provider.
 		password, err := common.RandomString(20)
@@ -868,4 +872,18 @@ func generateRecoveryCodes(n int) ([]string, error) {
 		recoveryCodes[i] = code
 	}
 	return recoveryCodes, nil
+}
+
+func (s *AuthService) userCountGuard(ctx context.Context) error {
+	userLimit := s.licenseService.GetPlanLimitValue(enterpriseAPI.PlanLimitMaximumUser)
+
+	count, err := s.store.CountPrincipal(ctx)
+	if err != nil {
+		return status.Errorf(codes.Internal, err.Error())
+	}
+	if int64(count) >= userLimit {
+		return status.Errorf(codes.ResourceExhausted, "reached the maximum user count %d", userLimit)
+	}
+
+	return nil
 }

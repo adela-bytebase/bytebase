@@ -81,10 +81,10 @@ export interface Plan {
   /** The system-assigned, unique identifier for a resource. */
   uid: string;
   /**
-   * The resource name of the review associated with this plan.
-   * Format: projects/{project}/reviews/{review}
+   * The resource name of the issue associated with this plan.
+   * Format: projects/{project}/issues/{issue}
    */
-  review: string;
+  issue: string;
   title: string;
   description: string;
   steps: Plan_Step[];
@@ -244,10 +244,10 @@ export interface Plan_ChangeDatabaseConfig_RollbackDetail {
    */
   rollbackFromTask: string;
   /**
-   * rollback_from_review is the review containing the original task from which the rollback SQL statement is generated for this task.
-   * Format: projects/{project}/reviews/{review}
+   * rollback_from_issue is the issue containing the original task from which the rollback SQL statement is generated for this task.
+   * Format: projects/{project}/issues/{issue}
    */
-  rollbackFromReview: string;
+  rollbackFromIssue: string;
 }
 
 export interface Plan_RestoreDatabaseConfig {
@@ -553,6 +553,16 @@ export interface GetRolloutRequest {
   name: string;
 }
 
+export interface PreviewRolloutRequest {
+  /**
+   * The name of the project.
+   * Format: projects/{project}
+   */
+  project: string;
+  /** The plan used to preview rollout. */
+  plan?: Plan;
+}
+
 export interface Rollout {
   /**
    * The resource name of the rollout.
@@ -834,11 +844,11 @@ export interface Task_DatabaseDataUpdate {
    */
   rollbackSheet: string;
   /**
-   * rollback_from_review is the resource name of the review that
+   * rollback_from_issue is the resource name of the issue that
    * the rollback SQL statement is generated from.
-   * Format: projects/{project}/reviews/{review}
+   * Format: projects/{project}/issues/{issue}
    */
-  rollbackFromReview: string;
+  rollbackFromIssue: string;
   /**
    * rollback_from_task is the resource name of the task that
    * the rollback SQL statement is generated from.
@@ -1368,7 +1378,7 @@ export const UpdatePlanRequest = {
 };
 
 function createBasePlan(): Plan {
-  return { name: "", uid: "", review: "", title: "", description: "", steps: [] };
+  return { name: "", uid: "", issue: "", title: "", description: "", steps: [] };
 }
 
 export const Plan = {
@@ -1379,8 +1389,8 @@ export const Plan = {
     if (message.uid !== "") {
       writer.uint32(18).string(message.uid);
     }
-    if (message.review !== "") {
-      writer.uint32(26).string(message.review);
+    if (message.issue !== "") {
+      writer.uint32(26).string(message.issue);
     }
     if (message.title !== "") {
       writer.uint32(34).string(message.title);
@@ -1420,7 +1430,7 @@ export const Plan = {
             break;
           }
 
-          message.review = reader.string();
+          message.issue = reader.string();
           continue;
         case 4:
           if (tag !== 34) {
@@ -1456,7 +1466,7 @@ export const Plan = {
     return {
       name: isSet(object.name) ? String(object.name) : "",
       uid: isSet(object.uid) ? String(object.uid) : "",
-      review: isSet(object.review) ? String(object.review) : "",
+      issue: isSet(object.issue) ? String(object.issue) : "",
       title: isSet(object.title) ? String(object.title) : "",
       description: isSet(object.description) ? String(object.description) : "",
       steps: Array.isArray(object?.steps) ? object.steps.map((e: any) => Plan_Step.fromJSON(e)) : [],
@@ -1467,7 +1477,7 @@ export const Plan = {
     const obj: any = {};
     message.name !== undefined && (obj.name = message.name);
     message.uid !== undefined && (obj.uid = message.uid);
-    message.review !== undefined && (obj.review = message.review);
+    message.issue !== undefined && (obj.issue = message.issue);
     message.title !== undefined && (obj.title = message.title);
     message.description !== undefined && (obj.description = message.description);
     if (message.steps) {
@@ -1486,7 +1496,7 @@ export const Plan = {
     const message = createBasePlan();
     message.name = object.name ?? "";
     message.uid = object.uid ?? "";
-    message.review = object.review ?? "";
+    message.issue = object.issue ?? "";
     message.title = object.title ?? "";
     message.description = object.description ?? "";
     message.steps = object.steps?.map((e) => Plan_Step.fromPartial(e)) || [];
@@ -2079,7 +2089,7 @@ export const Plan_ChangeDatabaseConfig = {
 };
 
 function createBasePlan_ChangeDatabaseConfig_RollbackDetail(): Plan_ChangeDatabaseConfig_RollbackDetail {
-  return { rollbackFromTask: "", rollbackFromReview: "" };
+  return { rollbackFromTask: "", rollbackFromIssue: "" };
 }
 
 export const Plan_ChangeDatabaseConfig_RollbackDetail = {
@@ -2087,8 +2097,8 @@ export const Plan_ChangeDatabaseConfig_RollbackDetail = {
     if (message.rollbackFromTask !== "") {
       writer.uint32(10).string(message.rollbackFromTask);
     }
-    if (message.rollbackFromReview !== "") {
-      writer.uint32(18).string(message.rollbackFromReview);
+    if (message.rollbackFromIssue !== "") {
+      writer.uint32(18).string(message.rollbackFromIssue);
     }
     return writer;
   },
@@ -2112,7 +2122,7 @@ export const Plan_ChangeDatabaseConfig_RollbackDetail = {
             break;
           }
 
-          message.rollbackFromReview = reader.string();
+          message.rollbackFromIssue = reader.string();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -2126,14 +2136,14 @@ export const Plan_ChangeDatabaseConfig_RollbackDetail = {
   fromJSON(object: any): Plan_ChangeDatabaseConfig_RollbackDetail {
     return {
       rollbackFromTask: isSet(object.rollbackFromTask) ? String(object.rollbackFromTask) : "",
-      rollbackFromReview: isSet(object.rollbackFromReview) ? String(object.rollbackFromReview) : "",
+      rollbackFromIssue: isSet(object.rollbackFromIssue) ? String(object.rollbackFromIssue) : "",
     };
   },
 
   toJSON(message: Plan_ChangeDatabaseConfig_RollbackDetail): unknown {
     const obj: any = {};
     message.rollbackFromTask !== undefined && (obj.rollbackFromTask = message.rollbackFromTask);
-    message.rollbackFromReview !== undefined && (obj.rollbackFromReview = message.rollbackFromReview);
+    message.rollbackFromIssue !== undefined && (obj.rollbackFromIssue = message.rollbackFromIssue);
     return obj;
   },
 
@@ -2144,7 +2154,7 @@ export const Plan_ChangeDatabaseConfig_RollbackDetail = {
   fromPartial(object: DeepPartial<Plan_ChangeDatabaseConfig_RollbackDetail>): Plan_ChangeDatabaseConfig_RollbackDetail {
     const message = createBasePlan_ChangeDatabaseConfig_RollbackDetail();
     message.rollbackFromTask = object.rollbackFromTask ?? "";
-    message.rollbackFromReview = object.rollbackFromReview ?? "";
+    message.rollbackFromIssue = object.rollbackFromIssue ?? "";
     return message;
   },
 };
@@ -2754,6 +2764,77 @@ export const GetRolloutRequest = {
   fromPartial(object: DeepPartial<GetRolloutRequest>): GetRolloutRequest {
     const message = createBaseGetRolloutRequest();
     message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBasePreviewRolloutRequest(): PreviewRolloutRequest {
+  return { project: "", plan: undefined };
+}
+
+export const PreviewRolloutRequest = {
+  encode(message: PreviewRolloutRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.project !== "") {
+      writer.uint32(10).string(message.project);
+    }
+    if (message.plan !== undefined) {
+      Plan.encode(message.plan, writer.uint32(18).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): PreviewRolloutRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePreviewRolloutRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.project = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.plan = Plan.decode(reader, reader.uint32());
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PreviewRolloutRequest {
+    return {
+      project: isSet(object.project) ? String(object.project) : "",
+      plan: isSet(object.plan) ? Plan.fromJSON(object.plan) : undefined,
+    };
+  },
+
+  toJSON(message: PreviewRolloutRequest): unknown {
+    const obj: any = {};
+    message.project !== undefined && (obj.project = message.project);
+    message.plan !== undefined && (obj.plan = message.plan ? Plan.toJSON(message.plan) : undefined);
+    return obj;
+  },
+
+  create(base?: DeepPartial<PreviewRolloutRequest>): PreviewRolloutRequest {
+    return PreviewRolloutRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<PreviewRolloutRequest>): PreviewRolloutRequest {
+    const message = createBasePreviewRolloutRequest();
+    message.project = object.project ?? "";
+    message.plan = (object.plan !== undefined && object.plan !== null) ? Plan.fromPartial(object.plan) : undefined;
     return message;
   },
 };
@@ -3621,7 +3702,7 @@ function createBaseTask_DatabaseDataUpdate(): Task_DatabaseDataUpdate {
     rollbackSqlStatus: 0,
     rollbackError: "",
     rollbackSheet: "",
-    rollbackFromReview: "",
+    rollbackFromIssue: "",
     rollbackFromTask: "",
   };
 }
@@ -3646,8 +3727,8 @@ export const Task_DatabaseDataUpdate = {
     if (message.rollbackSheet !== "") {
       writer.uint32(50).string(message.rollbackSheet);
     }
-    if (message.rollbackFromReview !== "") {
-      writer.uint32(58).string(message.rollbackFromReview);
+    if (message.rollbackFromIssue !== "") {
+      writer.uint32(58).string(message.rollbackFromIssue);
     }
     if (message.rollbackFromTask !== "") {
       writer.uint32(66).string(message.rollbackFromTask);
@@ -3709,7 +3790,7 @@ export const Task_DatabaseDataUpdate = {
             break;
           }
 
-          message.rollbackFromReview = reader.string();
+          message.rollbackFromIssue = reader.string();
           continue;
         case 8:
           if (tag !== 66) {
@@ -3737,7 +3818,7 @@ export const Task_DatabaseDataUpdate = {
         : 0,
       rollbackError: isSet(object.rollbackError) ? String(object.rollbackError) : "",
       rollbackSheet: isSet(object.rollbackSheet) ? String(object.rollbackSheet) : "",
-      rollbackFromReview: isSet(object.rollbackFromReview) ? String(object.rollbackFromReview) : "",
+      rollbackFromIssue: isSet(object.rollbackFromIssue) ? String(object.rollbackFromIssue) : "",
       rollbackFromTask: isSet(object.rollbackFromTask) ? String(object.rollbackFromTask) : "",
     };
   },
@@ -3751,7 +3832,7 @@ export const Task_DatabaseDataUpdate = {
       (obj.rollbackSqlStatus = task_DatabaseDataUpdate_RollbackSqlStatusToJSON(message.rollbackSqlStatus));
     message.rollbackError !== undefined && (obj.rollbackError = message.rollbackError);
     message.rollbackSheet !== undefined && (obj.rollbackSheet = message.rollbackSheet);
-    message.rollbackFromReview !== undefined && (obj.rollbackFromReview = message.rollbackFromReview);
+    message.rollbackFromIssue !== undefined && (obj.rollbackFromIssue = message.rollbackFromIssue);
     message.rollbackFromTask !== undefined && (obj.rollbackFromTask = message.rollbackFromTask);
     return obj;
   },
@@ -3768,7 +3849,7 @@ export const Task_DatabaseDataUpdate = {
     message.rollbackSqlStatus = object.rollbackSqlStatus ?? 0;
     message.rollbackError = object.rollbackError ?? "";
     message.rollbackSheet = object.rollbackSheet ?? "";
-    message.rollbackFromReview = object.rollbackFromReview ?? "";
+    message.rollbackFromIssue = object.rollbackFromIssue ?? "";
     message.rollbackFromTask = object.rollbackFromTask ?? "";
     return message;
   },
@@ -4379,6 +4460,67 @@ export const RolloutServiceDefinition = {
         },
       },
     },
+    previewRollout: {
+      name: "PreviewRollout",
+      requestType: PreviewRolloutRequest,
+      requestStream: false,
+      responseType: Rollout,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([4, 110, 97, 109, 101])],
+          578365826: [
+            new Uint8Array([
+              44,
+              58,
+              1,
+              42,
+              34,
+              39,
+              47,
+              118,
+              49,
+              47,
+              123,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              125,
+              58,
+              112,
+              114,
+              101,
+              118,
+              105,
+              101,
+              119,
+              82,
+              111,
+              108,
+              108,
+              111,
+              117,
+              116,
+            ]),
+          ],
+        },
+      },
+    },
     listRolloutTaskRuns: {
       name: "ListRolloutTaskRuns",
       requestType: ListPlansRequest,
@@ -4503,6 +4645,7 @@ export interface RolloutServiceImplementation<CallContextExt = {}> {
   createPlan(request: CreatePlanRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Plan>>;
   updatePlan(request: UpdatePlanRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Plan>>;
   getRollout(request: GetRolloutRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Rollout>>;
+  previewRollout(request: PreviewRolloutRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Rollout>>;
   listRolloutTaskRuns(
     request: ListPlansRequest,
     context: CallContext & CallContextExt,
@@ -4519,6 +4662,7 @@ export interface RolloutServiceClient<CallOptionsExt = {}> {
   createPlan(request: DeepPartial<CreatePlanRequest>, options?: CallOptions & CallOptionsExt): Promise<Plan>;
   updatePlan(request: DeepPartial<UpdatePlanRequest>, options?: CallOptions & CallOptionsExt): Promise<Plan>;
   getRollout(request: DeepPartial<GetRolloutRequest>, options?: CallOptions & CallOptionsExt): Promise<Rollout>;
+  previewRollout(request: DeepPartial<PreviewRolloutRequest>, options?: CallOptions & CallOptionsExt): Promise<Rollout>;
   listRolloutTaskRuns(
     request: DeepPartial<ListPlansRequest>,
     options?: CallOptions & CallOptionsExt,

@@ -830,7 +830,7 @@ func (s *ProjectService) createProjectGitOpsInfo(ctx context.Context, request *v
 		return nil, status.Errorf(codes.FailedPrecondition, setupExternalURLError)
 	}
 
-	vcsID, err := strconv.ParseInt(request.ProjectGitopsInfo.VcsUid, 10, 64)
+	vcsID, err := strconv.Atoi(request.ProjectGitopsInfo.VcsUid)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid vcs id: %s", request.ProjectGitopsInfo.VcsUid)
 	}
@@ -980,7 +980,11 @@ func (s *ProjectService) setupVCSSQLReviewCI(ctx context.Context, repository *st
 		return nil, err
 	}
 
-	sqlReviewEndpoint := fmt.Sprintf("%s/hook/sql-review/%s", setting.ExternalUrl, repository.WebhookEndpointID)
+	endpoint := setting.ExternalUrl
+	if setting.GitopsWebhookUrl != "" {
+		endpoint = setting.GitopsWebhookUrl
+	}
+	sqlReviewEndpoint := fmt.Sprintf("%s/hook/sql-review/%s", endpoint, repository.WebhookEndpointID)
 
 	switch vcs.Type {
 	case vcsPlugin.GitHub:
@@ -1363,8 +1367,8 @@ func (s *ProjectService) TestWebhook(ctx context.Context, request *v1pb.TestWebh
 
 // CreateDatabaseGroup creates a database group.
 func (s *ProjectService) CreateDatabaseGroup(ctx context.Context, request *v1pb.CreateDatabaseGroupRequest) (*v1pb.DatabaseGroup, error) {
-	if !s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping) {
-		return nil, status.Errorf(codes.PermissionDenied, api.FeatureDatabaseGrouping.AccessErrorMessage())
+	if err := s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, err.Error())
 	}
 	projectResourceID, err := getProjectID(request.Parent)
 	if err != nil {
@@ -1419,8 +1423,8 @@ func (s *ProjectService) CreateDatabaseGroup(ctx context.Context, request *v1pb.
 
 // UpdateDatabaseGroup updates a database group.
 func (s *ProjectService) UpdateDatabaseGroup(ctx context.Context, request *v1pb.UpdateDatabaseGroupRequest) (*v1pb.DatabaseGroup, error) {
-	if !s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping) {
-		return nil, status.Errorf(codes.PermissionDenied, api.FeatureDatabaseGrouping.AccessErrorMessage())
+	if err := s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, err.Error())
 	}
 	projectResourceID, databaseGroupResourceID, err := getProjectIDDatabaseGroupID(request.DatabaseGroup.Name)
 	if err != nil {
@@ -1612,8 +1616,8 @@ func (s *ProjectService) GetDatabaseGroup(ctx context.Context, request *v1pb.Get
 
 // CreateSchemaGroup creates a database group.
 func (s *ProjectService) CreateSchemaGroup(ctx context.Context, request *v1pb.CreateSchemaGroupRequest) (*v1pb.SchemaGroup, error) {
-	if !s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping) {
-		return nil, status.Errorf(codes.PermissionDenied, api.FeatureDatabaseGrouping.AccessErrorMessage())
+	if err := s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, err.Error())
 	}
 	projectResourceID, databaseGroupResourceID, err := getProjectIDDatabaseGroupID(request.Parent)
 	if err != nil {
@@ -1677,8 +1681,8 @@ func (s *ProjectService) CreateSchemaGroup(ctx context.Context, request *v1pb.Cr
 
 // UpdateSchemaGroup updates a schema group.
 func (s *ProjectService) UpdateSchemaGroup(ctx context.Context, request *v1pb.UpdateSchemaGroupRequest) (*v1pb.SchemaGroup, error) {
-	if !s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping) {
-		return nil, status.Errorf(codes.PermissionDenied, api.FeatureDatabaseGrouping.AccessErrorMessage())
+	if err := s.licenseService.IsFeatureEnabled(api.FeatureDatabaseGrouping); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, err.Error())
 	}
 	projectResourceID, databaseGroupResourceID, schemaGroupResourceID, err := getProjectIDDatabaseGroupIDSchemaGroupID(request.SchemaGroup.Name)
 	if err != nil {
@@ -1890,6 +1894,8 @@ func getMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx context.Context, databas
 	var matches []*store.DatabaseMessage
 	var unmatches []*store.DatabaseMessage
 
+	// DONOT check bb.feature.database-grouping for instance. The API here is read-only in the frontend, we need to show if the instance is matched but missing required license.
+	// The feature guard will works during issue creation.
 	for _, database := range allDatabases {
 		res, _, err := prog.ContextEval(ctx, map[string]any{
 			"resource": map[string]any{
@@ -1922,6 +1928,7 @@ func (s *ProjectService) convertStoreToAPIDatabaseGroupFull(ctx context.Context,
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
+
 	matches, unmatches, err := getMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx, databaseGroup, databases)
 	if err != nil {
 		return nil, err
@@ -2279,17 +2286,6 @@ func (s *ProjectService) getProjectMessage(ctx context.Context, name string) (*s
 	return project, nil
 }
 
-var iamPolicyCELAttributes = []cel.EnvOption{
-	cel.Variable("request.time", cel.TimestampType),
-	cel.Variable("request.statement", cel.StringType),
-	cel.Variable("request.row_limit", cel.IntType),
-	cel.Variable("request.export_format", cel.StringType),
-	cel.Variable("resource.environment", cel.StringType),
-	cel.Variable("resource.database", cel.StringType),
-	cel.Variable("resource.schema", cel.StringType),
-	cel.Variable("resource.table", cel.StringType),
-}
-
 func convertToIamPolicy(iamPolicy *store.IAMPolicyMessage) (*v1pb.IamPolicy, error) {
 	var bindings []*v1pb.Binding
 
@@ -2304,7 +2300,7 @@ func convertToIamPolicy(iamPolicy *store.IAMPolicyMessage) (*v1pb.IamPolicy, err
 			Condition: binding.Condition,
 		}
 		if binding.Condition.Expression != "" {
-			e, err := cel.NewEnv(iamPolicyCELAttributes...)
+			e, err := cel.NewEnv(common.QueryExportPolicyCELAttributes...)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to create cel environment")
 			}

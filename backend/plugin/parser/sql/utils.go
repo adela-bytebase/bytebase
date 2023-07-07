@@ -17,14 +17,13 @@ import (
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pkg/errors"
 
-	mysqlparser "github.com/bytebase/mysql-parser"
-
 	"github.com/bytebase/bytebase/backend/plugin/parser/sql/ast"
 )
 
 // SingleSQL is a separate SQL split from multi-SQL.
 type SingleSQL struct {
 	Text     string
+	BaseLine int
 	LastLine int
 	// The sql is empty, such as `/* comments */;` or just `;`.
 	Empty bool
@@ -71,11 +70,12 @@ func ExtractResourceList(engineType EngineType, currentDatabase string, currentS
 	case Postgres:
 		// The resource list for Postgres may contains table, view and temporary table.
 		return extractPostgresResourceList(currentDatabase, "public", sql)
+	case Snowflake:
+		return extractSnowflakeNormalizeResourceListFromSelectStatement(currentDatabase, "PUBLIC", sql)
 	default:
 		if currentDatabase == "" {
 			return nil, errors.Errorf("database must be specified for engine type: %s", engineType)
 		}
-
 		return []SchemaResource{{Database: currentDatabase}}, nil
 	}
 }
@@ -397,7 +397,7 @@ func SplitMultiSQL(engineType EngineType, statement string) ([]SingleSQL, error)
 		t := newTokenizer(statement)
 		list, err = t.splitPostgreSQLMultiSQL()
 	case MySQL, MariaDB, OceanBase:
-		return splitMySQLMultiSQL(statement)
+		return SplitMySQL(statement)
 	case TiDB:
 		t := newTokenizer(statement)
 		list, err = t.splitTiDBMultiSQL()
@@ -429,55 +429,20 @@ func SplitMultiSQL(engineType EngineType, statement string) ([]SingleSQL, error)
 	return result, nil
 }
 
-func splitMySQLMultiSQL(statement string) ([]SingleSQL, error) {
-	tree, tokens, err := ParseMySQL(statement)
-	if err != nil {
-		return nil, err
-	}
-	if tree == nil {
-		return nil, nil
-	}
-
-	var result []SingleSQL
-	for _, node := range tree.GetChildren() {
-		if query, ok := node.(mysqlparser.IQueryContext); ok {
-			result = append(result, SingleSQL{
-				Text:     tokens.GetTextFromRuleContext(query),
-				LastLine: query.GetStop().GetLine(),
-				Empty:    false,
-			})
-		}
-	}
-
-	return result, nil
-}
-
 // Note that the reader is read completely into memory and so it must actually
 // have a stopping point - you cannot pass in a reader on an open-ended source such
 // as a socket for instance.
 func splitMySQLMultiSQLStream(src io.Reader, f func(string) error) ([]SingleSQL, error) {
-	tree, tokens, err := ParseMySQLStream(src)
+	result, err := SplitMySQLStream(src)
 	if err != nil {
 		return nil, err
 	}
-	if tree == nil {
-		return nil, nil
-	}
 
-	var result []SingleSQL
-	for _, node := range tree.GetChildren() {
-		if query, ok := node.(mysqlparser.IQueryContext); ok {
-			text := tokens.GetTextFromRuleContext(query)
-			if f != nil {
-				if err := f(text); err != nil {
-					return nil, err
-				}
+	for _, sql := range result {
+		if f != nil {
+			if err := f(sql.Text); err != nil {
+				return nil, err
 			}
-			result = append(result, SingleSQL{
-				Text:     text,
-				LastLine: query.GetStop().GetLine(),
-				Empty:    false,
-			})
 		}
 	}
 
@@ -782,13 +747,31 @@ func TypeString(tp byte) string {
 }
 
 // ExtractDatabaseList extracts all databases from statement.
-func ExtractDatabaseList(engineType EngineType, statement string) ([]string, error) {
+func ExtractDatabaseList(engineType EngineType, statement string, fallbackNormalizedDatabaseName string) ([]string, error) {
 	switch engineType {
 	case MySQL, TiDB, MariaDB, OceanBase:
 		return extractMySQLDatabaseList(statement)
+	case Snowflake:
+		return extractSnowSQLNormalizedDatabaseList(statement, fallbackNormalizedDatabaseName)
 	default:
 		return nil, errors.Errorf("engine type is not supported: %s", engineType)
 	}
+}
+
+// extractSnowSQLNormalizedDatabaseList extracts all databases from statement, and normalizes the database name.
+// If the database name is not specified, it will fallback to the normalizedDatabaseName.
+func extractSnowSQLNormalizedDatabaseList(statement string, normalizedDatabaseName string) ([]string, error) {
+	schemaPlaceholder := "schema_placeholder"
+	schemaResource, err := extractSnowflakeNormalizeResourceListFromSelectStatement(normalizedDatabaseName, schemaPlaceholder, statement)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []string
+	for _, resource := range schemaResource {
+		result = append(result, resource.Database)
+	}
+	return result, nil
 }
 
 func newMySQLParser() *tidbparser.Parser {
@@ -811,7 +794,7 @@ func extractMySQLDatabaseList(statement string) ([]string, error) {
 	}
 
 	for _, node := range nodeList {
-		databaseList := extractDatabaseListFromNode(node)
+		databaseList := extractMySQLDatabaseListFromNode(node)
 		for _, database := range databaseList {
 			databaseMap[database] = true
 		}
@@ -827,8 +810,8 @@ func extractMySQLDatabaseList(statement string) ([]string, error) {
 	return databaseList, nil
 }
 
-// extractDatabaseListFromNode extracts all the database from node.
-func extractDatabaseListFromNode(in tidbast.Node) []string {
+// extractMySQLDatabaseListFromNode extracts all the database from node.
+func extractMySQLDatabaseListFromNode(in tidbast.Node) []string {
 	tableNameList := ExtractMySQLTableList(in, false /* asName */)
 
 	databaseMap := make(map[string]bool)

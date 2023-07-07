@@ -30,6 +30,7 @@ import (
 	"github.com/pkg/errors"
 	scas "github.com/qiangmzsx/string-adapter/v2"
 	echoSwagger "github.com/swaggo/echo-swagger"
+	"github.com/tmc/grpc-websocket-proxy/wsproxy"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -320,12 +321,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 			return nil, err
 		}
 		s.SchemaVersion = metadataVersion
-		if err := storeInstance.BackfillRiskExpression(ctx); err != nil {
-			return nil, err
-		}
-		if err := storeInstance.BackfillWorkspaceApprovalSetting(ctx); err != nil {
-			return nil, err
-		}
 	}
 
 	s.stateCfg = &state.State{
@@ -359,7 +354,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 			// Skip grpc and webhook calls.
 			return strings.HasPrefix(c.Request().URL.Path, "/bytebase.v1.") ||
 				strings.HasPrefix(c.Request().URL.Path, webhookAPIPrefix) ||
-				strings.HasPrefix(c.Request().URL.Path, "/api/sheet/")
+				strings.HasPrefix(c.Request().URL.Path, "/v1:adminExecute")
 		},
 		Timeout: 30 * time.Second,
 	}))
@@ -430,7 +425,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.SlowQuerySyncer = slowquerysync.NewSyncer(storeInstance, s.dbFactory, s.stateCfg, profile)
 		// TODO(p0ny): enable Feishu provider only when it is needed.
 		s.feishuProvider = feishu.NewProvider(profile.FeishuAPIURL)
-		s.ApplicationRunner = apprun.NewRunner(storeInstance, s.ActivityManager, s.feishuProvider, profile)
+		s.ApplicationRunner = apprun.NewRunner(storeInstance, s.ActivityManager, s.feishuProvider, profile, s.licenseService)
 
 		s.RelayRunner = relay.NewRunner(storeInstance, s.ActivityManager, s.TaskScheduler, s.stateCfg)
 
@@ -454,10 +449,7 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 		s.TaskScheduler.Register(api.TaskDatabaseRestorePITRCutover, taskrun.NewPITRCutoverExecutor(storeInstance, s.dbFactory, s.SchemaSyncer, s.BackupRunner, s.ActivityManager, profile))
 
 		s.TaskCheckScheduler = taskcheck.NewScheduler(storeInstance, s.licenseService, s.stateCfg)
-		statementSimpleExecutor := taskcheck.NewStatementAdvisorSimpleExecutor(storeInstance)
-		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementFakeAdvise, statementSimpleExecutor)
-		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementSyntax, statementSimpleExecutor)
-		statementCompositeExecutor := taskcheck.NewStatementAdvisorCompositeExecutor(storeInstance, s.dbFactory)
+		statementCompositeExecutor := taskcheck.NewStatementAdvisorCompositeExecutor(storeInstance, s.dbFactory, s.licenseService)
 		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementAdvise, statementCompositeExecutor)
 		statementTypeExecutor := taskcheck.NewStatementTypeExecutor(storeInstance, s.dbFactory)
 		s.TaskCheckScheduler.Register(api.TaskCheckDatabaseStatementType, statementTypeExecutor)
@@ -523,7 +515,6 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	s.registerIssueSubscriberRoutes(apiGroup)
 	s.registerTaskRoutes(apiGroup)
 	s.registerStageRoutes(apiGroup)
-	s.registerSQLRoutes(apiGroup)
 
 	// Register healthz endpoint.
 	e.GET("/healthz", func(c echo.Context) error {
@@ -596,10 +587,10 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	v1pb.RegisterIdentityProviderServiceServer(s.grpcServer, v1.NewIdentityProviderService(s.store, s.licenseService))
 	v1pb.RegisterSettingServiceServer(s.grpcServer, v1.NewSettingService(s.store, &s.profile, s.licenseService, s.stateCfg, s.feishuProvider))
 	v1pb.RegisterAnomalyServiceServer(s.grpcServer, v1.NewAnomalyService(s.store))
-	v1pb.RegisterSQLServiceServer(s.grpcServer, v1.NewSQLService(s.store, s.SchemaSyncer, s.dbFactory, s.ActivityManager))
+	v1pb.RegisterSQLServiceServer(s.grpcServer, v1.NewSQLService(s.store, s.SchemaSyncer, s.dbFactory, s.ActivityManager, s.licenseService))
 	v1pb.RegisterExternalVersionControlServiceServer(s.grpcServer, v1.NewExternalVersionControlService(s.store))
 	v1pb.RegisterRiskServiceServer(s.grpcServer, v1.NewRiskService(s.store, s.licenseService))
-	v1pb.RegisterReviewServiceServer(s.grpcServer, v1.NewReviewService(s.store, s.ActivityManager, s.TaskScheduler, s.TaskCheckScheduler, s.RelayRunner, s.stateCfg))
+	v1pb.RegisterIssueServiceServer(s.grpcServer, v1.NewIssueService(s.store, s.ActivityManager, s.TaskScheduler, s.TaskCheckScheduler, s.RelayRunner, s.stateCfg))
 	v1pb.RegisterRolloutServiceServer(s.grpcServer, v1.NewRolloutService(s.store, s.licenseService, s.dbFactory, s.TaskScheduler, s.TaskCheckScheduler, s.stateCfg, s.ActivityManager))
 	v1pb.RegisterRoleServiceServer(s.grpcServer, v1.NewRoleService(s.store, s.licenseService))
 	v1pb.RegisterSheetServiceServer(s.grpcServer, v1.NewSheetService(s.store, s.licenseService))
@@ -676,6 +667,12 @@ func NewServer(ctx context.Context, profile config.Profile) (*Server, error) {
 	if err := v1pb.RegisterInboxServiceHandler(ctx, mux, grpcConn); err != nil {
 		return nil, err
 	}
+	e.GET("/v1:adminExecute", echo.WrapHandler(wsproxy.WebsocketProxy(
+		mux,
+		wsproxy.WithTokenCookieName("access-token"),
+		// 10M.
+		wsproxy.WithMaxRespBodyBufferSize(10*1024*1024),
+	)))
 	e.Any("/v1/*", echo.WrapHandler(mux))
 	// GRPC web proxy.
 	options := []grpcweb.Option{
@@ -1072,7 +1069,8 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 			},
 		},
 		EnvironmentID: api.DefaultProdEnvironmentID,
-	}, userID)
+		Activation:    false,
+	}, userID, -1)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create onboarding instance")
 	}
@@ -1137,17 +1135,17 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 		DatabaseUID: &database.UID,
 		Name:        "Sample Sheet",
 		Statement:   "SELECT * FROM salary;",
-		Visibility:  api.ProjectSheet,
-		Source:      api.SheetFromBytebase,
-		Type:        api.SheetForSQL,
+		Visibility:  store.ProjectSheet,
+		Source:      store.SheetFromBytebase,
+		Type:        store.SheetForSQL,
 	}
-	_, err = s.store.CreateSheetV2(ctx, sheetCreate)
+	_, err = s.store.CreateSheet(ctx, sheetCreate)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create sample sheet")
 	}
 
 	// Create a schema update issue and start with creating the sheet for the schema update.
-	sheet, err := s.store.CreateSheetV2(ctx, &store.SheetMessage{
+	sheet, err := s.store.CreateSheet(ctx, &store.SheetMessage{
 		CreatorID: api.SystemBotID,
 
 		ProjectUID:  project.UID,
@@ -1155,9 +1153,9 @@ func (s *Server) generateOnboardingData(ctx context.Context, userID int) error {
 
 		Name:       "Alter table sheet for Sample Issue",
 		Statement:  "ALTER TABLE employee ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';",
-		Visibility: api.ProjectSheet,
-		Source:     api.SheetFromBytebaseArtifact,
-		Type:       api.SheetForSQL,
+		Visibility: store.ProjectSheet,
+		Source:     store.SheetFromBytebaseArtifact,
+		Type:       store.SheetForSQL,
 		Payload:    "{}",
 	})
 	if err != nil {

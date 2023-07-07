@@ -61,6 +61,32 @@
           </div>
 
           <div
+            v-if="subscriptionStore.currentPlan !== PlanType.FREE"
+            class="sm:col-span-2 ml-0 sm:ml-3"
+          >
+            <label for="activation" class="textlabel block">
+              {{ $t("subscription.instance-assignment.assign-license") }}
+              (<router-link to="/setting/subscription" class="accent-link">
+                {{
+                  $t("subscription.instance-assignment.n-license-remain", {
+                    n: availableLicenseCount,
+                  })
+                }}</router-link
+              >)
+            </label>
+            <BBSwitch
+              class="mt-2"
+              :text="false"
+              :value="basicInfo.activation"
+              :disabled="
+                !allowEdit ||
+                (!basicInfo.activation && availableLicenseCount === 0)
+              "
+              @toggle="(on: boolean) => basicInfo.activation = on"
+            />
+          </div>
+
+          <div
             :key="basicInfo.environment"
             class="sm:col-span-3 sm:col-start-1 -mt-4"
           >
@@ -485,12 +511,13 @@
               </label>
               <FeatureBadge
                 feature="bb.feature.instance-ssh-connection"
-                class="text-accent"
+                :instance="instance"
               />
             </div>
             <template v-if="currentDataSource.pendingCreate">
               <SshConnectionForm
                 :value="currentDataSource"
+                :instance="instance"
                 @change="handleCurrentDataSourceSshChange"
               />
             </template>
@@ -498,6 +525,7 @@
               <template v-if="currentDataSource.updateSsh">
                 <SshConnectionForm
                   :value="currentDataSource"
+                  :instance="instance"
                   @change="handleCurrentDataSourceSshChange"
                 />
               </template>
@@ -580,8 +608,9 @@
   </component>
 
   <FeatureModal
-    v-if="state.showFeatureModal"
     feature="bb.feature.read-replica-connection"
+    :open="state.showFeatureModal"
+    :instance="instance"
     @cancel="state.showFeatureModal = false"
   />
 
@@ -634,12 +663,12 @@ import {
   useActuatorV1Store,
   useEnvironmentV1Store,
   useInstanceV1Store,
+  useSubscriptionV1Store,
   useGracefulRequest,
   featureToRef,
 } from "@/store";
 import { getErrorCode, extractGrpcErrorMessage } from "@/utils/grpcweb";
 import EnvironmentSelect from "@/components/EnvironmentSelect.vue";
-import FeatureBadge from "@/components/FeatureBadge.vue";
 import SslCertificateForm from "./SslCertificateForm.vue";
 import SshConnectionForm from "./SshConnectionForm.vue";
 import SpannerHostInput from "./SpannerHostInput.vue";
@@ -655,6 +684,7 @@ import {
 } from "@/types/proto/v1/instance_service";
 import { Engine, State } from "@/types/proto/v1/common";
 import { instanceServiceClient } from "@/grpcweb";
+import { PlanType } from "@/types/proto/v1/subscription_service";
 
 const props = defineProps({
   instance: {
@@ -707,6 +737,7 @@ const instanceV1Store = useInstanceV1Store();
 const settingV1Store = useSettingV1Store();
 const currentUserV1 = useCurrentUserV1();
 const actuatorStore = useActuatorV1Store();
+const subscriptionStore = useSubscriptionV1Store();
 
 const state = reactive<LocalState>({
   currentDataSourceType: DataSourceType.ADMIN,
@@ -718,8 +749,17 @@ const state = reactive<LocalState>({
 });
 
 const hasReadonlyReplicaFeature = featureToRef(
-  "bb.feature.read-replica-connection"
+  "bb.feature.read-replica-connection",
+  props.instance
 );
+
+const availableLicenseCount = computed(() => {
+  return Math.max(
+    0,
+    subscriptionStore.instanceLicenseCount -
+      instanceV1Store.activateInstanceCount
+  );
+});
 
 const extractBasicInfo = (instance: Instance | undefined): BasicInfo => {
   return {
@@ -730,6 +770,9 @@ const extractBasicInfo = (instance: Instance | undefined): BasicInfo => {
     engine: instance?.engine ?? Engine.MYSQL,
     externalLink: instance?.externalLink ?? "",
     environment: instance?.environment ?? UNKNOWN_ENVIRONMENT_NAME,
+    activation: instance
+      ? instance.activation
+      : availableLicenseCount.value > 0,
   };
 };
 
@@ -840,6 +883,15 @@ watch(
   },
   {
     immediate: true,
+  }
+);
+
+watch(
+  () => props.instance?.activation,
+  (val) => {
+    if (val !== undefined) {
+      basicInfo.value.activation = val;
+    }
   }
 );
 
@@ -1301,6 +1353,9 @@ const doUpdate = async () => {
     }
     if (instancePatch.externalLink !== instance.externalLink) {
       updateMask.push("external_link");
+    }
+    if (instancePatch.activation !== instance.activation) {
+      updateMask.push("activation");
     }
     return await instanceV1Store.updateInstance(instancePatch, updateMask);
   };
