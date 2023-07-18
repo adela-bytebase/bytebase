@@ -476,6 +476,8 @@ type SQLReviewCheckContext struct {
 	Driver    *sql.DB
 	Context   context.Context
 
+	// Snowflake specific fields
+	CurrentDatabase string
 	// Oracle specific fields
 	CurrentSchema string
 }
@@ -490,6 +492,8 @@ func syntaxCheck(statement string, checkContext SQLReviewCheckContext) (any, []A
 		return oracleSyntaxCheck(statement)
 	case db.Snowflake:
 		return snowflakeSyntaxCheck(statement)
+	case db.MSSQL:
+		return mssqlSyntaxCheck(statement)
 	}
 	return nil, []Advice{
 		{
@@ -500,6 +504,34 @@ func syntaxCheck(statement string, checkContext SQLReviewCheckContext) (any, []A
 			Line:    1,
 		},
 	}
+}
+
+func mssqlSyntaxCheck(statement string) (any, []Advice) {
+	tree, err := parser.ParseTSQL(statement)
+	if err != nil {
+		if syntaxErr, ok := err.(*parser.SyntaxError); ok {
+			return nil, []Advice{
+				{
+					Status:  Warn,
+					Code:    StatementSyntaxError,
+					Title:   SyntaxErrorTitle,
+					Content: syntaxErr.Message,
+					Line:    syntaxErr.Line,
+				},
+			}
+		}
+		return nil, []Advice{
+			{
+				Status:  Warn,
+				Code:    Internal,
+				Title:   "Parse error",
+				Content: err.Error(),
+				Line:    1,
+			},
+		}
+	}
+
+	return tree, nil
 }
 
 func snowflakeSyntaxCheck(statement string) (any, []Advice) {
@@ -531,7 +563,7 @@ func snowflakeSyntaxCheck(statement string) (any, []Advice) {
 }
 
 func oracleSyntaxCheck(statement string) (any, []Advice) {
-	tree, err := parser.ParsePLSQL(statement + ";")
+	tree, _, err := parser.ParsePLSQL(statement + ";")
 	if err != nil {
 		if syntaxErr, ok := err.(*parser.SyntaxError); ok {
 			return nil, []Advice{
@@ -724,14 +756,15 @@ func SQLReviewCheck(statements string, ruleList []*SQLReviewRule, checkContext S
 			checkContext.DbType,
 			advisorType,
 			Context{
-				Charset:       checkContext.Charset,
-				Collation:     checkContext.Collation,
-				AST:           ast,
-				Rule:          rule,
-				Catalog:       finder,
-				Driver:        checkContext.Driver,
-				Context:       checkContext.Context,
-				CurrentSchema: checkContext.CurrentSchema,
+				Charset:         checkContext.Charset,
+				Collation:       checkContext.Collation,
+				AST:             ast,
+				Rule:            rule,
+				Catalog:         finder,
+				Driver:          checkContext.Driver,
+				Context:         checkContext.Context,
+				CurrentSchema:   checkContext.CurrentSchema,
+				CurrentDatabase: checkContext.CurrentDatabase,
 			},
 			statements,
 		)
@@ -1040,6 +1073,10 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return PostgreSQLNoSelectAll, nil
 		case db.Oracle:
 			return OracleNoSelectAll, nil
+		case db.Snowflake:
+			return SnowflakeNoSelectAll, nil
+		case db.MSSQL:
+			return MSSQLNoSelectAll, nil
 		}
 	case SchemaRuleSchemaBackwardCompatibility:
 		switch engine {
@@ -1047,6 +1084,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLMigrationCompatibility, nil
 		case db.Postgres:
 			return PostgreSQLMigrationCompatibility, nil
+		case db.Snowflake:
+			return SnowflakeMigrationCompatibility, nil
 		}
 	case SchemaRuleTableNaming:
 		switch engine {
@@ -1257,6 +1296,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return MySQLTableDropNamingConvention, nil
 		case db.Postgres:
 			return PostgreSQLTableDropNamingConvention, nil
+		case db.Snowflake:
+			return SnowflakeTableDropNamingConvention, nil
 		}
 	case SchemaRuleTableCommentConvention:
 		switch engine {

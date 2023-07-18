@@ -407,7 +407,9 @@ export interface SearchProjectsResponse {
 
 export interface CreateProjectRequest {
   /** The project to create. */
-  project?: Project;
+  project?:
+    | Project
+    | undefined;
   /**
    * The ID to use for the project, which will become the final component of
    * the project's resource name.
@@ -425,9 +427,11 @@ export interface UpdateProjectRequest {
    * The project's `name` field is used to identify the project to update.
    * Format: projects/{project}
    */
-  project?: Project;
+  project?:
+    | Project
+    | undefined;
   /** The list of fields to update. */
-  updateMask?: string[];
+  updateMask?: string[] | undefined;
 }
 
 export interface DeleteProjectRequest {
@@ -468,7 +472,7 @@ export interface BatchGetIamPolicyResponse {
 
 export interface BatchGetIamPolicyResponse_PolicyResult {
   project: string;
-  policy?: IamPolicy;
+  policy?: IamPolicy | undefined;
 }
 
 export interface SetIamPolicyRequest {
@@ -477,7 +481,7 @@ export interface SetIamPolicyRequest {
    * Format: projects/{project}
    */
   project: string;
-  policy?: IamPolicy;
+  policy?: IamPolicy | undefined;
 }
 
 export interface GetDeploymentConfigRequest {
@@ -489,14 +493,18 @@ export interface GetDeploymentConfigRequest {
 }
 
 export interface UpdateDeploymentConfigRequest {
-  config?: DeploymentConfig;
+  config?: DeploymentConfig | undefined;
 }
 
 export interface UpdateProjectGitOpsInfoRequest {
   /** The binding for the project and external version control. */
-  projectGitopsInfo?: ProjectGitOpsInfo;
+  projectGitopsInfo?:
+    | ProjectGitOpsInfo
+    | undefined;
   /** The mask of the fields to be updated. */
-  updateMask?: string[];
+  updateMask?:
+    | string[]
+    | undefined;
   /** If true, the gitops will be created if it does not exist. */
   allowMissing: boolean;
 }
@@ -547,7 +555,6 @@ export interface Project {
   visibility: Visibility;
   tenantMode: TenantMode;
   dbNameTemplate: string;
-  schemaVersion: SchemaVersion;
   schemaChange: SchemaChange;
   webhooks: Webhook[];
 }
@@ -559,19 +566,21 @@ export interface AddWebhookRequest {
    */
   project: string;
   /** The webhook to add. */
-  webhook?: Webhook;
+  webhook?: Webhook | undefined;
 }
 
 export interface UpdateWebhookRequest {
   /** The webhook to modify. */
-  webhook?: Webhook;
+  webhook?:
+    | Webhook
+    | undefined;
   /** The list of fields to update. */
-  updateMask?: string[];
+  updateMask?: string[] | undefined;
 }
 
 export interface RemoveWebhookRequest {
   /** The webhook to remove. Identified by its url. */
-  webhook?: Webhook;
+  webhook?: Webhook | undefined;
 }
 
 export interface TestWebhookRequest {
@@ -581,7 +590,7 @@ export interface TestWebhookRequest {
    */
   project: string;
   /** The webhook to test. Identified by its url. */
-  webhook?: Webhook;
+  webhook?: Webhook | undefined;
 }
 
 export interface TestWebhookResponse {
@@ -692,7 +701,7 @@ export interface DeploymentConfig {
   name: string;
   /** The title of the deployment config. */
   title: string;
-  schedule?: Schedule;
+  schedule?: Schedule | undefined;
 }
 
 export interface Schedule {
@@ -702,11 +711,11 @@ export interface Schedule {
 export interface ScheduleDeployment {
   /** The title of the deployment (stage) in a schedule. */
   title: string;
-  spec?: DeploymentSpec;
+  spec?: DeploymentSpec | undefined;
 }
 
 export interface DeploymentSpec {
-  labelSelector?: LabelSelector;
+  labelSelector?: LabelSelector | undefined;
 }
 
 export interface LabelSelector {
@@ -966,7 +975,9 @@ export interface CreateDatabaseGroupRequest {
    */
   parent: string;
   /** The database group to create. */
-  databaseGroup?: DatabaseGroup;
+  databaseGroup?:
+    | DatabaseGroup
+    | undefined;
   /**
    * The ID to use for the database group, which will become the final component of
    * the database group's resource name.
@@ -986,9 +997,11 @@ export interface UpdateDatabaseGroupRequest {
    * The database group's `name` field is used to identify the database group to update.
    * Format: projects/{project}/databaseGroups/{databaseGroup}
    */
-  databaseGroup?: DatabaseGroup;
+  databaseGroup?:
+    | DatabaseGroup
+    | undefined;
   /** The list of fields to update. */
-  updateMask?: string[];
+  updateMask?: string[] | undefined;
 }
 
 export interface DeleteDatabaseGroupRequest {
@@ -1011,7 +1024,9 @@ export interface DatabaseGroup {
    */
   databasePlaceholder: string;
   /** The condition that is associated with this database group. */
-  databaseExpr?: Expr;
+  databaseExpr?:
+    | Expr
+    | undefined;
   /** The list of databases that match the database group condition. */
   matchedDatabases: DatabaseGroup_Database[];
   /** The list of databases that match the database group condition. */
@@ -1033,7 +1048,9 @@ export interface CreateSchemaGroupRequest {
    */
   parent: string;
   /** The schema group to create. */
-  schemaGroup?: SchemaGroup;
+  schemaGroup?:
+    | SchemaGroup
+    | undefined;
   /**
    * The ID to use for the schema group, which will become the final component of
    * the schema group's resource name.
@@ -1053,9 +1070,11 @@ export interface UpdateSchemaGroupRequest {
    * The schema group's `name` field is used to identify the schema group to update.
    * Format: projects/{project}/databaseGroups/{databaseGroup}/schemaGroups/{schemaGroup}
    */
-  schemaGroup?: SchemaGroup;
+  schemaGroup?:
+    | SchemaGroup
+    | undefined;
   /** The list of fields to update. */
-  updateMask?: string[];
+  updateMask?: string[] | undefined;
 }
 
 export interface DeleteSchemaGroupRequest {
@@ -1119,7 +1138,9 @@ export interface SchemaGroup {
    * The table condition that is associated with this schema group.
    * The table_placeholder in the sheet script will be rendered to the actual table name.
    */
-  tableExpr?: Expr;
+  tableExpr?:
+    | Expr
+    | undefined;
   /**
    * The table placeholder used for rendering. For example, if set to "tbl", all the table name
    * "tbl" in the SQL script will be rendered to the actual table name.
@@ -2576,7 +2597,6 @@ function createBaseProject(): Project {
     visibility: 0,
     tenantMode: 0,
     dbNameTemplate: "",
-    schemaVersion: 0,
     schemaChange: 0,
     webhooks: [],
   };
@@ -2611,14 +2631,11 @@ export const Project = {
     if (message.dbNameTemplate !== "") {
       writer.uint32(74).string(message.dbNameTemplate);
     }
-    if (message.schemaVersion !== 0) {
-      writer.uint32(80).int32(message.schemaVersion);
-    }
     if (message.schemaChange !== 0) {
-      writer.uint32(88).int32(message.schemaChange);
+      writer.uint32(80).int32(message.schemaChange);
     }
     for (const v of message.webhooks) {
-      Webhook.encode(v!, writer.uint32(98).fork()).ldelim();
+      Webhook.encode(v!, writer.uint32(90).fork()).ldelim();
     }
     return writer;
   },
@@ -2698,17 +2715,10 @@ export const Project = {
             break;
           }
 
-          message.schemaVersion = reader.int32() as any;
-          continue;
-        case 11:
-          if (tag !== 88) {
-            break;
-          }
-
           message.schemaChange = reader.int32() as any;
           continue;
-        case 12:
-          if (tag !== 98) {
+        case 11:
+          if (tag !== 90) {
             break;
           }
 
@@ -2734,7 +2744,6 @@ export const Project = {
       visibility: isSet(object.visibility) ? visibilityFromJSON(object.visibility) : 0,
       tenantMode: isSet(object.tenantMode) ? tenantModeFromJSON(object.tenantMode) : 0,
       dbNameTemplate: isSet(object.dbNameTemplate) ? String(object.dbNameTemplate) : "",
-      schemaVersion: isSet(object.schemaVersion) ? schemaVersionFromJSON(object.schemaVersion) : 0,
       schemaChange: isSet(object.schemaChange) ? schemaChangeFromJSON(object.schemaChange) : 0,
       webhooks: Array.isArray(object?.webhooks) ? object.webhooks.map((e: any) => Webhook.fromJSON(e)) : [],
     };
@@ -2751,7 +2760,6 @@ export const Project = {
     message.visibility !== undefined && (obj.visibility = visibilityToJSON(message.visibility));
     message.tenantMode !== undefined && (obj.tenantMode = tenantModeToJSON(message.tenantMode));
     message.dbNameTemplate !== undefined && (obj.dbNameTemplate = message.dbNameTemplate);
-    message.schemaVersion !== undefined && (obj.schemaVersion = schemaVersionToJSON(message.schemaVersion));
     message.schemaChange !== undefined && (obj.schemaChange = schemaChangeToJSON(message.schemaChange));
     if (message.webhooks) {
       obj.webhooks = message.webhooks.map((e) => e ? Webhook.toJSON(e) : undefined);
@@ -2776,7 +2784,6 @@ export const Project = {
     message.visibility = object.visibility ?? 0;
     message.tenantMode = object.tenantMode ?? 0;
     message.dbNameTemplate = object.dbNameTemplate ?? "";
-    message.schemaVersion = object.schemaVersion ?? 0;
     message.schemaChange = object.schemaChange ?? 0;
     message.webhooks = object.webhooks?.map((e) => Webhook.fromPartial(e)) || [];
     return message;

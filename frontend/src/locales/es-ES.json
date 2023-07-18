@@ -570,7 +570,9 @@
       "description": "Configura un flujo de aprobación para controlar la consulta y exportación de datos. {link}",
       "skip-approval": "Saltar aprobación manual",
       "query-data": "Consulta de datos",
-      "export-data": "Exportación de datos"
+      "export-data": "Exportación de datos",
+      "disallowed": "no permitido",
+      "copy-data-from-sql-editor": "Copiar datos del editor de SQL"
     },
     "release": {
       "new-version-available": "Nueva versión disponible",
@@ -972,7 +974,13 @@
     "create-gcp-credentials": "Para crear credenciales, consulte",
     "used-for-testing-connection": "Usado solo para probar conexiones",
     "all": "Todas las instancias",
-    "force-archive-description": "Forzar a archivar. \nTodos los problemas relacionados se resolverán y todas las hojas relacionadas se eliminarán."
+    "force-archive-description": "Forzar a archivar. \nTodos los problemas relacionados se resolverán y todas las hojas relacionadas se eliminarán.",
+    "sync-mode": {
+      "self": "Modo de sincronización",
+      "sync-self": "Sincronizarse",
+      "sync-all": "Sincronización propia y de todas las bases de datos (CDB + PDB)",
+      "description": "Bytebase sincronizará la base de datos de conexión, así como todas las bases de datos que la contienen. Solo aplicable a Oracle 12c."
+    }
   },
   "environment": {
     "id": "ID del Entorno",
@@ -1287,8 +1295,10 @@
       "errors": {
         "select-target-project": "Seleccionar proyecto de destino",
         "select-at-least-one-database": "Seleccione al menos una base de datos"
-      }
-    }
+      },
+      "select-target-project": "Seleccionar proyecto de destino"
+    },
+    "transfer-database-from-to": "Transferir la base de datos del proyecto de origen al proyecto de destino"
   },
   "repository": {
     "branch-observe-file-change": "La rama donde Bytebase observa el cambio de archivo.",
@@ -1578,12 +1588,14 @@
           "github-application-id-error": "El ID de aplicación debe ser una cadena alfanumérica de 20 caracteres",
           "github-secret-error": "El secreto debe ser una cadena alfanumérica de 40 caracteres",
           "bitbucket-application-id-error": "El ID de aplicación debe ser una cadena alfanumérica de 18 caracteres",
-          "bitbucket-secret-error": "El secreto debe ser una cadena alfanumérica de 32 caracteres"
+          "bitbucket-secret-error": "El secreto debe ser una cadena alfanumérica de 32 caracteres",
+          "github-enterprise-login-as-admin": "Inicia sesión en tu sitio GitHub Enterprise como administrador de la organización. Esta cuenta debe ser un administrador de organización de GitHub (con acceso a la página de configuración de la organización)."
         },
         "confirm": {
           "confirm-info": "Confirmar la información",
           "confirm-description": "Después de la creación, este proveedor de Git se puede elegir en la pestaña \"GitOps\" del panel del proyecto por el propietario del proyecto."
-        }
+        },
+        "github-self-host-ee": "Autohospedado de GitHub Enterprise Edition (EE)"
       },
       "git-provider": {
         "gitlab-self-host-application-id-label": "ID de aplicación para la aplicación OAuth de GitLab registrada en toda la instancia.",
@@ -1793,6 +1805,7 @@
       "drop-table": "Eliminar tabla",
       "restore": "Restaurar",
       "add-column": "Agregar columna",
+      "add-from-template": "Añadir desde plantilla",
       "drop-column": "Eliminar columna",
       "sql-preview": "Vista previa SQL",
       "reset": "Restablecer",
@@ -1891,7 +1904,7 @@
       "subscription-page": "página de suscripción",
       "subscription": "Visite la {page} para conocer estas funciones y nuestros planes."
     },
-    "description": "Puedes subir tu licencia Bytebase para desbloquear funciones de equipo/empresa.",
+    "description": "Puedes subir tu licencia Bytebase para desbloquear funciones de edición/empresa.",
     "upload-license": "Subir licencia",
     "upgrade-trial-button": "Actualizar prueba",
     "start-n-days-trial": "Comienza una prueba de {days} días (no se requiere tarjeta de crédito)",
@@ -2079,6 +2092,10 @@
       "bb-feature-instance-ssh-connection": {
         "title": "Instancia de Conexión SSH",
         "desc": "Conéctese a una instancia a través de SSH."
+      },
+      "bb-feature-schema-template": {
+        "title": "Plantilla de esquema",
+        "desc": "Predefina la plantilla de campo, luego aplique la plantilla durante el cambio de esquema."
       }
     }
   },
@@ -2577,6 +2594,20 @@
     "no-log-placeholder": {
       "admin": "Haga clic en el botón \"Configurar\" para obtener consultas lentas de las instancias de la base de datos o haga clic en el botón \"Sincronizar ahora\" para sincronizar los registros de consultas lentas de inmediato",
       "developer": "Haga clic en el botón \"Sincronizar ahora\" para sincronizar los registros de consultas lentas inmediatamente o comuníquese con los propietarios/DBA de Bytebase para configurar consultas lentas"
+    }
+  },
+  "schema-template": {
+    "self": "Plantilla de esquema",
+    "field-template": "Plantilla de campo",
+    "add-field": "Agregar plantilla de campo",
+    "description": "Predefina la plantilla de campo, luego aplique la plantilla durante el cambio de esquema.",
+    "search-by-name-or-comment": "Buscar por nombre o comentario",
+    "form": {
+      "column-name": "Nombre de la columna",
+      "column-type": "Tipo de columna",
+      "default-value": "Valor por defecto",
+      "comment": "Comentario",
+      "nullable": "Anulable"
     }
   },
   "principal": {

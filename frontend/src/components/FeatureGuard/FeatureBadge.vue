@@ -13,15 +13,20 @@
       </span>
     </NTooltip>
   </div>
-  <router-link
-    v-else-if="!hasFeature"
-    to="/setting/subscription"
-    exact-active-class=""
-  >
-    <heroicons-solid:sparkles class="text-accent w-5 h-5" />
-  </router-link>
+  <template v-else-if="!hasFeature">
+    <router-link
+      v-if="clickable"
+      to="/setting/subscription"
+      exact-active-class=""
+    >
+      <heroicons-solid:sparkles class="text-accent w-5 h-5" />
+    </router-link>
+    <span v-else>
+      <heroicons-solid:sparkles class="text-accent w-5 h-5" />
+    </span>
+  </template>
   <InstanceAssignment
-    v-if="!hasFeature"
+    v-if="instanceMissingLicense"
     :show="state.showInstanceAssignmentDrawer"
     @dismiss="state.showInstanceAssignmentDrawer = false"
   />
@@ -51,6 +56,10 @@ const props = defineProps({
     require: false,
     default: "",
     type: String,
+  },
+  clickable: {
+    type: Boolean,
+    default: false,
   },
 });
 

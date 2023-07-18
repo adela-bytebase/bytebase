@@ -426,6 +426,23 @@ const (
 
 	// SnowflakeColumnNoNull is an advisor type for Snowflake column no NULL value.
 	SnowflakeColumnNoNull Type = "bb.plugin.advisor.snowflake.column.no-null"
+
+	// SnowflakeNoSelectAll is an advisor type for Snowflake no select all.
+	SnowflakeNoSelectAll Type = "bb.plugin.advisor.snowflake.select.no-select-all"
+
+	// SnowflakeTableDropNamingConvention is an advisor type for Snowflake table drop with naming convention.
+	SnowflakeTableDropNamingConvention Type = "bb.plugin.advisor.snowflake.table.drop-naming-convention"
+
+	// SnowflakeMigrationCompatibility is an advisor type for Snowflake migration compatibility.
+	SnowflakeMigrationCompatibility Type = "bb.plugin.advisor.snowflake.migration-compatibility"
+
+	// MSSQL Advisor.
+
+	// MSSQLSyntax is an advisor type for MSSQL syntax.
+	MSSQLSyntax Type = "bb.plugin.advisor.mssql.syntax"
+
+	// MSSQLNoSelectAll is an advisor type for MSSQL no select all.
+	MSSQLNoSelectAll Type = "bb.plugin.advisor.mssql.select.no-select-all"
 )
 
 // Advice is the result of an advisor.
@@ -487,6 +504,8 @@ type Context struct {
 	Driver  *sql.DB
 	Context context.Context
 
+	// CurrentDatabase is the current database. Special for Snowflake.
+	CurrentDatabase string
 	// CurrentSchema is the current schema. Special for Oracle.
 	CurrentSchema string
 }
@@ -549,7 +568,7 @@ func Check(dbType db.Type, advType Type, ctx Context, statement string) (adviceL
 // IsSyntaxCheckSupported checks the engine type if syntax check supports it.
 func IsSyntaxCheckSupported(dbType db.Type) bool {
 	switch dbType {
-	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres, db.Oracle, db.OceanBase, db.Snowflake:
+	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres, db.Oracle, db.OceanBase, db.Snowflake, db.MSSQL:
 		return true
 	}
 	return false
@@ -558,7 +577,7 @@ func IsSyntaxCheckSupported(dbType db.Type) bool {
 // IsSQLReviewSupported checks the engine type if SQL review supports it.
 func IsSQLReviewSupported(dbType db.Type) bool {
 	switch dbType {
-	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres, db.Oracle, db.OceanBase, db.Snowflake:
+	case db.MySQL, db.TiDB, db.MariaDB, db.Postgres, db.Oracle, db.OceanBase, db.Snowflake, db.MSSQL:
 		return true
 	}
 	return false

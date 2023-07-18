@@ -50,7 +50,7 @@ func TestGetMinorMigrationVersions(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		migrateVersions, _, _ := getMinorMigrationVersions(test.names, test.currentVersion)
+		migrateVersions, _ := getMinorMigrationVersions(test.names, test.currentVersion)
 		require.Equal(t, test.want, migrateVersions)
 	}
 }
@@ -241,5 +241,5 @@ func TestMigrationCompatibility(t *testing.T) {
 func TestGetCutoffVersion(t *testing.T) {
 	releaseVersion, err := getProdCutoffVersion()
 	require.NoError(t, err)
-	require.Equal(t, semver.MustParse("2.4.2"), releaseVersion)
+	require.Equal(t, semver.MustParse("2.5.1"), releaseVersion)
 }

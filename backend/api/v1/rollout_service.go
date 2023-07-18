@@ -73,6 +73,65 @@ func (s *RolloutService) GetPlan(ctx context.Context, request *v1pb.GetPlanReque
 	return convertToPlan(plan), nil
 }
 
+// ListPlans lists plans.
+func (s *RolloutService) ListPlans(ctx context.Context, request *v1pb.ListPlansRequest) (*v1pb.ListPlansResponse, error) {
+	projectID, err := getProjectID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	var limit, offset int
+	if request.PageToken != "" {
+		var pageToken storepb.PageToken
+		if err := unmarshalPageToken(request.PageToken, &pageToken); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid page token: %v", err)
+		}
+		if pageToken.Limit < 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "page size cannot be negative")
+		}
+		limit = int(pageToken.Limit)
+		offset = int(pageToken.Offset)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	limitPlusOne := limit + 1
+
+	find := &store.FindPlanMessage{
+		Limit:  &limitPlusOne,
+		Offset: &offset,
+	}
+	if projectID != "-" {
+		find.ProjectID = &projectID
+	}
+
+	plans, err := s.store.ListPlans(ctx, find)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list plans, error: %v", err)
+	}
+
+	// has more pages
+	if len(plans) == limitPlusOne {
+		nextPageToken, err := getPageToken(limit, offset+limit)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to get next page token, error: %v", err)
+		}
+		return &v1pb.ListPlansResponse{
+			Plans:         convertToPlans(plans[:limit]),
+			NextPageToken: nextPageToken,
+		}, nil
+	}
+
+	// no subsequent pages
+	return &v1pb.ListPlansResponse{
+		Plans:         convertToPlans(plans),
+		NextPageToken: "",
+	}, nil
+}
+
 // CreatePlan creates a new plan.
 func (s *RolloutService) CreatePlan(ctx context.Context, request *v1pb.CreatePlanRequest) (*v1pb.Plan, error) {
 	creatorID := ctx.Value(common.PrincipalIDContextKey).(int)
@@ -93,24 +152,145 @@ func (s *RolloutService) CreatePlan(ctx context.Context, request *v1pb.CreatePla
 		return nil, status.Errorf(codes.InvalidArgument, "failed to validate plan steps, error: %v", err)
 	}
 
-	pipelineCreate, err := s.getPipelineCreate(ctx, request.Plan.Steps, project)
+	planMessage := &store.PlanMessage{
+		ProjectID:   projectID,
+		PipelineUID: nil,
+		Name:        request.Plan.Title,
+		Description: request.Plan.Description,
+		Config: &storepb.PlanConfig{
+			Steps: convertPlanSteps(request.Plan.Steps),
+		},
+	}
+
+	plan, err := s.store.CreatePlan(ctx, planMessage, creatorID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create plan, error: %v", err)
+	}
+	return convertToPlan(plan), nil
+}
+
+// PreviewRollout previews the rollout for a plan.
+func (s *RolloutService) PreviewRollout(ctx context.Context, request *v1pb.PreviewRolloutRequest) (*v1pb.Rollout, error) {
+	projectID, err := getProjectID(request.Project)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get project, error: %v", err)
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectID)
+	}
+
+	if err := validateSteps(request.Plan.Steps); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to validate plan steps, error: %v", err)
+	}
+	steps := convertPlanSteps(request.Plan.Steps)
+
+	rollout, err := s.getPipelineCreate(ctx, steps, project)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to get pipeline create, error: %v", err)
 	}
-	if len(pipelineCreate.StageList) == 0 {
+	if len(rollout.Stages) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "plan has no stage created")
+	}
+
+	rolloutV1, err := convertToRollout(ctx, s.store, project, rollout)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert to rollout, error: %v", err)
+	}
+	return rolloutV1, nil
+}
+
+// GetRollout gets a rollout.
+func (s *RolloutService) GetRollout(ctx context.Context, request *v1pb.GetRolloutRequest) (*v1pb.Rollout, error) {
+	projectID, rolloutID, err := getProjectIDRolloutID(request.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get project, error: %v", err)
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", projectID)
+	}
+	rollout, err := s.store.GetRollout(ctx, rolloutID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get pipeline, error: %v", err)
+	}
+
+	rolloutV1, err := convertToRollout(ctx, s.store, project, rollout)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert to rollout, error: %v", err)
+	}
+	return rolloutV1, nil
+}
+
+// CreateRollout creates a rollout from plan.
+func (s *RolloutService) CreateRollout(ctx context.Context, request *v1pb.CreateRolloutRequest) (*v1pb.Rollout, error) {
+	creatorID := ctx.Value(common.PrincipalIDContextKey).(int)
+	projectID, err := getProjectID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get project, error: %v", err)
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project not found for id: %v", projectID)
+	}
+
+	planID, err := getPlanID(request.Plan)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	plan, err := s.store.GetPlan(ctx, planID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get plan, error: %v", err)
+	}
+	if plan == nil {
+		return nil, status.Errorf(codes.NotFound, "plan not found for id: %d", planID)
+	}
+
+	pipelineCreate, err := s.getPipelineCreate(ctx, plan.Config.Steps, project)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to get pipeline create, error: %v", err)
+	}
+	if len(pipelineCreate.Stages) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "no database matched for deployment")
 	}
-	firstEnvironmentID := pipelineCreate.StageList[0].EnvironmentID
+	pipeline, err := s.createPipeline(ctx, project, pipelineCreate, creatorID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update pipeline ID in the plan.
+	if err := s.store.UpdatePlan(ctx, &store.UpdatePlanMessage{
+		UID:         planID,
+		UpdaterID:   creatorID,
+		PipelineUID: &pipelineCreate.ID,
+	}); err != nil {
+		return nil, err
+	}
 
 	issueCreateMessage := &store.IssueMessage{
 		Project:     project,
-		Title:       request.Plan.Title,
+		Title:       plan.Name,
 		Type:        api.IssueDatabaseGeneral,
-		Description: request.Plan.Description,
+		Description: plan.Description,
 		Assignee:    nil,
 	}
-
 	// Find an assignee.
+	firstEnvironmentID := pipelineCreate.Stages[0].EnvironmentID
 	assignee, err := s.taskScheduler.GetDefaultAssignee(ctx, firstEnvironmentID, issueCreateMessage.Project.UID, issueCreateMessage.Type)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to find a default assignee, error: %v", err)
@@ -132,10 +312,6 @@ func (s *RolloutService) CreatePlan(ctx context.Context, request *v1pb.CreatePla
 	}
 	issueCreateMessage.Payload = string(issueCreatePayloadBytes)
 
-	pipeline, err := s.createPipeline(ctx, creatorID, pipelineCreate)
-	if err != nil {
-		return nil, err
-	}
 	issueCreateMessage.PipelineUID = &pipeline.ID
 	issue, err := s.store.CreateIssueV2(ctx, issueCreateMessage, creatorID)
 	if err != nil {
@@ -198,129 +374,117 @@ func (s *RolloutService) CreatePlan(ctx context.Context, request *v1pb.CreatePla
 			return nil, errors.Wrapf(err, "failed to create ActivityPipelineStageStatusUpdate activity after creating the issue: %v", issue.Title)
 		}
 	}
-
-	planMessage := &store.PlanMessage{
-		ProjectID:   projectID,
-		PipelineUID: nil,
-		Name:        request.Plan.Title,
-		Description: request.Plan.Description,
-		Config: &storepb.PlanConfig{
-			Steps: convertPlanSteps(request.Plan.Steps),
-		},
-	}
-	planMessage.PipelineUID = &pipeline.ID
-
-	plan, err := s.store.CreatePlan(ctx, planMessage, creatorID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create plan, error: %v", err)
-	}
-	return convertToPlan(plan), nil
+	return nil, nil
 }
 
-// GetRollout gets a rollout.
-func (s *RolloutService) GetRollout(ctx context.Context, request *v1pb.GetRolloutRequest) (*v1pb.Rollout, error) {
-	projectID, rolloutID, err := getProjectIDRolloutID(request.Name)
+// ListRolloutTaskRuns lists rollout task runs.
+func (s *RolloutService) ListRolloutTaskRuns(ctx context.Context, request *v1pb.ListRolloutTaskRunsRequest) (*v1pb.ListRolloutTaskRunsResponse, error) {
+	projectID, rolloutID, maybeStageID, maybeTaskID, err := getProjectIDRolloutIDStageIDTaskID(request.Parent)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
 	}
+
 	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
 		ResourceID: &projectID,
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get project, error: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to find project, error: %v", err)
 	}
 	if project == nil {
-		return nil, status.Errorf(codes.NotFound, "project %q not found", projectID)
-	}
-	pipeline, err := s.store.GetPipelineV2ByID(ctx, rolloutID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get pipeline, error: %v", err)
-	}
-	stages, err := s.store.ListStageV2(ctx, rolloutID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get stages, error: %v", err)
-	}
-	tasks, err := s.store.ListTasks(ctx, &api.TaskFind{PipelineID: &rolloutID})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get tasks, error: %v", err)
+		return nil, status.Errorf(codes.NotFound, "project %v not found", projectID)
 	}
 
-	rollout, err := convertToRollout(ctx, s.store, project, pipeline, stages, tasks)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to convert to rollout, error: %v", err)
-	}
-	return rollout, nil
-}
-
-func convertToRollout(ctx context.Context, s *store.Store, project *store.ProjectMessage, pipeline *store.PipelineMessage, stages []*store.StageMessage, tasks []*store.TaskMessage) (*v1pb.Rollout, error) {
-	rollout := &v1pb.Rollout{
-		Name:   fmt.Sprintf("%s%s/%s%d", projectNamePrefix, project.ResourceID, rolloutPrefix, pipeline.ID),
-		Uid:    fmt.Sprintf("%d", pipeline.ID),
-		Plan:   "",
-		Title:  pipeline.Name,
-		Stages: nil,
-	}
-
-	rolloutStageByID := make(map[int]*v1pb.Stage)
-	rolloutTaskByID := make(map[int]*v1pb.Task)
-
-	for _, stage := range stages {
-		rolloutStage, err := convertToStage(ctx, s, project, stage)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to convert stage, error: %v", err)
-		}
-		rollout.Stages = append(rollout.Stages, rolloutStage)
-		rolloutStageByID[stage.ID] = rolloutStage
-	}
-
-	for _, task := range tasks {
-		rolloutTask, err := convertToTask(ctx, s, project, task)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to convert task, error: %v", err)
-		}
-		rolloutTaskByID[task.ID] = rolloutTask
-
-		rolloutStage, ok := rolloutStageByID[task.StageID]
-		if !ok {
-			return nil, errors.Errorf("cannot find stage %d of task %d in pipeline %d", task.StageID, task.ID, task.PipelineID)
-		}
-		rolloutStage.Tasks = append(rolloutStage.Tasks, rolloutTask)
-	}
-
-	for _, task := range tasks {
-		rolloutTask, ok := rolloutTaskByID[task.ID]
-		if !ok {
-			return nil, errors.Errorf("cannot find task %d in pipeline %d", task.ID, task.PipelineID)
-		}
-		for _, blockingTask := range task.BlockedBy {
-			blockingRolloutTask, ok := rolloutTaskByID[blockingTask]
-			if !ok {
-				return nil, errors.Errorf("cannot find blocking task %d of task %d in pipeline %d", blockingTask, task.ID, task.PipelineID)
-			}
-			rolloutTask.BlockedByTasks = append(rolloutTask.BlockedByTasks, blockingRolloutTask.Name)
-		}
-	}
-
-	return rollout, nil
-}
-
-func convertToStage(ctx context.Context, s *store.Store, project *store.ProjectMessage, stage *store.StageMessage) (*v1pb.Stage, error) {
-	environment, err := s.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{
-		UID: &stage.EnvironmentID,
+	taskRuns, err := s.store.ListTaskRunsV2(ctx, &store.FindTaskRunMessage{
+		PipelineUID: &rolloutID,
+		StageUID:    maybeStageID,
+		TaskUID:     maybeTaskID,
 	})
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get environment %d", stage.EnvironmentID)
+		return nil, status.Errorf(codes.Internal, "failed to list task runs, error: %v", err)
 	}
-	if environment == nil {
-		return nil, errors.Errorf("environment %d not found", stage.EnvironmentID)
-	}
-	return &v1pb.Stage{
-		Name:        fmt.Sprintf("%s%s/%s%d/%s%d", projectNamePrefix, project.ResourceID, rolloutPrefix, stage.PipelineID, stagePrefix, stage.ID),
-		Uid:         fmt.Sprintf("%d", stage.ID),
-		Environment: fmt.Sprintf("%s%s", environmentNamePrefix, environment.ResourceID),
-		Title:       stage.Name,
-		Tasks:       nil,
+
+	return &v1pb.ListRolloutTaskRunsResponse{
+		TaskRuns:      convertToTaskRuns(taskRuns),
+		NextPageToken: "",
 	}, nil
+}
+
+func convertToTaskRuns(taskRuns []*store.TaskRunMessage) []*v1pb.TaskRun {
+	var taskRunsV1 []*v1pb.TaskRun
+	for _, taskRun := range taskRuns {
+		taskRunsV1 = append(taskRunsV1, convertToTaskRun(taskRun))
+	}
+	return taskRunsV1
+}
+
+func convertToTaskRunStatus(status api.TaskRunStatus) v1pb.TaskRun_Status {
+	switch status {
+	case api.TaskRunUnknown:
+		return v1pb.TaskRun_STATUS_UNSPECIFIED
+	case api.TaskRunRunning:
+		return v1pb.TaskRun_RUNNING
+	case api.TaskRunDone:
+		return v1pb.TaskRun_DONE
+	case api.TaskRunFailed:
+		return v1pb.TaskRun_FAILED
+	case api.TaskRunCanceled:
+		return v1pb.TaskRun_CANCELED
+	default:
+		return v1pb.TaskRun_STATUS_UNSPECIFIED
+	}
+}
+
+func convertToTaskRun(taskRun *store.TaskRunMessage) *v1pb.TaskRun {
+	return &v1pb.TaskRun{
+		Name:          fmt.Sprintf("%s%s/%s%d/%s%d/%s%d/%s%d", projectNamePrefix, taskRun.ProjectID, rolloutPrefix, taskRun.PipelineUID, stagePrefix, taskRun.StageUID, taskPrefix, taskRun.TaskUID, taskRunPrefix, taskRun.ID),
+		Uid:           fmt.Sprintf("%d", taskRun.ID),
+		Creator:       fmt.Sprintf("user:%s", taskRun.Creator.Email),
+		Updater:       fmt.Sprintf("user:%s", taskRun.Updater.Email),
+		CreateTime:    timestamppb.New(time.Unix(taskRun.CreatedTs, 0)),
+		UpdateTime:    timestamppb.New(time.Unix(taskRun.UpdatedTs, 0)),
+		Title:         taskRun.Name,
+		Status:        convertToTaskRunStatus(taskRun.Status),
+		Detail:        taskRun.ResultProto.Detail,
+		ChangeHistory: taskRun.ResultProto.ChangeHistory,
+		SchemaVersion: taskRun.ResultProto.Version,
+	}
+}
+
+func convertToRollout(ctx context.Context, s *store.Store, project *store.ProjectMessage, rollout *store.PipelineMessage) (*v1pb.Rollout, error) {
+	rolloutV1 := &v1pb.Rollout{
+		Name:   fmt.Sprintf("%s%s/%s%d", projectNamePrefix, project.ResourceID, rolloutPrefix, rollout.ID),
+		Uid:    fmt.Sprintf("%d", rollout.ID),
+		Plan:   "",
+		Title:  rollout.Name,
+		Stages: nil,
+	}
+	for _, stage := range rollout.Stages {
+		environment, err := s.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{
+			UID: &stage.EnvironmentID,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get environment %d", stage.EnvironmentID)
+		}
+		if environment == nil {
+			return nil, errors.Errorf("environment %d not found", stage.EnvironmentID)
+		}
+		rolloutStage := &v1pb.Stage{
+			Name:        fmt.Sprintf("%s%s/%s%d/%s%d", projectNamePrefix, project.ResourceID, rolloutPrefix, rollout.ID, stagePrefix, stage.ID),
+			Uid:         fmt.Sprintf("%d", stage.ID),
+			Environment: fmt.Sprintf("%s%s", environmentNamePrefix, environment.ResourceID),
+			Title:       stage.Name,
+		}
+		for _, task := range stage.TaskList {
+			rolloutTask, err := convertToTask(ctx, s, project, task)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to convert task, error: %v", err)
+			}
+			rolloutStage.Tasks = append(rolloutStage.Tasks, rolloutTask)
+		}
+
+		rolloutV1.Stages = append(rolloutV1.Stages, rolloutStage)
+	}
+	return rolloutV1, nil
 }
 
 func convertToTask(ctx context.Context, s *store.Store, project *store.ProjectMessage, task *store.TaskMessage) (*v1pb.Task, error) {
@@ -353,10 +517,6 @@ func convertToTaskFromDatabaseCreate(ctx context.Context, s *store.Store, projec
 	if err := json.Unmarshal([]byte(task.Payload), payload); err != nil {
 		return nil, errors.Wrapf(err, "failed to unmarshal task payload")
 	}
-	sheet, err := getResourceNameForSheet(ctx, s, payload.SheetID)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get sheet %d", payload.SheetID)
-	}
 	instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{
 		UID: &task.InstanceID,
 	})
@@ -377,7 +537,7 @@ func convertToTaskFromDatabaseCreate(ctx context.Context, s *store.Store, projec
 				Project:      "",
 				Database:     payload.DatabaseName,
 				Table:        payload.TableName,
-				Sheet:        sheet,
+				Sheet:        getResourceNameForSheet(project, payload.SheetID),
 				CharacterSet: payload.CharacterSet,
 				Collation:    payload.Collation,
 			},
@@ -428,20 +588,6 @@ func convertToTaskFromSchemaUpdate(ctx context.Context, s *store.Store, project 
 	if err := json.Unmarshal([]byte(task.Payload), payload); err != nil {
 		return nil, errors.Wrapf(err, "failed to unmarshal task payload")
 	}
-	sheet, err := s.GetSheet(ctx, &store.FindSheetMessage{UID: &payload.SheetID}, api.SystemBotID)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get sheet")
-	}
-	if sheet == nil {
-		return nil, errors.Errorf("sheet not found")
-	}
-	sheetProject, err := s.GetProjectV2(ctx, &store.FindProjectMessage{UID: &sheet.ProjectUID})
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get sheet project")
-	}
-	if sheetProject == nil {
-		return nil, errors.Errorf("sheet project not found")
-	}
 	database, err := s.GetDatabaseV2(ctx, &store.FindDatabaseMessage{UID: task.DatabaseID})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get database")
@@ -460,7 +606,7 @@ func convertToTaskFromSchemaUpdate(ctx context.Context, s *store.Store, project 
 		Target:         fmt.Sprintf("%s%s/%s%s", instanceNamePrefix, database.InstanceID, databaseIDPrefix, database.DatabaseName),
 		Payload: &v1pb.Task_DatabaseSchemaUpdate_{
 			DatabaseSchemaUpdate: &v1pb.Task_DatabaseSchemaUpdate{
-				Sheet:         fmt.Sprintf("%s%s/%s%d", projectNamePrefix, sheetProject.ResourceID, sheetIDPrefix, sheet.UID),
+				Sheet:         getResourceNameForSheet(project, payload.SheetID),
 				SchemaVersion: payload.SchemaVersion,
 			},
 		},
@@ -505,17 +651,9 @@ func convertToTaskFromDataUpdate(ctx context.Context, s *store.Store, project *s
 	if err := json.Unmarshal([]byte(task.Payload), payload); err != nil {
 		return nil, errors.Wrapf(err, "failed to unmarshal task payload")
 	}
-	sheetName, err := getResourceNameForSheet(ctx, s, payload.SheetID)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get sheet resource name")
-	}
 	var rollbackSheetName string
 	if payload.RollbackSheetID != 0 {
-		sheetName, err := getResourceNameForSheet(ctx, s, payload.RollbackSheetID)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get rollback sheet resource name")
-		}
-		rollbackSheetName = sheetName
+		rollbackSheetName = getResourceNameForSheet(project, payload.RollbackSheetID)
 	}
 	database, err := s.GetDatabaseV2(ctx, &store.FindDatabaseMessage{UID: task.DatabaseID})
 	if err != nil {
@@ -537,7 +675,7 @@ func convertToTaskFromDataUpdate(ctx context.Context, s *store.Store, project *s
 	}
 	v1pbTaskPayload := &v1pb.Task_DatabaseDataUpdate_{
 		DatabaseDataUpdate: &v1pb.Task_DatabaseDataUpdate{
-			Sheet:             sheetName,
+			Sheet:             getResourceNameForSheet(project, payload.SheetID),
 			SchemaVersion:     payload.SchemaVersion,
 			RollbackEnabled:   payload.RollbackEnabled,
 			RollbackSqlStatus: convertToRollbackSQLStatus(payload.RollbackSQLStatus),
@@ -969,13 +1107,13 @@ func validateSteps(_ []*v1pb.Plan_Step) error {
 	return nil
 }
 
-func (s *RolloutService) getPipelineCreate(ctx context.Context, steps []*v1pb.Plan_Step, project *store.ProjectMessage) (*api.PipelineCreate, error) {
+func (s *RolloutService) getPipelineCreate(ctx context.Context, steps []*storepb.PlanConfig_Step, project *store.ProjectMessage) (*store.PipelineMessage, error) {
 	// FIXME: handle deploymentConfig
-	pipelineCreate := &api.PipelineCreate{
+	pipelineCreate := &store.PipelineMessage{
 		Name: "Rollout Pipeline",
 	}
 	for _, step := range steps {
-		stageCreate := api.StageCreate{}
+		stageCreate := &store.StageMessage{}
 
 		var stageEnvironmentID string
 		registerEnvironmentID := func(environmentID string) error {
@@ -1011,12 +1149,12 @@ func (s *RolloutService) getPipelineCreate(ctx context.Context, steps []*v1pb.Pl
 		stageCreate.EnvironmentID = environment.UID
 		stageCreate.Name = fmt.Sprintf("%s Stage", environment.Title)
 
-		pipelineCreate.StageList = append(pipelineCreate.StageList, stageCreate)
+		pipelineCreate.Stages = append(pipelineCreate.Stages, stageCreate)
 	}
 	return pipelineCreate, nil
 }
 
-func (s *RolloutService) getTaskCreatesFromSpec(ctx context.Context, spec *v1pb.Plan_Spec, project *store.ProjectMessage, registerEnvironmentID func(string) error) ([]api.TaskCreate, []api.TaskIndexDAG, error) {
+func (s *RolloutService) getTaskCreatesFromSpec(ctx context.Context, spec *storepb.PlanConfig_Spec, project *store.ProjectMessage, registerEnvironmentID func(string) error) ([]*store.TaskMessage, []store.TaskIndexDAG, error) {
 	if s.licenseService.IsFeatureEnabled(api.FeatureTaskScheduleTime) != nil {
 		if spec.EarliestAllowedTime != nil && !spec.EarliestAllowedTime.AsTime().IsZero() {
 			return nil, nil, errors.Errorf(api.FeatureTaskScheduleTime.AccessErrorMessage())
@@ -1024,18 +1162,18 @@ func (s *RolloutService) getTaskCreatesFromSpec(ctx context.Context, spec *v1pb.
 	}
 
 	switch config := spec.Config.(type) {
-	case *v1pb.Plan_Spec_CreateDatabaseConfig:
+	case *storepb.PlanConfig_Spec_CreateDatabaseConfig:
 		return getTaskCreatesFromCreateDatabaseConfig(ctx, s.store, s.licenseService, s.dbFactory, spec, config.CreateDatabaseConfig, project, registerEnvironmentID)
-	case *v1pb.Plan_Spec_ChangeDatabaseConfig:
+	case *storepb.PlanConfig_Spec_ChangeDatabaseConfig:
 		return getTaskCreatesFromChangeDatabaseConfig(ctx, s.store, spec, config.ChangeDatabaseConfig, project, registerEnvironmentID)
-	case *v1pb.Plan_Spec_RestoreDatabaseConfig:
+	case *storepb.PlanConfig_Spec_RestoreDatabaseConfig:
 		return getTaskCreatesFromRestoreDatabaseConfig(ctx, s.store, s.licenseService, s.dbFactory, spec, config.RestoreDatabaseConfig, project, registerEnvironmentID)
 	}
 
 	return nil, nil, errors.Errorf("invalid spec config type %T", spec.Config)
 }
 
-func getTaskCreatesFromCreateDatabaseConfig(ctx context.Context, s *store.Store, licenseService enterpriseAPI.LicenseService, dbFactory *dbfactory.DBFactory, spec *v1pb.Plan_Spec, c *v1pb.Plan_CreateDatabaseConfig, project *store.ProjectMessage, registerEnvironmentID func(string) error) ([]api.TaskCreate, []api.TaskIndexDAG, error) {
+func getTaskCreatesFromCreateDatabaseConfig(ctx context.Context, s *store.Store, licenseService enterpriseAPI.LicenseService, dbFactory *dbfactory.DBFactory, spec *storepb.PlanConfig_Spec, c *storepb.PlanConfig_CreateDatabaseConfig, project *store.ProjectMessage, registerEnvironmentID func(string) error) ([]*store.TaskMessage, []store.TaskIndexDAG, error) {
 	if c.Database == "" {
 		return nil, nil, errors.Errorf("database name is required")
 	}
@@ -1069,7 +1207,7 @@ func getTaskCreatesFromCreateDatabaseConfig(ctx context.Context, s *store.Store,
 		return nil, nil, errors.Errorf("collection name is required for MongoDB")
 	}
 
-	taskCreates, err := func() ([]api.TaskCreate, error) {
+	taskCreates, err := func() ([]*store.TaskMessage, error) {
 		if err := checkCharacterSetCollationOwner(instance.Engine, c.CharacterSet, c.Collation, c.Owner); err != nil {
 			return nil, err
 		}
@@ -1161,7 +1299,7 @@ func getTaskCreatesFromCreateDatabaseConfig(ctx context.Context, s *store.Store,
 			return nil, errors.Wrap(err, "failed to create database creation task, unable to marshal payload")
 		}
 
-		return []api.TaskCreate{
+		return []*store.TaskMessage{
 			{
 				InstanceID:        instance.UID,
 				DatabaseID:        nil,
@@ -1182,7 +1320,7 @@ func getTaskCreatesFromCreateDatabaseConfig(ctx context.Context, s *store.Store,
 	return taskCreates, nil, nil
 }
 
-func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store, spec *v1pb.Plan_Spec, c *v1pb.Plan_ChangeDatabaseConfig, _ *store.ProjectMessage, registerEnvironmentID func(string) error) ([]api.TaskCreate, []api.TaskIndexDAG, error) {
+func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store, spec *storepb.PlanConfig_Spec, c *storepb.PlanConfig_ChangeDatabaseConfig, _ *store.ProjectMessage, registerEnvironmentID func(string) error) ([]*store.TaskMessage, []store.TaskIndexDAG, error) {
 	// possible target:
 	// 1. instances/{instance}/databases/{database}
 	instanceID, databaseName, err := getInstanceDatabaseID(c.Target)
@@ -1214,7 +1352,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 	}
 
 	switch c.Type {
-	case v1pb.Plan_ChangeDatabaseConfig_BASELINE:
+	case storepb.PlanConfig_ChangeDatabaseConfig_BASELINE:
 		payload := api.TaskDatabaseSchemaBaselinePayload{
 			SpecID:        spec.Id,
 			SchemaVersion: c.SchemaVersion,
@@ -1224,7 +1362,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			return nil, nil, errors.Wrapf(err, "failed to marshal task database schema baseline payload")
 		}
 		payloadString := string(bytes)
-		taskCreate := api.TaskCreate{
+		taskCreate := &store.TaskMessage{
 			Name:              fmt.Sprintf("Establish baseline for database %q", database.DatabaseName),
 			InstanceID:        instance.UID,
 			DatabaseID:        &database.UID,
@@ -1233,9 +1371,9 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			EarliestAllowedTs: spec.EarliestAllowedTime.GetSeconds(),
 			Payload:           payloadString,
 		}
-		return []api.TaskCreate{taskCreate}, nil, nil
+		return []*store.TaskMessage{taskCreate}, nil, nil
 
-	case v1pb.Plan_ChangeDatabaseConfig_MIGRATE:
+	case storepb.PlanConfig_ChangeDatabaseConfig_MIGRATE:
 		_, sheetIDStr, err := getProjectResourceIDSheetID(c.Sheet)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to get sheet id from sheet %q", c.Sheet)
@@ -1243,13 +1381,6 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 		sheetID, err := strconv.Atoi(sheetIDStr)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to convert sheet id %q to int", sheetIDStr)
-		}
-		sheet, err := s.GetSheet(ctx, &store.FindSheetMessage{UID: &sheetID}, api.SystemBotID)
-		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to get sheet %q", sheetID)
-		}
-		if sheet == nil {
-			return nil, nil, errors.Errorf("sheet %q not found", sheetID)
 		}
 		payload := api.TaskDatabaseSchemaUpdatePayload{
 			SpecID:        spec.Id,
@@ -1262,7 +1393,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			return nil, nil, errors.Wrapf(err, "failed to marshal task database schema update payload")
 		}
 		payloadString := string(bytes)
-		taskCreate := api.TaskCreate{
+		taskCreate := &store.TaskMessage{
 			Name:              fmt.Sprintf("DDL(schema) for database %q", database.DatabaseName),
 			InstanceID:        instance.UID,
 			DatabaseID:        &database.UID,
@@ -1271,9 +1402,9 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			EarliestAllowedTs: spec.EarliestAllowedTime.GetSeconds(),
 			Payload:           payloadString,
 		}
-		return []api.TaskCreate{taskCreate}, nil, nil
+		return []*store.TaskMessage{taskCreate}, nil, nil
 
-	case v1pb.Plan_ChangeDatabaseConfig_MIGRATE_SDL:
+	case storepb.PlanConfig_ChangeDatabaseConfig_MIGRATE_SDL:
 		_, sheetIDStr, err := getProjectResourceIDSheetID(c.Sheet)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to get sheet id from sheet %q", c.Sheet)
@@ -1281,13 +1412,6 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 		sheetID, err := strconv.Atoi(sheetIDStr)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to convert sheet id %q to int", sheetIDStr)
-		}
-		sheet, err := s.GetSheet(ctx, &store.FindSheetMessage{UID: &sheetID}, api.SystemBotID)
-		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to get sheet %q", sheetID)
-		}
-		if sheet == nil {
-			return nil, nil, errors.Errorf("sheet %q not found", sheetID)
 		}
 		payload := api.TaskDatabaseSchemaUpdateSDLPayload{
 			SheetID:       sheetID,
@@ -1299,7 +1423,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			return nil, nil, errors.Wrapf(err, "failed to marshal database schema update SDL payload")
 		}
 		payloadString := string(bytes)
-		taskCreate := api.TaskCreate{
+		taskCreate := &store.TaskMessage{
 			Name:              fmt.Sprintf("SDL for database %q", database.DatabaseName),
 			InstanceID:        instance.UID,
 			DatabaseID:        &database.UID,
@@ -1308,9 +1432,9 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			EarliestAllowedTs: spec.EarliestAllowedTime.GetSeconds(),
 			Payload:           payloadString,
 		}
-		return []api.TaskCreate{taskCreate}, nil, nil
+		return []*store.TaskMessage{taskCreate}, nil, nil
 
-	case v1pb.Plan_ChangeDatabaseConfig_MIGRATE_GHOST:
+	case storepb.PlanConfig_ChangeDatabaseConfig_MIGRATE_GHOST:
 		_, sheetIDStr, err := getProjectResourceIDSheetID(c.Sheet)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to get sheet id from sheet %q", c.Sheet)
@@ -1319,14 +1443,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to convert sheet id %q to int", sheetIDStr)
 		}
-		sheet, err := s.GetSheet(ctx, &store.FindSheetMessage{UID: &sheetID}, api.SystemBotID)
-		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to get sheet %q", sheetID)
-		}
-		if sheet == nil {
-			return nil, nil, errors.Errorf("sheet %q not found", sheetID)
-		}
-		var taskCreateList []api.TaskCreate
+		var taskCreateList []*store.TaskMessage
 		// task "sync"
 		payloadSync := api.TaskDatabaseSchemaUpdateGhostSyncPayload{
 			SpecID:        spec.Id,
@@ -1338,7 +1455,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to marshal database schema update gh-ost sync payload")
 		}
-		taskCreateList = append(taskCreateList, api.TaskCreate{
+		taskCreateList = append(taskCreateList, &store.TaskMessage{
 			Name:              fmt.Sprintf("Update schema gh-ost sync for database %q", database.DatabaseName),
 			InstanceID:        instance.UID,
 			DatabaseID:        &database.UID,
@@ -1356,7 +1473,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to marshal database schema update ghost cutover payload")
 		}
-		taskCreateList = append(taskCreateList, api.TaskCreate{
+		taskCreateList = append(taskCreateList, &store.TaskMessage{
 			Name:              fmt.Sprintf("Update schema gh-ost cutover for database %q", database.DatabaseName),
 			InstanceID:        instance.UID,
 			DatabaseID:        &database.UID,
@@ -1368,12 +1485,12 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 
 		// The below list means that taskCreateList[0] blocks taskCreateList[1].
 		// In other words, task "sync" blocks task "cutover".
-		taskIndexDAGList := []api.TaskIndexDAG{
+		taskIndexDAGList := []store.TaskIndexDAG{
 			{FromIndex: 0, ToIndex: 1},
 		}
 		return taskCreateList, taskIndexDAGList, nil
 
-	case v1pb.Plan_ChangeDatabaseConfig_DATA:
+	case storepb.PlanConfig_ChangeDatabaseConfig_DATA:
 		_, sheetIDStr, err := getProjectResourceIDSheetID(c.Sheet)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to get sheet id from sheet %q", c.Sheet)
@@ -1381,13 +1498,6 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 		sheetID, err := strconv.Atoi(sheetIDStr)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to convert sheet id %q to int", sheetIDStr)
-		}
-		sheet, err := s.GetSheet(ctx, &store.FindSheetMessage{UID: &sheetID}, api.SystemBotID)
-		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to get sheet %q", sheetID)
-		}
-		if sheet == nil {
-			return nil, nil, errors.Errorf("sheet %q not found", sheetID)
 		}
 		payload := api.TaskDatabaseDataUpdatePayload{
 			SheetID:           sheetID,
@@ -1413,7 +1523,7 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			return nil, nil, errors.Wrapf(err, "Failed to marshal database data update payload")
 		}
 		payloadString := string(bytes)
-		taskCreate := api.TaskCreate{
+		taskCreate := &store.TaskMessage{
 			Name:              fmt.Sprintf("DML(data) for database %q", database.DatabaseName),
 			InstanceID:        instance.UID,
 			DatabaseID:        &database.UID,
@@ -1422,13 +1532,13 @@ func getTaskCreatesFromChangeDatabaseConfig(ctx context.Context, s *store.Store,
 			EarliestAllowedTs: spec.EarliestAllowedTime.GetSeconds(),
 			Payload:           payloadString,
 		}
-		return []api.TaskCreate{taskCreate}, nil, nil
+		return []*store.TaskMessage{taskCreate}, nil, nil
 	default:
 		return nil, nil, errors.Errorf("unsupported change database config type %q", c.Type)
 	}
 }
 
-func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store, licenseService enterpriseAPI.LicenseService, dbFactory *dbfactory.DBFactory, spec *v1pb.Plan_Spec, c *v1pb.Plan_RestoreDatabaseConfig, project *store.ProjectMessage, registerEnvironmentID func(string) error) ([]api.TaskCreate, []api.TaskIndexDAG, error) {
+func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store, licenseService enterpriseAPI.LicenseService, dbFactory *dbfactory.DBFactory, spec *storepb.PlanConfig_Spec, c *storepb.PlanConfig_RestoreDatabaseConfig, project *store.ProjectMessage, registerEnvironmentID func(string) error) ([]*store.TaskMessage, []store.TaskIndexDAG, error) {
 	if c.Source == nil {
 		return nil, nil, errors.Errorf("missing source in restore database config")
 	}
@@ -1461,7 +1571,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 		return nil, nil, err
 	}
 
-	var taskCreates []api.TaskCreate
+	var taskCreates []*store.TaskMessage
 
 	if c.CreateDatabaseConfig != nil {
 		restorePayload := api.TaskDatabasePITRRestorePayload{
@@ -1489,7 +1599,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 
 		// task 2: restore the database
 		switch source := c.Source.(type) {
-		case *v1pb.Plan_RestoreDatabaseConfig_Backup:
+		case *storepb.PlanConfig_RestoreDatabaseConfig_Backup:
 			backupInstanceID, backupDatabaseName, backupName, err := getInstanceDatabaseIDBackupName(source.Backup)
 			if err != nil {
 				return nil, nil, errors.Wrapf(err, "failed to parse backup name %q", source.Backup)
@@ -1515,7 +1625,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 				return nil, nil, errors.Errorf("failed to find backup %q", backupName)
 			}
 			restorePayload.BackupID = &backup.UID
-		case *v1pb.Plan_RestoreDatabaseConfig_PointInTime:
+		case *storepb.PlanConfig_RestoreDatabaseConfig_PointInTime:
 			ts := source.PointInTime.GetSeconds()
 			restorePayload.PointInTimeTs = &ts
 		}
@@ -1527,7 +1637,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 			return nil, nil, errors.Wrap(err, "failed to create PITR restore task, unable to marshal payload")
 		}
 
-		restoreTaskCreate := api.TaskCreate{
+		restoreTaskCreate := &store.TaskMessage{
 			Name:       fmt.Sprintf("Restore to new database %q", *restorePayload.DatabaseName),
 			Status:     api.TaskPendingApproval,
 			Type:       api.TaskDatabaseRestorePITRRestore,
@@ -1544,7 +1654,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 			ProjectID: project.UID,
 		}
 		switch source := c.Source.(type) {
-		case *v1pb.Plan_RestoreDatabaseConfig_Backup:
+		case *storepb.PlanConfig_RestoreDatabaseConfig_Backup:
 			backupInstanceID, backupDatabaseName, backupName, err := getInstanceDatabaseIDBackupName(source.Backup)
 			if err != nil {
 				return nil, nil, errors.Wrapf(err, "failed to parse backup name %q", source.Backup)
@@ -1570,7 +1680,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 				return nil, nil, errors.Errorf("failed to find backup %q", backupName)
 			}
 			restorePayload.BackupID = &backup.UID
-		case *v1pb.Plan_RestoreDatabaseConfig_PointInTime:
+		case *storepb.PlanConfig_RestoreDatabaseConfig_PointInTime:
 			ts := source.PointInTime.GetSeconds()
 			restorePayload.PointInTimeTs = &ts
 		}
@@ -1579,7 +1689,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 			return nil, nil, errors.Wrap(err, "failed to create PITR restore task, unable to marshal payload")
 		}
 
-		restoreTaskCreate := api.TaskCreate{
+		restoreTaskCreate := &store.TaskMessage{
 			Name:       fmt.Sprintf("Restore to PITR database %q", database.DatabaseName),
 			Status:     api.TaskPendingApproval,
 			Type:       api.TaskDatabaseRestorePITRRestore,
@@ -1596,7 +1706,7 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "failed to create PITR cutover task, unable to marshal payload")
 		}
-		taskCreates = append(taskCreates, api.TaskCreate{
+		taskCreates = append(taskCreates, &store.TaskMessage{
 			Name:       fmt.Sprintf("Swap PITR and the original database %q", database.DatabaseName),
 			InstanceID: instance.UID,
 			DatabaseID: &database.UID,
@@ -1607,13 +1717,21 @@ func getTaskCreatesFromRestoreDatabaseConfig(ctx context.Context, s *store.Store
 	}
 
 	// We make sure that we will always return 2 tasks.
-	taskIndexDAGs := []api.TaskIndexDAG{
+	taskIndexDAGs := []store.TaskIndexDAG{
 		{
 			FromIndex: 0,
 			ToIndex:   1,
 		},
 	}
 	return taskCreates, taskIndexDAGs, nil
+}
+
+func convertToPlans(plans []*store.PlanMessage) []*v1pb.Plan {
+	v1Plans := make([]*v1pb.Plan, len(plans))
+	for i := range plans {
+		v1Plans[i] = convertToPlan(plans[i])
+	}
+	return v1Plans
 }
 
 func convertToPlan(plan *store.PlanMessage) *v1pb.Plan {
@@ -1941,7 +2059,7 @@ func convertDatabaseLabels(labelsMap map[string]string) (string, error) {
 	return string(labelsJSON), nil
 }
 
-func getCreateDatabaseStatement(dbType db.Type, c *v1pb.Plan_CreateDatabaseConfig, databaseName, adminDatasourceUser string) (string, error) {
+func getCreateDatabaseStatement(dbType db.Type, c *storepb.PlanConfig_CreateDatabaseConfig, databaseName, adminDatasourceUser string) (string, error) {
 	var stmt string
 	switch dbType {
 	case db.MySQL, db.TiDB, db.MariaDB, db.OceanBase:
@@ -2007,14 +2125,17 @@ func getCreateDatabaseStatement(dbType db.Type, c *v1pb.Plan_CreateDatabaseConfi
 	return "", errors.Errorf("unsupported database type %s", dbType)
 }
 
-func (s *RolloutService) createPipeline(ctx context.Context, creatorID int, pipelineCreate *api.PipelineCreate) (*store.PipelineMessage, error) {
-	pipelineCreated, err := s.store.CreatePipelineV2(ctx, &store.PipelineMessage{Name: pipelineCreate.Name}, creatorID)
+func (s *RolloutService) createPipeline(ctx context.Context, project *store.ProjectMessage, pipelineCreate *store.PipelineMessage, creatorID int) (*store.PipelineMessage, error) {
+	pipelineCreated, err := s.store.CreatePipelineV2(ctx, &store.PipelineMessage{
+		Name:      pipelineCreate.Name,
+		ProjectID: project.ResourceID,
+	}, creatorID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create pipeline for issue")
 	}
 
 	var stageCreates []*store.StageMessage
-	for _, stage := range pipelineCreate.StageList {
+	for _, stage := range pipelineCreate.Stages {
 		stageCreates = append(stageCreates, &store.StageMessage{
 			Name:          stage.Name,
 			EnvironmentID: stage.EnvironmentID,
@@ -2029,16 +2150,16 @@ func (s *RolloutService) createPipeline(ctx context.Context, creatorID int, pipe
 		return nil, errors.Errorf("failed to create stages, expect to have created %d stages, got %d", len(stageCreates), len(createdStages))
 	}
 
-	for i, stageCreate := range pipelineCreate.StageList {
+	for i, stageCreate := range pipelineCreate.Stages {
 		createdStage := createdStages[i]
 
-		var taskCreateList []*api.TaskCreate
+		var taskCreateList []*store.TaskMessage
 		for _, taskCreate := range stageCreate.TaskList {
 			c := taskCreate
 			c.CreatorID = creatorID
 			c.PipelineID = pipelineCreated.ID
 			c.StageID = createdStage.ID
-			taskCreateList = append(taskCreateList, &c)
+			taskCreateList = append(taskCreateList, c)
 		}
 		tasks, err := s.store.CreateTasksV2(ctx, taskCreateList...)
 		if err != nil {
@@ -2059,20 +2180,6 @@ func (s *RolloutService) createPipeline(ctx context.Context, creatorID int, pipe
 	return pipelineCreated, nil
 }
 
-func getResourceNameForSheet(ctx context.Context, s *store.Store, sheetUID int) (string, error) {
-	sheet, err := s.GetSheet(ctx, &store.FindSheetMessage{UID: &sheetUID}, api.SystemBotID)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to get sheet")
-	}
-	if sheet == nil {
-		return "", errors.Errorf("sheet not found")
-	}
-	sheetProject, err := s.GetProjectV2(ctx, &store.FindProjectMessage{UID: &sheet.ProjectUID})
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to get sheet project")
-	}
-	if sheetProject == nil {
-		return "", errors.Errorf("sheet project not found")
-	}
-	return fmt.Sprintf("%s%s/%s%d", projectNamePrefix, sheetProject.ResourceID, sheetIDPrefix, sheet.UID), nil
+func getResourceNameForSheet(project *store.ProjectMessage, sheetUID int) string {
+	return fmt.Sprintf("%s%s/%s%d", projectNamePrefix, project.ResourceID, sheetIDPrefix, sheetUID)
 }

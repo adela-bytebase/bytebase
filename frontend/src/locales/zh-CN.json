@@ -567,7 +567,9 @@
       "description": "配置审批流来控制数据的查询和导出。{link}",
       "skip-approval": "跳过人工审批",
       "query-data": "数据查询",
-      "export-data": "数据导出"
+      "export-data": "数据导出",
+      "disallowed": "禁止",
+      "copy-data-from-sql-editor": "从 SQL 编辑器复制数据"
     },
     "release": {
       "new-version-available": "有新版本可更新",
@@ -969,7 +971,13 @@
     "create-gcp-credentials": "创建凭据的方法见",
     "used-for-testing-connection": "仅作测试连接用",
     "all": "所有实例",
-    "force-archive-description": "强制归档。所有关联的工单都将被解决，所有关联的工作表都将被删除。"
+    "force-archive-description": "强制归档。所有关联的工单都将被解决，所有关联的工作表都将被删除。",
+    "sync-mode": {
+      "self": "同步模式",
+      "sync-self": "同步自身",
+      "sync-all": "同步自身和所有包含的数据库（CDB + PDB）",
+      "description": "Bytebase 会同步连接数据库及其所有包含的数据库。仅适用于Oracle 12c。"
+    }
   },
   "environment": {
     "id": "环境 ID",
@@ -1282,8 +1290,10 @@
       "errors": {
         "select-target-project": "选择目标项目",
         "select-at-least-one-database": "至少选择一个数据库"
-      }
-    }
+      },
+      "select-target-project": "选择目标项目"
+    },
+    "transfer-database-from-to": "将数据库从源项目转移到目标项目"
   },
   "repository": {
     "branch-observe-file-change": "Bytebase 跟踪文件变更的分支。",
@@ -1573,12 +1583,14 @@
           "github-application-id-error": "应用 ID 必须是 20 个字母长度",
           "github-secret-error": "Secret 必须是 40 个字母长度",
           "bitbucket-application-id-error": "应用 ID 必须是 18 个字母长度",
-          "bitbucket-secret-error": "Secret 必须是 32 个字母长度"
+          "bitbucket-secret-error": "Secret 必须是 32 个字母长度",
+          "github-enterprise-login-as-admin": "以组织管理员身份登录您部署的 GitHub Enterprise 站点。这个账号必须是 GitHub 组织的管理员 (能够进入组织 Settings 页面)。"
         },
         "confirm": {
           "confirm-info": "确认信息",
           "confirm-description": "创建完成后，这个 Git 供应方将出现在项目面板「GitOps」Tab 下，可以被项目所有者选中。"
-        }
+        },
+        "github-self-host-ee": "自托管 GitHub 企业版 (EE)"
       },
       "git-provider": {
         "gitlab-self-host-application-id-label": "注册为 GitLab 实例级 OAuth 应用的应用 ID。",
@@ -1789,6 +1801,7 @@
       "drop": "删除",
       "restore": "恢复",
       "add-column": "添加列",
+      "add-from-template": "从模板添加",
       "drop-column": "删除列",
       "sql-preview": "预览 SQL",
       "reset": "重置",
@@ -1887,7 +1900,7 @@
       "subscription-page": "订阅页面",
       "subscription": "可以在{page}查看我们的订阅方案及付费功能。"
     },
-    "description": "您可以在这里上传您购买的 Bytebase 证书来解锁团队版/企业版功能。",
+    "description": "您可以在这里上传您购买的 Bytebase 证书来解锁专业版/企业版功能。",
     "upload-license": "上传证书",
     "upgrade-trial-button": "升级试用",
     "start-n-days-trial": "开启 {days} 天试用 (无需信用卡)",
@@ -2074,6 +2087,10 @@
       "bb-feature-disallow-signup": {
         "title": "禁用自助注册",
         "desc": "禁用之后，新用户将无法自助注册，只能通过管理员邀请来创建账户。"
+      },
+      "bb-feature-schema-template": {
+        "title": "Schema 模板",
+        "desc": "预定义 Schema 模板，之后可以在变更或设计 Schema 时应用这些模板。"
       }
     },
     "feature-require-subscription": "{feature} 需要 {requiredPlan}。"
@@ -2569,6 +2586,20 @@
     "no-log-placeholder": {
       "admin": "点击「配置」按钮从数据库实例上抓取慢查询日志或点击「立即同步」按钮立即同步慢查询日志",
       "developer": "点击「立即同步」按钮立即同步慢查询日志或联系工作空间所有者或 DBA 配置慢查询功能"
+    }
+  },
+  "schema-template": {
+    "self": "Schema 模板",
+    "field-template": "字段模板",
+    "add-field": "新增字段模板",
+    "description": "预定义 Schema 模板，之后可以在变更或设计 Schema 时应用这些模板。",
+    "search-by-name-or-comment": "根据名称或备注搜索",
+    "form": {
+      "column-name": "字段名",
+      "column-type": "字段类型",
+      "default-value": "默认值",
+      "comment": "备注",
+      "nullable": "可为空"
     }
   },
   "principal": {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"regexp"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -255,7 +256,7 @@ func (s *AuthService) UpdateUser(ctx context.Context, request *v1pb.UpdateUserRe
 		return nil, status.Errorf(codes.NotFound, "user %d not found", userID)
 	}
 	if user.MemberDeleted {
-		return nil, status.Errorf(codes.InvalidArgument, "user %q has been deleted", userID)
+		return nil, status.Errorf(codes.NotFound, "user %q has been deleted", userID)
 	}
 
 	role := ctx.Value(common.RoleContextKey).(api.Role)
@@ -414,7 +415,7 @@ func (s *AuthService) DeleteUser(ctx context.Context, request *v1pb.DeleteUserRe
 		return nil, status.Errorf(codes.NotFound, "user %d not found", userID)
 	}
 	if user.MemberDeleted {
-		return nil, status.Errorf(codes.InvalidArgument, "user %q has been deleted", userID)
+		return nil, status.Errorf(codes.NotFound, "user %q has been deleted", userID)
 	}
 
 	role := ctx.Value(common.RoleContextKey).(api.Role)
@@ -745,8 +746,9 @@ func (s *AuthService) getOrCreateUserWithIDP(ctx context.Context, request *v1pb.
 	var email string
 	if fieldMapping.Identifier == fieldMapping.Email {
 		email = strings.ToLower(userInfo.Email)
-	} else {
-		email = strings.ToLower(fmt.Sprintf("%s@%s", userInfo.Identifier, idp.Domain))
+	} else if idp.Domain != "" {
+		domain := extractDomain(idp.Domain)
+		email = strings.ToLower(fmt.Sprintf("%s@%s", userInfo.Identifier, domain))
 	}
 	if email == "" {
 		return nil, status.Errorf(codes.NotFound, "unable to identify the user by provider user info")
@@ -837,6 +839,23 @@ func validatePhone(phone string) error {
 		return errors.New("invalid phone number")
 	}
 	return nil
+}
+
+func extractDomain(input string) string {
+	pattern := `[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+`
+	regExp, err := regexp.Compile(pattern)
+	if err != nil {
+		// WHen the pattern is invalid, we just return the input.
+		return input
+	}
+
+	match := regExp.FindString(input)
+	domainParts := strings.Split(match, ".")
+	// If the domain has at least 3 parts, we will remove the first part.
+	if len(domainParts) >= 3 {
+		match = strings.Join(domainParts[1:], ".")
+	}
+	return match
 }
 
 const (

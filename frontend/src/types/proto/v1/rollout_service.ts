@@ -56,7 +56,7 @@ export interface CreatePlanRequest {
    */
   parent: string;
   /** The plan to create. */
-  plan?: Plan;
+  plan?: Plan | undefined;
 }
 
 export interface UpdatePlanRequest {
@@ -66,9 +66,11 @@ export interface UpdatePlanRequest {
    * The plan's `name` field is used to identify the plan to update.
    * Format: projects/{project}/plans/{plan}
    */
-  plan?: Plan;
+  plan?:
+    | Plan
+    | undefined;
   /** The list of fields to update. */
-  updateMask?: string[];
+  updateMask?: string[] | undefined;
 }
 
 export interface Plan {
@@ -97,7 +99,9 @@ export interface Plan_Step {
 
 export interface Plan_Spec {
   /** earliest_allowed_time the earliest execution time of the change. */
-  earliestAllowedTime?: Date;
+  earliestAllowedTime?:
+    | Date
+    | undefined;
   /** A UUID4 string that uniquely identifies the Spec. */
   id: string;
   createDatabaseConfig?: Plan_CreateDatabaseConfig | undefined;
@@ -553,6 +557,16 @@ export interface GetRolloutRequest {
   name: string;
 }
 
+export interface CreateRolloutRequest {
+  /**
+   * The parent project where this rollout will be created.
+   * Format: projects/{project}
+   */
+  parent: string;
+  /** The plan used to create rollout. */
+  plan: string;
+}
+
 export interface PreviewRolloutRequest {
   /**
    * The name of the project.
@@ -560,7 +574,41 @@ export interface PreviewRolloutRequest {
    */
   project: string;
   /** The plan used to preview rollout. */
-  plan?: Plan;
+  plan?: Plan | undefined;
+}
+
+export interface ListRolloutTaskRunsRequest {
+  /**
+   * The parent, which owns this collection of plans.
+   * Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task}
+   * Use "projects/{project}/rollouts/{rollout}/stages/-/tasks/-" to list all taskRuns from a rollout.
+   */
+  parent: string;
+  /**
+   * The maximum number of taskRuns to return. The service may return fewer than
+   * this value.
+   * If unspecified, at most 50 taskRuns will be returned.
+   * The maximum value is 1000; values above 1000 will be coerced to 1000.
+   */
+  pageSize: number;
+  /**
+   * A page token, received from a previous `ListRolloutTaskRuns` call.
+   * Provide this to retrieve the subsequent page.
+   *
+   * When paginating, all other parameters provided to `ListRolloutTaskRuns` must match
+   * the call that provided the page token.
+   */
+  pageToken: string;
+}
+
+export interface ListRolloutTaskRunsResponse {
+  /** The taskRuns from the specified request. */
+  taskRuns: TaskRun[];
+  /**
+   * A token, which can be sent as `page_token` to retrieve the next page.
+   * If this field is omitted, there are no subsequent pages.
+   */
+  nextPageToken: string;
 }
 
 export interface Rollout {
@@ -943,8 +991,8 @@ export interface TaskRun {
   creator: string;
   /** Format: user:hello@world.com */
   updater: string;
-  createTime?: Date;
-  updateTime?: Date;
+  createTime?: Date | undefined;
+  updateTime?: Date | undefined;
   title: string;
   status: TaskRun_Status;
   /** Below are the results of a task run. */
@@ -2768,6 +2816,77 @@ export const GetRolloutRequest = {
   },
 };
 
+function createBaseCreateRolloutRequest(): CreateRolloutRequest {
+  return { parent: "", plan: "" };
+}
+
+export const CreateRolloutRequest = {
+  encode(message: CreateRolloutRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.parent !== "") {
+      writer.uint32(10).string(message.parent);
+    }
+    if (message.plan !== "") {
+      writer.uint32(18).string(message.plan);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): CreateRolloutRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateRolloutRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parent = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.plan = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateRolloutRequest {
+    return {
+      parent: isSet(object.parent) ? String(object.parent) : "",
+      plan: isSet(object.plan) ? String(object.plan) : "",
+    };
+  },
+
+  toJSON(message: CreateRolloutRequest): unknown {
+    const obj: any = {};
+    message.parent !== undefined && (obj.parent = message.parent);
+    message.plan !== undefined && (obj.plan = message.plan);
+    return obj;
+  },
+
+  create(base?: DeepPartial<CreateRolloutRequest>): CreateRolloutRequest {
+    return CreateRolloutRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<CreateRolloutRequest>): CreateRolloutRequest {
+    const message = createBaseCreateRolloutRequest();
+    message.parent = object.parent ?? "";
+    message.plan = object.plan ?? "";
+    return message;
+  },
+};
+
 function createBasePreviewRolloutRequest(): PreviewRolloutRequest {
   return { project: "", plan: undefined };
 }
@@ -2835,6 +2954,165 @@ export const PreviewRolloutRequest = {
     const message = createBasePreviewRolloutRequest();
     message.project = object.project ?? "";
     message.plan = (object.plan !== undefined && object.plan !== null) ? Plan.fromPartial(object.plan) : undefined;
+    return message;
+  },
+};
+
+function createBaseListRolloutTaskRunsRequest(): ListRolloutTaskRunsRequest {
+  return { parent: "", pageSize: 0, pageToken: "" };
+}
+
+export const ListRolloutTaskRunsRequest = {
+  encode(message: ListRolloutTaskRunsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.parent !== "") {
+      writer.uint32(10).string(message.parent);
+    }
+    if (message.pageSize !== 0) {
+      writer.uint32(16).int32(message.pageSize);
+    }
+    if (message.pageToken !== "") {
+      writer.uint32(26).string(message.pageToken);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ListRolloutTaskRunsRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListRolloutTaskRunsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parent = reader.string();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.pageSize = reader.int32();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.pageToken = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListRolloutTaskRunsRequest {
+    return {
+      parent: isSet(object.parent) ? String(object.parent) : "",
+      pageSize: isSet(object.pageSize) ? Number(object.pageSize) : 0,
+      pageToken: isSet(object.pageToken) ? String(object.pageToken) : "",
+    };
+  },
+
+  toJSON(message: ListRolloutTaskRunsRequest): unknown {
+    const obj: any = {};
+    message.parent !== undefined && (obj.parent = message.parent);
+    message.pageSize !== undefined && (obj.pageSize = Math.round(message.pageSize));
+    message.pageToken !== undefined && (obj.pageToken = message.pageToken);
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListRolloutTaskRunsRequest>): ListRolloutTaskRunsRequest {
+    return ListRolloutTaskRunsRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<ListRolloutTaskRunsRequest>): ListRolloutTaskRunsRequest {
+    const message = createBaseListRolloutTaskRunsRequest();
+    message.parent = object.parent ?? "";
+    message.pageSize = object.pageSize ?? 0;
+    message.pageToken = object.pageToken ?? "";
+    return message;
+  },
+};
+
+function createBaseListRolloutTaskRunsResponse(): ListRolloutTaskRunsResponse {
+  return { taskRuns: [], nextPageToken: "" };
+}
+
+export const ListRolloutTaskRunsResponse = {
+  encode(message: ListRolloutTaskRunsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.taskRuns) {
+      TaskRun.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.nextPageToken !== "") {
+      writer.uint32(18).string(message.nextPageToken);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ListRolloutTaskRunsResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListRolloutTaskRunsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.taskRuns.push(TaskRun.decode(reader, reader.uint32()));
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.nextPageToken = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListRolloutTaskRunsResponse {
+    return {
+      taskRuns: Array.isArray(object?.taskRuns) ? object.taskRuns.map((e: any) => TaskRun.fromJSON(e)) : [],
+      nextPageToken: isSet(object.nextPageToken) ? String(object.nextPageToken) : "",
+    };
+  },
+
+  toJSON(message: ListRolloutTaskRunsResponse): unknown {
+    const obj: any = {};
+    if (message.taskRuns) {
+      obj.taskRuns = message.taskRuns.map((e) => e ? TaskRun.toJSON(e) : undefined);
+    } else {
+      obj.taskRuns = [];
+    }
+    message.nextPageToken !== undefined && (obj.nextPageToken = message.nextPageToken);
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListRolloutTaskRunsResponse>): ListRolloutTaskRunsResponse {
+    return ListRolloutTaskRunsResponse.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<ListRolloutTaskRunsResponse>): ListRolloutTaskRunsResponse {
+    const message = createBaseListRolloutTaskRunsResponse();
+    message.taskRuns = object.taskRuns?.map((e) => TaskRun.fromPartial(e)) || [];
+    message.nextPageToken = object.nextPageToken ?? "";
     return message;
   },
 };
@@ -4460,6 +4738,63 @@ export const RolloutServiceDefinition = {
         },
       },
     },
+    createRollout: {
+      name: "CreateRollout",
+      requestType: CreateRolloutRequest,
+      requestStream: false,
+      responseType: Rollout,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([0])],
+          578365826: [
+            new Uint8Array([
+              40,
+              58,
+              4,
+              112,
+              108,
+              97,
+              110,
+              34,
+              32,
+              47,
+              118,
+              49,
+              47,
+              123,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              125,
+              47,
+              114,
+              111,
+              108,
+              108,
+              111,
+              117,
+              116,
+              115,
+            ]),
+          ],
+        },
+      },
+    },
     previewRollout: {
       name: "PreviewRollout",
       requestType: PreviewRolloutRequest,
@@ -4523,18 +4858,18 @@ export const RolloutServiceDefinition = {
     },
     listRolloutTaskRuns: {
       name: "ListRolloutTaskRuns",
-      requestType: ListPlansRequest,
+      requestType: ListRolloutTaskRunsRequest,
       requestStream: false,
-      responseType: ListPlansResponse,
+      responseType: ListRolloutTaskRunsResponse,
       responseStream: false,
       options: {
         _unknownFields: {
           8410: [new Uint8Array([6, 112, 97, 114, 101, 110, 116])],
           578365826: [
             new Uint8Array([
-              34,
+              62,
               18,
-              32,
+              60,
               47,
               118,
               49,
@@ -4557,7 +4892,6 @@ export const RolloutServiceDefinition = {
               115,
               47,
               42,
-              125,
               47,
               114,
               111,
@@ -4566,6 +4900,35 @@ export const RolloutServiceDefinition = {
               111,
               117,
               116,
+              115,
+              47,
+              42,
+              47,
+              115,
+              116,
+              97,
+              103,
+              101,
+              115,
+              47,
+              42,
+              47,
+              116,
+              97,
+              115,
+              107,
+              115,
+              47,
+              42,
+              125,
+              47,
+              116,
+              97,
+              115,
+              107,
+              82,
+              117,
+              110,
               115,
             ]),
           ],
@@ -4645,11 +5008,12 @@ export interface RolloutServiceImplementation<CallContextExt = {}> {
   createPlan(request: CreatePlanRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Plan>>;
   updatePlan(request: UpdatePlanRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Plan>>;
   getRollout(request: GetRolloutRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Rollout>>;
+  createRollout(request: CreateRolloutRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Rollout>>;
   previewRollout(request: PreviewRolloutRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Rollout>>;
   listRolloutTaskRuns(
-    request: ListPlansRequest,
+    request: ListRolloutTaskRunsRequest,
     context: CallContext & CallContextExt,
-  ): Promise<DeepPartial<ListPlansResponse>>;
+  ): Promise<DeepPartial<ListRolloutTaskRunsResponse>>;
   listPlanCheckRuns(
     request: ListPlanCheckRunsRequest,
     context: CallContext & CallContextExt,
@@ -4662,21 +5026,22 @@ export interface RolloutServiceClient<CallOptionsExt = {}> {
   createPlan(request: DeepPartial<CreatePlanRequest>, options?: CallOptions & CallOptionsExt): Promise<Plan>;
   updatePlan(request: DeepPartial<UpdatePlanRequest>, options?: CallOptions & CallOptionsExt): Promise<Plan>;
   getRollout(request: DeepPartial<GetRolloutRequest>, options?: CallOptions & CallOptionsExt): Promise<Rollout>;
+  createRollout(request: DeepPartial<CreateRolloutRequest>, options?: CallOptions & CallOptionsExt): Promise<Rollout>;
   previewRollout(request: DeepPartial<PreviewRolloutRequest>, options?: CallOptions & CallOptionsExt): Promise<Rollout>;
   listRolloutTaskRuns(
-    request: DeepPartial<ListPlansRequest>,
+    request: DeepPartial<ListRolloutTaskRunsRequest>,
     options?: CallOptions & CallOptionsExt,
-  ): Promise<ListPlansResponse>;
+  ): Promise<ListRolloutTaskRunsResponse>;
   listPlanCheckRuns(
     request: DeepPartial<ListPlanCheckRunsRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<ListPlanCheckRunsResponse>;
 }
 
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var tsProtoGlobalThis: any = (() => {
+declare const self: any | undefined;
+declare const window: any | undefined;
+declare const global: any | undefined;
+const tsProtoGlobalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
