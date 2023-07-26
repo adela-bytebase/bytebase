@@ -82,7 +82,7 @@
                 !allowEdit ||
                 (!basicInfo.activation && availableLicenseCount === 0)
               "
-              @toggle="(on: boolean) => basicInfo.activation = on"
+              @toggle="changeInstanceActivation"
             />
           </div>
 
@@ -794,7 +794,8 @@ const extractBasicInfo = (instance: Instance | undefined): BasicInfo => {
     options: instance?.options
       ? cloneDeep(instance.options)
       : {
-          schemaTenantMode: true, // default to true
+          // default to false (Manage based on database, aka CDB + non-CDB)
+          schemaTenantMode: false,
         },
   };
 };
@@ -1081,13 +1082,9 @@ const allowUpdate = computed((): boolean => {
 });
 
 const isEngineBeta = (engine: Engine): boolean => {
-  return [
-    Engine.ORACLE,
-    Engine.MSSQL,
-    Engine.REDSHIFT,
-    Engine.MARIADB,
-    Engine.OCEANBASE,
-  ].includes(engine);
+  return false;
+  // return [
+  // ].includes(engine);
 };
 
 const handleSelectEnvironmentUID = (uid: number | string) => {
@@ -1704,5 +1701,16 @@ const checkRODataSourceFeature = (instance: Instance) => {
     }
   }
   return true;
+};
+
+const changeInstanceActivation = async (on: boolean) => {
+  basicInfo.value.activation = on;
+  if (props.instance) {
+    const instancePatch = {
+      ...props.instance,
+      activation: on,
+    };
+    await instanceV1Store.updateInstance(instancePatch, ["activation"]);
+  }
 };
 </script>

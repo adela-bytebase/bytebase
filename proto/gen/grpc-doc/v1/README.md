@@ -426,6 +426,12 @@
     - [RoleService](#bytebase-v1-RoleService)
   
 - [v1/rollout_service.proto](#v1_rollout_service-proto)
+    - [BatchCancelTaskRunsRequest](#bytebase-v1-BatchCancelTaskRunsRequest)
+    - [BatchCancelTaskRunsResponse](#bytebase-v1-BatchCancelTaskRunsResponse)
+    - [BatchRunTasksRequest](#bytebase-v1-BatchRunTasksRequest)
+    - [BatchRunTasksResponse](#bytebase-v1-BatchRunTasksResponse)
+    - [BatchSkipTasksRequest](#bytebase-v1-BatchSkipTasksRequest)
+    - [BatchSkipTasksResponse](#bytebase-v1-BatchSkipTasksResponse)
     - [CreatePlanRequest](#bytebase-v1-CreatePlanRequest)
     - [CreateRolloutRequest](#bytebase-v1-CreateRolloutRequest)
     - [GetPlanRequest](#bytebase-v1-GetPlanRequest)
@@ -434,8 +440,8 @@
     - [ListPlanCheckRunsResponse](#bytebase-v1-ListPlanCheckRunsResponse)
     - [ListPlansRequest](#bytebase-v1-ListPlansRequest)
     - [ListPlansResponse](#bytebase-v1-ListPlansResponse)
-    - [ListRolloutTaskRunsRequest](#bytebase-v1-ListRolloutTaskRunsRequest)
-    - [ListRolloutTaskRunsResponse](#bytebase-v1-ListRolloutTaskRunsResponse)
+    - [ListTaskRunsRequest](#bytebase-v1-ListTaskRunsRequest)
+    - [ListTaskRunsResponse](#bytebase-v1-ListTaskRunsResponse)
     - [Plan](#bytebase-v1-Plan)
     - [Plan.ChangeDatabaseConfig](#bytebase-v1-Plan-ChangeDatabaseConfig)
     - [Plan.ChangeDatabaseConfig.RollbackDetail](#bytebase-v1-Plan-ChangeDatabaseConfig-RollbackDetail)
@@ -446,6 +452,8 @@
     - [Plan.Step](#bytebase-v1-Plan-Step)
     - [PlanCheckRun](#bytebase-v1-PlanCheckRun)
     - [PlanCheckRun.Result](#bytebase-v1-PlanCheckRun-Result)
+    - [PlanCheckRun.Result.SqlReviewReport](#bytebase-v1-PlanCheckRun-Result-SqlReviewReport)
+    - [PlanCheckRun.Result.SqlSummaryReport](#bytebase-v1-PlanCheckRun-Result-SqlSummaryReport)
     - [PreviewRolloutRequest](#bytebase-v1-PreviewRolloutRequest)
     - [Rollout](#bytebase-v1-Rollout)
     - [Stage](#bytebase-v1-Stage)
@@ -461,7 +469,6 @@
     - [UpdatePlanRequest](#bytebase-v1-UpdatePlanRequest)
   
     - [Plan.ChangeDatabaseConfig.Type](#bytebase-v1-Plan-ChangeDatabaseConfig-Type)
-    - [PlanCheckRun.Result.Namespace](#bytebase-v1-PlanCheckRun-Result-Namespace)
     - [PlanCheckRun.Result.Status](#bytebase-v1-PlanCheckRun-Result-Status)
     - [PlanCheckRun.Status](#bytebase-v1-PlanCheckRun-Status)
     - [PlanCheckRun.Type](#bytebase-v1-PlanCheckRun-Type)
@@ -505,6 +512,9 @@
     - [AgentPluginSetting](#bytebase-v1-AgentPluginSetting)
     - [AppIMSetting](#bytebase-v1-AppIMSetting)
     - [AppIMSetting.ExternalApproval](#bytebase-v1-AppIMSetting-ExternalApproval)
+    - [DataCategorySetting](#bytebase-v1-DataCategorySetting)
+    - [DataCategorySetting.DataCategoryConfig](#bytebase-v1-DataCategorySetting-DataCategoryConfig)
+    - [DataCategorySetting.DataCategoryConfig.CategoryLevelEntry](#bytebase-v1-DataCategorySetting-DataCategoryConfig-CategoryLevelEntry)
     - [ExternalApprovalSetting](#bytebase-v1-ExternalApprovalSetting)
     - [ExternalApprovalSetting.Node](#bytebase-v1-ExternalApprovalSetting-Node)
     - [GetSettingRequest](#bytebase-v1-GetSettingRequest)
@@ -2489,6 +2499,8 @@ CreateBackupRequest is the request message for CreateBackup.
 | successful_sync_time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | The latest synchronization time. |
 | project | [string](#string) |  | The project for a database. Format: projects/{project} |
 | schema_version | [string](#string) |  | The version of database schema. |
+| environment | [string](#string) |  | The environment resource. Format: environments/prod where prod is the environment resource ID. |
+| effective_environment | [string](#string) |  | The effective environment based on environment tag above and environment tag on the instance. Inheritance follows https://cloud.google.com/resource-manager/docs/tags/tags-overview. |
 | labels | [Database.LabelsEntry](#bytebase-v1-Database-LabelsEntry) | repeated | Labels will be used for deployment and policy control. |
 
 
@@ -3881,6 +3893,7 @@ The environment&#39;s `name` field is used to identify the environment to update
 | GITHUB | 1 | GitHub type. Using for GitHub community edition(ce). |
 | GITLAB | 2 | GitLab type. Using for GitLab community edition(ce) and enterprise edition(ee). |
 | BITBUCKET | 3 | BitBucket type. Using for BitBucket cloud or BitBucket server. |
+| AZURE_DEVOPS | 4 | Azure DevOps. Using for Azure DevOps GitOps workflow. |
 
 
  
@@ -5952,6 +5965,7 @@ When paginating, all other parameters provided to `ListSchemaGroups` must match 
 | db_name_template | [string](#string) |  |  |
 | schema_change | [SchemaChange](#bytebase-v1-SchemaChange) |  |  |
 | webhooks | [Webhook](#bytebase-v1-Webhook) | repeated |  |
+| data_category_config_id | [string](#string) |  |  |
 
 
 
@@ -6797,6 +6811,84 @@ When paginating, all other parameters provided to `ListRoles` must match the cal
 
 
 
+<a name="bytebase-v1-BatchCancelTaskRunsRequest"></a>
+
+### BatchCancelTaskRunsRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The name of the parent of the taskRuns. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} |
+| task_runs | [string](#string) | repeated | The taskRuns to cancel. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task}/taskRuns/{taskRun} |
+
+
+
+
+
+
+<a name="bytebase-v1-BatchCancelTaskRunsResponse"></a>
+
+### BatchCancelTaskRunsResponse
+
+
+
+
+
+
+
+<a name="bytebase-v1-BatchRunTasksRequest"></a>
+
+### BatchRunTasksRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The name of the parent of the tasks. Format: projects/{project}/rollouts/{rollout}/stages/{stage} |
+| tasks | [string](#string) | repeated | The tasks to run. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} |
+
+
+
+
+
+
+<a name="bytebase-v1-BatchRunTasksResponse"></a>
+
+### BatchRunTasksResponse
+
+
+
+
+
+
+
+<a name="bytebase-v1-BatchSkipTasksRequest"></a>
+
+### BatchSkipTasksRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| parent | [string](#string) |  | The name of the parent of the tasks. Format: projects/{project}/rollouts/{rollout}/stages/{stage} |
+| tasks | [string](#string) | repeated | The tasks to skip. Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} |
+
+
+
+
+
+
+<a name="bytebase-v1-BatchSkipTasksResponse"></a>
+
+### BatchSkipTasksResponse
+
+
+
+
+
+
+
 <a name="bytebase-v1-CreatePlanRequest"></a>
 
 ### CreatePlanRequest
@@ -6929,9 +7021,9 @@ When paginating, all other parameters provided to `ListPlans` must match the cal
 
 
 
-<a name="bytebase-v1-ListRolloutTaskRunsRequest"></a>
+<a name="bytebase-v1-ListTaskRunsRequest"></a>
 
-### ListRolloutTaskRunsRequest
+### ListTaskRunsRequest
 
 
 
@@ -6948,9 +7040,9 @@ When paginating, all other parameters provided to `ListRolloutTaskRuns` must mat
 
 
 
-<a name="bytebase-v1-ListRolloutTaskRunsResponse"></a>
+<a name="bytebase-v1-ListTaskRunsResponse"></a>
 
-### ListRolloutTaskRunsResponse
+### ListTaskRunsResponse
 
 
 
@@ -6992,7 +7084,7 @@ When paginating, all other parameters provided to `ListRolloutTaskRuns` must mat
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| target | [string](#string) |  | The resource name of the target. Format: instances/{instance-id}/databases/{database-name}. Format: projects/{project}/deploymentConfig. |
+| target | [string](#string) |  | The resource name of the target. Format: instances/{instance-id}/databases/{database-name}. |
 | sheet | [string](#string) |  | The resource name of the sheet. Format: projects/{project}/sheets/{sheet} |
 | type | [Plan.ChangeDatabaseConfig.Type](#bytebase-v1-Plan-ChangeDatabaseConfig-Type) |  |  |
 | schema_version | [string](#string) |  | schema_version is parsed from VCS file name. It is automatically generated in the UI workflow. |
@@ -7099,7 +7191,7 @@ When paginating, all other parameters provided to `ListRolloutTaskRuns` must mat
 <a name="bytebase-v1-Plan-Step"></a>
 
 ### Plan.Step
-FIXME(d/xz): support spec with deployment config
+
 
 
 | Field | Type | Label | Description |
@@ -7125,8 +7217,8 @@ FIXME(d/xz): support spec with deployment config
 | status | [PlanCheckRun.Status](#bytebase-v1-PlanCheckRun-Status) |  |  |
 | target | [string](#string) |  | Format: instances/{instance}/databases/{database} |
 | sheet | [string](#string) |  | Format: projects/{project}/sheets/{sheet} |
-| detail | [string](#string) |  |  |
 | results | [PlanCheckRun.Result](#bytebase-v1-PlanCheckRun-Result) | repeated |  |
+| error | [string](#string) |  | error is set if the Status is FAILED. |
 
 
 
@@ -7141,13 +7233,45 @@ FIXME(d/xz): support spec with deployment config
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| namespace | [PlanCheckRun.Result.Namespace](#bytebase-v1-PlanCheckRun-Result-Namespace) |  |  |
-| code | [int64](#int64) |  |  |
 | status | [PlanCheckRun.Result.Status](#bytebase-v1-PlanCheckRun-Result-Status) |  |  |
 | title | [string](#string) |  |  |
 | content | [string](#string) |  |  |
+| code | [int64](#int64) |  |  |
+| sql_summary_report | [PlanCheckRun.Result.SqlSummaryReport](#bytebase-v1-PlanCheckRun-Result-SqlSummaryReport) |  |  |
+| sql_review_report | [PlanCheckRun.Result.SqlReviewReport](#bytebase-v1-PlanCheckRun-Result-SqlReviewReport) |  |  |
+
+
+
+
+
+
+<a name="bytebase-v1-PlanCheckRun-Result-SqlReviewReport"></a>
+
+### PlanCheckRun.Result.SqlReviewReport
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
 | line | [int64](#int64) |  |  |
 | detail | [string](#string) |  |  |
+| code | [int64](#int64) |  | Code from sql review. |
+
+
+
+
+
+
+<a name="bytebase-v1-PlanCheckRun-Result-SqlSummaryReport"></a>
+
+### PlanCheckRun.Result.SqlSummaryReport
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| statement_type | [string](#string) |  |  |
+| affected_rows | [int64](#int64) |  |  |
 
 
 
@@ -7420,19 +7544,6 @@ Type is the database change type.
 
 
 
-<a name="bytebase-v1-PlanCheckRun-Result-Namespace"></a>
-
-### PlanCheckRun.Result.Namespace
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| NAMESPACE_UNSPECIFIED | 0 |  |
-| BYTEBASE | 1 |  |
-| ADVISOR | 2 |  |
-
-
-
 <a name="bytebase-v1-PlanCheckRun-Result-Status"></a>
 
 ### PlanCheckRun.Result.Status
@@ -7475,11 +7586,10 @@ Type is the database change type.
 | DATABASE_STATEMENT_COMPATIBILITY | 3 |  |
 | DATABASE_STATEMENT_ADVISE | 4 |  |
 | DATABASE_STATEMENT_TYPE | 5 |  |
-| DATABASE_STATEMENT_TYPE_REPORT | 6 |  |
-| DATABASE_STATEMENT_AFFECTED_ROWS_REPORT | 7 |  |
-| DATABASE_CONNECT | 8 |  |
-| DATABASE_GHOST_SYNC | 9 |  |
-| DATABASE_PITR_MYSQL | 10 |  |
+| DATABASE_STATEMENT_SUMMARY_REPORT | 6 |  |
+| DATABASE_CONNECT | 7 |  |
+| DATABASE_GHOST_SYNC | 8 |  |
+| DATABASE_PITR_MYSQL | 9 |  |
 
 
 
@@ -7572,8 +7682,11 @@ Type is the database change type.
 | GetRollout | [GetRolloutRequest](#bytebase-v1-GetRolloutRequest) | [Rollout](#bytebase-v1-Rollout) |  |
 | CreateRollout | [CreateRolloutRequest](#bytebase-v1-CreateRolloutRequest) | [Rollout](#bytebase-v1-Rollout) |  |
 | PreviewRollout | [PreviewRolloutRequest](#bytebase-v1-PreviewRolloutRequest) | [Rollout](#bytebase-v1-Rollout) |  |
-| ListRolloutTaskRuns | [ListRolloutTaskRunsRequest](#bytebase-v1-ListRolloutTaskRunsRequest) | [ListRolloutTaskRunsResponse](#bytebase-v1-ListRolloutTaskRunsResponse) |  |
+| ListTaskRuns | [ListTaskRunsRequest](#bytebase-v1-ListTaskRunsRequest) | [ListTaskRunsResponse](#bytebase-v1-ListTaskRunsResponse) |  |
 | ListPlanCheckRuns | [ListPlanCheckRunsRequest](#bytebase-v1-ListPlanCheckRunsRequest) | [ListPlanCheckRunsResponse](#bytebase-v1-ListPlanCheckRunsResponse) |  |
+| BatchRunTasks | [BatchRunTasksRequest](#bytebase-v1-BatchRunTasksRequest) | [BatchRunTasksResponse](#bytebase-v1-BatchRunTasksResponse) |  |
+| BatchSkipTasks | [BatchSkipTasksRequest](#bytebase-v1-BatchSkipTasksRequest) | [BatchSkipTasksResponse](#bytebase-v1-BatchSkipTasksResponse) |  |
+| BatchCancelTaskRuns | [BatchCancelTaskRunsRequest](#bytebase-v1-BatchCancelTaskRunsRequest) | [BatchCancelTaskRunsResponse](#bytebase-v1-BatchCancelTaskRunsResponse) |  |
 
  
 
@@ -8018,6 +8131,56 @@ The schema design&#39;s `name` field is used to identify the schema design to up
 
 
 
+<a name="bytebase-v1-DataCategorySetting"></a>
+
+### DataCategorySetting
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| configs | [DataCategorySetting.DataCategoryConfig](#bytebase-v1-DataCategorySetting-DataCategoryConfig) | repeated |  |
+
+
+
+
+
+
+<a name="bytebase-v1-DataCategorySetting-DataCategoryConfig"></a>
+
+### DataCategorySetting.DataCategoryConfig
+Hard-coded schema comment format: [0-9]&#43;-[0-9]&#43;-[0-9]&#43;
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  |  |
+| title | [string](#string) |  |  |
+| category_level | [DataCategorySetting.DataCategoryConfig.CategoryLevelEntry](#bytebase-v1-DataCategorySetting-DataCategoryConfig-CategoryLevelEntry) | repeated | Maps category to level.
+
+TODO(ed): store the actual config. |
+
+
+
+
+
+
+<a name="bytebase-v1-DataCategorySetting-DataCategoryConfig-CategoryLevelEntry"></a>
+
+### DataCategorySetting.DataCategoryConfig.CategoryLevelEntry
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| key | [string](#string) |  |  |
+| value | [string](#string) |  |  |
+
+
+
+
+
+
 <a name="bytebase-v1-ExternalApprovalSetting"></a>
 
 ### ExternalApprovalSetting
@@ -8164,6 +8327,7 @@ When paginating, all other parameters provided to `ListSettings` must match the 
 | ----- | ---- | ----- | ----------- |
 | id | [string](#string) |  |  |
 | engine | [Engine](#bytebase-v1-Engine) |  |  |
+| category | [string](#string) |  |  |
 | column | [ColumnMetadata](#bytebase-v1-ColumnMetadata) |  |  |
 
 

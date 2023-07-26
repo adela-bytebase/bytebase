@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
@@ -212,11 +213,10 @@ func (s *Syncer) SyncInstance(ctx context.Context, instance *store.InstanceMessa
 		if !exist {
 			// Create the database in the default project.
 			if err := s.store.CreateDatabaseDefault(ctx, &store.DatabaseMessage{
-				EnvironmentID: instance.EnvironmentID,
-				InstanceID:    instance.ResourceID,
-				DatabaseName:  databaseMetadata.Name,
-				DataShare:     databaseMetadata.Datashare,
-				ServiceName:   databaseMetadata.ServiceName,
+				InstanceID:   instance.ResourceID,
+				DatabaseName: databaseMetadata.Name,
+				DataShare:    databaseMetadata.Datashare,
+				ServiceName:  databaseMetadata.ServiceName,
 			}); err != nil {
 				return nil, errors.Wrapf(err, "failed to create instance %q database %q in sync runner", instance.ResourceID, databaseMetadata.Name)
 			}
@@ -269,6 +269,7 @@ func (s *Syncer) SyncDatabaseSchema(ctx context.Context, database *store.Databas
 	if err != nil {
 		return err
 	}
+	setCategoryFromComment(databaseMetadata)
 
 	var patchSchemaVersion *string
 	if force {
@@ -337,4 +338,17 @@ func equalDatabaseMetadata(x, y *storepb.DatabaseMetadata) bool {
 	return cmp.Equal(x, y, protocmp.Transform(),
 		protocmp.IgnoreFields(&storepb.TableMetadata{}, "row_count", "data_size", "index_size", "data_free"),
 	)
+}
+
+var getCategoryFromCommentReg = regexp.MustCompile("^[0-9]+-[0-9]+-[0-9]+")
+
+func setCategoryFromComment(dbSchema *storepb.DatabaseMetadata) {
+	for _, schema := range dbSchema.Schemas {
+		for _, table := range schema.Tables {
+			table.Category = getCategoryFromCommentReg.FindString(table.Comment)
+			for _, col := range table.Columns {
+				col.Category = getCategoryFromCommentReg.FindString(col.Comment)
+			}
+		}
+	}
 }

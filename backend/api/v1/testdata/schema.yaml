@@ -3,9 +3,11 @@
     create table t
       (
         a int default 1 comment 'abcdefg',
-        b varchar(20) default 'NULL' comment ''
+        b varchar(20) default 'NULL' comment '',
+        primary key (a, b),
+        constraint fk1 foreign key (a) references t2 (b)
       );
-    create table t2(b int NOT NULL default NULL);
+    create table t2(b int NOT NULL default NULL, primary key (b));
   metadata:
     name: ""
     schemas:
@@ -31,7 +33,16 @@
                   characterset: ""
                   collation: ""
                   comment: ""
-              indexes: []
+              indexes:
+                - name: PRIMARY
+                  expressions:
+                    - a
+                    - b
+                  type: ""
+                  unique: true
+                  primary: true
+                  visible: true
+                  comment: ""
               engine: ""
               collation: ""
               rowcount: 0
@@ -40,7 +51,17 @@
               datafree: 0
               createoptions: ""
               comment: ""
-              foreignkeys: []
+              foreignkeys:
+                - name: fk1
+                  columns:
+                    - a
+                  referencedschema: ""
+                  referencedtable: t2
+                  referencedcolumns:
+                    - b
+                  ondelete: ""
+                  onupdate: ""
+                  matchtype: ""
             - name: t2
               columns:
                 - name: b
@@ -52,7 +73,15 @@
                   characterset: ""
                   collation: ""
                   comment: ""
-              indexes: []
+              indexes:
+                - name: PRIMARY
+                  expressions:
+                    - b
+                  type: ""
+                  unique: true
+                  primary: true
+                  visible: true
+                  comment: ""
               engine: ""
               collation: ""
               rowcount: 0

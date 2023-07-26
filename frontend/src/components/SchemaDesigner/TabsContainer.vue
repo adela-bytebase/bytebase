@@ -43,6 +43,7 @@
 </template>
 
 <script lang="ts" setup>
+import { head } from "lodash-es";
 import { NEllipsis } from "naive-ui";
 import { computed, nextTick, ref, watch } from "vue";
 import scrollIntoView from "scroll-into-view-if-needed";
@@ -51,8 +52,9 @@ import {
   TabContext,
   SchemaDesignerTabType,
 } from "./common";
+import { isTableChanged } from "./utils/table";
 
-const { tabState, getCurrentTab } = useSchemaDesignerContext();
+const { tabState, getCurrentTab, getTable } = useSchemaDesignerContext();
 const tabsContainerRef = ref();
 const tabList = computed(() => {
   return Array.from(tabState.value.tabMap.values());
@@ -78,12 +80,29 @@ watch(
 );
 
 const getTabComputedClassList = (tab: TabContext) => {
+  if (tab.type === SchemaDesignerTabType.TabForTable) {
+    const table = getTable(tab.schemaId, tab.tableId);
+    if (!table) {
+      return [];
+    }
+
+    if (table.status === "dropped") {
+      return ["text-red-700", "line-through"];
+    }
+    if (table.status === "created") {
+      return ["text-green-700"];
+    }
+    if (isTableChanged(tab.schemaId, tab.tableId)) {
+      return ["text-yellow-700"];
+    }
+  }
   return [];
 };
 
 const getTabName = (tab: TabContext) => {
   if (tab.type === SchemaDesignerTabType.TabForTable) {
-    return tab.table || "";
+    const table = getTable(tab.schemaId, tab.tableId);
+    return table.name || "Uknown tab";
   } else {
     // Should never reach here.
     return "unknown structure";
@@ -95,6 +114,13 @@ const handleSelectTab = (tab: TabContext) => {
 };
 
 const handleCloseTab = (tab: TabContext) => {
-  tabState.value.currentTabId = undefined;
+  tabState.value.tabMap.delete(tab.id);
+  if (tab.id === currentTab.value?.id) {
+    tabState.value.currentTabId = undefined;
+  } else {
+    tabState.value.currentTabId = head(
+      Array.from(tabState.value.tabMap.values())
+    )?.id;
+  }
 };
 </script>

@@ -92,6 +92,7 @@
     "id": "ID",
     "name": "Name",
     "creator": "Creator",
+    "updater": "Updater",
     "version": "Version",
     "issue": "Issue",
     "issues": "Issues",
@@ -977,9 +978,14 @@
     "force-archive-description": "Force to archive. All releated issues will be resolved, and all related sheets will be deleted.",
     "sync-mode": {
       "self": "Sync Mode",
-      "sync-self": "Sync self",
-      "sync-all": "Sync self and all containing databases (CDB + PDB)",
-      "description": "Bytebase will sync the connecting database as well as its all containing databases. Only applicable to Oracle 12c+."
+      "database": {
+        "self": "Manage based on database",
+        "description": "The entire database is treated as a managed object, with CDB and PDB being regarded as distinct databases. (Supports CDB and non-CDB mode)"
+      },
+      "schema": {
+        "self": "Manage based on schema",
+        "description": "Each schema is treated as a managed object. (Only supports non-CDB mode)"
+      }
     }
   },
   "environment": {
@@ -1110,7 +1116,9 @@
     "establish-database-baseline": "Establish \"{name}\" baseline",
     "instance-missing-change-schema": "Missing change history schema on instance \"{name}\".",
     "instance-bad-connection": "Unable to connect instance \"{name}\" to retrieve change history.",
-    "contact-dba": "Please contact your DBA to config it"
+    "contact-dba": "Please contact your DBA to config it",
+    "export": "Export Change History",
+    "need-to-select-first": "Need to select change history first"
   },
   "database": {
     "select": "Select database",
@@ -1126,6 +1134,7 @@
     "alter-schema-in-vcs": "Alter Schema in VCS",
     "change-data": "Change Data",
     "change-data-in-vcs": "Change Data in VCS",
+    "design-schema": "Design Schema",
     "successfully-transferred-updateddatabase-name-to-project-updateddatabase-project-name": "Successfully transferred '{0}' to project '{1}'.",
     "backup-name": "Backup name",
     "create-backup": "Create backup",
@@ -1507,7 +1516,7 @@
       "view-by-principals": "View by principals",
       "view-by-roles": "View by roles",
       "cannot-remove-last-owner": "Cannot remove the last owner of a project",
-      "revoke-role-from-user": "Revocar el '{role}' del usuario '{user}'",
+      "revoke-role-from-user": "Revoke '{role}' from '{user}'",
       "inactive-members": "Inactive members",
       "show-inactive": "Show inactive members",
       "select-users": "Select users",
@@ -1547,6 +1556,7 @@
         "gitlab-com-admin-requirement": "Your account needs to have Admin access to any of the repositories to be linked. Usually this account corresponds to a dedicated service user instead of a human user.",
         "github-com-admin-requirement": "You need to be an admin of your chosen GitHub organization to configure this. Otherwise, you need to ask your GitHub organization admin to register Bytebase as a GitHub organization-wide OAuth application, then provide you that Application ID and Secret to fill at the 'OAuth application info' step.",
         "bitbucket-admin-requirement": "You need to be an admin of your chosen Bitbucket workspace to configure this. Otherwise, you need to ask your Bitbucket workspace admin to register Bytebase as a Bitbucket workspace-wide OAuth application, then provide you that Application ID and Secret to fill at the 'OAuth application info' step.",
+        "azure-admin-requirement": "You need to be an admin of your chosen Azure DevOps organization to configure this. Otherwise, you need to ask your Bitbucket workspace admin to register Bytebase as a Azure DevOps organization-wide OAuth application, then provide you that Application ID and Client Secret to fill at the 'OAuth application info' step.",
         "oauth-info-correct": "Verified OAuth info is correct",
         "check-oauth-info-match": "Please make sure Secret matches the one from your GitLab instance Application.",
         "add-success": "Successfully added Git provider {vcs}",
@@ -1559,6 +1569,7 @@
           "gitlab-instance-url-label": "The VCS instance URL. Make sure this instance and Bytebase are network reachable from each other.",
           "github-instance-url": "GitHub instance URL",
           "bitbucket-instance-url": "Bitbucket instance URL",
+          "azure-instance-url": "Azure DevOps instance URL",
           "instance-url-error": "Instance URL must begin with https:// or http://",
           "display-name": "Display name",
           "display-name-label": "An optional display name to help identifying among different configs using the same Git provider."
@@ -1570,14 +1581,18 @@
           "gitlab-self-host-visit-admin-page": "Go to the Admin page by clicking the wrench icon, then navigate to \"Applications\" section and click \"New application\" button.",
           "gitlab-com-register-oauth-application": "Register Bytebase as a GitLab user OAuth application.",
           "gitlab-com-login": "Log in as whichever account you want Bytebase to act as. Usually this account corresponds to a dedicated service user instead of a human user.",
+          "azure-devops-login": "Log in as whichever account you want Bytebase to act as. Usually this account corresponds to a dedicated service user instead of a human user.",
           "gitlab-com-visit-application-page": "Go to Preferences -> Applications page. You can reach it through your profile picture on the top right corner.",
+          "azure-devops-visit-application-page": "Go to the applications page.",
           "gitlab-paste-oauth-info": "Paste the Application ID and Secret from that just created application into fields below.",
+          "azure-paste-oauth-info": "Paste the Application ID and Client Secret from that just created application into fields below.",
           "github-register-oauth-application": "Register Bytebase as a GitHub organization-wide OAuth application.",
           "github-login-as-admin": "Log in as an organization admin user to the GitHub.com. The account must be an organization admin of the GitHub organization (able to access the organization Settings page).",
           "github-visit-admin-page": "Go to the Settings page, then navigate to \"Developer settings > OAuth Apps\" section and click \"Register an application\" button.",
           "github-paste-oauth-info": "Paste the Client ID and Client secret from that just created application into fields below.",
           "github-enterprise-login-as-admin": "Log in as an organization admin user to your hosted GitHub Enterprise site. The account must be an organization admin of the GitHub organization (able to access the organization Settings page).",
           "bitbucket-register-oauth-application": "Register Bytebase as a Bitbucket workspace-wide OAuth consumer.",
+          "azure-register-oauth-application": "Register Bytebase as a Azure DevOps organization-wide OAuth consumer.",
           "bitbucket-login-as-admin": "Log in as an workspace admin user to the Bitbucket.org. The account must be an workspace admin of the Bitbucket workspace (able to access the workspace Settings page).",
           "bitbucket-visit-admin-page": "Go to the Settings page, then navigate to \"APPS AND FEATURES > OAuth consumers\" section and click \"Add a consumer\" button.",
           "bitbucket-paste-oauth-info": "Paste the Key and Secret from that just created consumer into fields below.",
@@ -1836,7 +1851,8 @@
       "default": "Default",
       "comment": "Comment",
       "not-null": "Not Null",
-      "primary": "Primary"
+      "primary": "Primary",
+      "foreign-key": "Foreign Key"
     },
     "nothing-changed": "Nothing changed",
     "message": {
@@ -2602,6 +2618,9 @@
     "description": "You can pre-define the field template, then apply the template during the schema change.",
     "search-by-name-or-comment": "Search by name or comment",
     "form": {
+      "category": "Category",
+      "category-desc": "Select an existed category or create a new one",
+      "unclassified": "Unclassified",
       "column-name": "Column name",
       "column-type": "Column Type",
       "default-value": "Default value",
@@ -2674,5 +2693,22 @@
   },
   "export-center": {
     "self": "Export Center"
+  },
+  "schema-designer": {
+    "self": "Schema Designer",
+    "quick-action": "Design Schema",
+    "schema-design": "Schema Design",
+    "schema-design-list": "Schema Design List",
+    "new-schema-design": "New Schema Design",
+    "baseline-database": "Baseline database",
+    "schema-version": "Schema version",
+    "tables": "Tables",
+    "search-tables": "Search tables",
+    "use-tips": "Click a table to start.",
+    "apply-to-database": "Apply to database",
+    "message": {
+      "created-succeed": "Schema design created successfully",
+      "updated-succeed": "Schema design updated successfully"
+    }
   }
 }

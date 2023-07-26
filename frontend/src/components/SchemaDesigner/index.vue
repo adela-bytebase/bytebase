@@ -1,26 +1,13 @@
 <template>
-  <div v-if="!state.isLoading" class="w-full h-full">
+  <div class="w-full h-[32rem] border rounded-lg">
     <Splitpanes
       class="default-theme w-full h-full flex flex-row overflow-hidden"
     >
-      <Pane size="20">
+      <Pane size="25">
         <AsidePanel />
       </Pane>
-      <Pane min-size="60" size="80">
-        <main class="pl-2 pt-2 w-full h-full flex flex-col overflow-y-auto">
-          <template v-if="currentTab">
-            <TabsContainer />
-            <div
-              :key="currentTab.id"
-              class="w-full h-full relative overflow-y-auto"
-            >
-              <TableEditor
-                v-if="currentTab.type === SchemaDesignerTabType.TabForTable"
-              />
-            </div>
-          </template>
-          <EmptyTips v-else />
-        </main>
+      <Pane min-size="60" size="75">
+        <Designer />
       </Pane>
     </Splitpanes>
   </div>
@@ -28,40 +15,28 @@
 
 <script lang="ts" setup>
 import { Splitpanes, Pane } from "splitpanes";
-import { computed, onMounted, reactive, ref } from "vue";
-import { useDBSchemaV1Store } from "@/store";
-import AsidePanel from "./AsidePanel.vue";
-import EmptyTips from "./EmptyTips.vue";
-import TabsContainer from "./TabsContainer.vue";
-import TableEditor from "./Panels/TableEditor.vue";
-import {
-  provideSchemaDesignerContext,
-  useSchemaDesignerContext,
-} from "./common";
+import { ref, watch } from "vue";
 import { DatabaseMetadata } from "@/types/proto/v1/database_service";
+import { SchemaDesign } from "@/types/proto/v1/schema_design_service";
 import { Engine } from "@/types/proto/v1/common";
-import { SchemaDesignerTabState, SchemaDesignerTabType } from "./common/type";
+import { provideSchemaDesignerContext } from "./common";
+import { SchemaDesignerTabState } from "./common/type";
+import AsidePanel from "./AsidePanel.vue";
+import Designer from "./Designer.vue";
+import { Schema, convertSchemaMetadataList } from "@/types";
+import { cloneDeep } from "lodash-es";
 
-interface LocalState {
-  isLoading: boolean;
-}
+const props = defineProps<{
+  readonly: boolean;
+  engine: Engine;
+  schemaDesign: SchemaDesign;
+}>();
 
-const props = defineProps({
-  database: {
-    type: String,
-    required: true,
-  },
-});
-const state = reactive<LocalState>({
-  isLoading: true,
-});
-
-const { getCurrentTab } = useSchemaDesignerContext();
-const dbSchemaStore = useDBSchemaV1Store();
-const currentTab = computed(() => {
-  return getCurrentTab();
-});
+const readonly = ref(props.readonly);
+const engine = ref(props.engine);
 const metadata = ref<DatabaseMetadata>(DatabaseMetadata.fromPartial({}));
+const originalSchemas = ref<Schema[]>([]);
+const editableSchemas = ref<Schema[]>([]);
 const baselineMetadata = ref<DatabaseMetadata>(
   DatabaseMetadata.fromPartial({})
 );
@@ -70,19 +45,46 @@ const tabState = ref<SchemaDesignerTabState>({
 });
 
 provideSchemaDesignerContext({
-  metadata,
-  baselineMetadata: baselineMetadata.value,
-  engine: Engine.MYSQL,
+  readonly: readonly,
+  baselineMetadata: baselineMetadata,
+  engine: engine,
+  metadata: metadata,
   tabState: tabState,
+  originalSchemas: originalSchemas,
+  editableSchemas: editableSchemas,
 });
 
-onMounted(async () => {
-  const databaseMetadata = await dbSchemaStore.getOrFetchDatabaseMetadata(
-    props.database
-  );
-  baselineMetadata.value = databaseMetadata;
-  metadata.value = databaseMetadata;
-  state.isLoading = false;
+watch(
+  () => props,
+  () => {
+    baselineMetadata.value =
+      cloneDeep(props.schemaDesign?.baselineSchemaMetadata) ||
+      DatabaseMetadata.fromPartial({});
+    metadata.value =
+      cloneDeep(props.schemaDesign?.schemaMetadata) ||
+      DatabaseMetadata.fromPartial({});
+    editableSchemas.value = convertSchemaMetadataList(metadata.value.schemas);
+    originalSchemas.value = cloneDeep(editableSchemas.value);
+    readonly.value = props.readonly;
+    engine.value = props.engine;
+    // NOTE: clear tab state in the following cases:
+    // * change baseline schema.
+    // * change selected schema design.
+    // * toggle the editing state.
+    tabState.value = {
+      tabMap: new Map(),
+    };
+  },
+  {
+    immediate: true,
+    deep: true,
+  }
+);
+
+defineExpose({
+  metadata,
+  baselineMetadata,
+  editableSchemas,
 });
 </script>
 

@@ -443,6 +443,39 @@ const (
 
 	// MSSQLNoSelectAll is an advisor type for MSSQL no select all.
 	MSSQLNoSelectAll Type = "bb.plugin.advisor.mssql.select.no-select-all"
+
+	// MSSQLNamingTableConvention is an advisor type for MSSQL table naming convention.
+	MSSQLNamingTableConvention Type = "bb.plugin.advisor.mssql.naming.table"
+
+	// MSSQLTableNamingNoKeyword is an advisor type for MSSQL table naming convention without keyword.
+	MSSQLTableNamingNoKeyword Type = "bb.plugin.advisor.mssql.naming.table-no-keyword"
+
+	// MSSQLIdentifierNamingNoKeyword is an advisor type for MSSQL identifier naming convention without keyword.
+	MSSQLIdentifierNamingNoKeyword Type = "bb.plugin.advisor.mssql.naming.identifier-no-keyword"
+
+	// MSSQLWhereRequirement is an advisor type for MSSQL WHERE clause requirement.
+	MSSQLWhereRequirement Type = "bb.plugin.advisor.mssql.where.require"
+
+	// MSSQLColumnMaximumVarcharLength is an advisor type for MSSQL maximum varchar length.
+	MSSQLColumnMaximumVarcharLength Type = "bb.plugin.advisor.mssql.column.maximum-varchar-length"
+
+	// MSSQLTableDropNamingConvention is an advisor type for MSSQL table drop with naming convention.
+	MSSQLTableDropNamingConvention Type = "bb.plugin.advisor.mssql.table.drop-naming-convention"
+
+	// MSSQLTableRequirePK is an advisor type for MSSQL table require primary key.
+	MSSQLTableRequirePK Type = "bb.plugin.advisor.mssql.table.require-pk"
+
+	// MSSQLColumnNoNull is an advisor type for MSSQL column no NULL value.
+	MSSQLColumnNoNull Type = "bb.plugin.advisor.mssql.column.no-null"
+
+	// MSSQLTableNoFK is an advisor type for MSSQL table disallow foreign key.
+	MSSQLTableNoFK Type = "bb.plugin.advisor.mssql.table.no-foreign-key"
+
+	// MSSQLMigrationCompatibility is an advisor type for MSSQL migration compatibility.
+	MSSQLMigrationCompatibility Type = "bb.plugin.advisor.mssql.migration-compatibility"
+
+	// MSSQLColumnRequirement is an advisor type for MSSQL column requirement.
+	MSSQLColumnRequirement Type = "bb.plugin.advisor.mssql.column.require"
 )
 
 // Advice is the result of an advisor.

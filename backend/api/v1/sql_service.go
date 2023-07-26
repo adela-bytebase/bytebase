@@ -782,7 +782,7 @@ func (s *SQLService) preExport(ctx context.Context, request *v1pb.ExportRequest)
 	case db.MySQL, db.TiDB, db.MariaDB, db.OceanBase:
 		databaseList, err := parser.ExtractDatabaseList(parser.MySQL, request.Statement, "")
 		if err != nil {
-			return nil, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s", request.Statement)
+			return nil, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s with error %v", request.Statement, err)
 		}
 
 		sensitiveSchemaInfo, err = s.getSensitiveSchemaInfo(ctx, instance, databaseList, request.ConnectionDatabase)
@@ -822,7 +822,7 @@ func (s *SQLService) preExport(ctx context.Context, request *v1pb.ExportRequest)
 	case db.Snowflake:
 		databaseList, err := parser.ExtractDatabaseList(parser.Snowflake, request.Statement, request.ConnectionDatabase)
 		if err != nil {
-			return nil, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s", request.Statement)
+			return nil, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s with error %v", request.Statement, err)
 		}
 
 		sensitiveSchemaInfo, err = s.getSensitiveSchemaInfo(ctx, instance, databaseList, request.ConnectionDatabase)
@@ -1077,7 +1077,7 @@ func (s *SQLService) preQuery(ctx context.Context, request *v1pb.QueryRequest) (
 		case db.MySQL, db.TiDB, db.MariaDB, db.OceanBase:
 			databaseList, err := parser.ExtractDatabaseList(parser.MySQL, request.Statement, "")
 			if err != nil {
-				return nil, nil, advisor.Success, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s", request.Statement)
+				return nil, nil, advisor.Success, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s with error %v", request.Statement, err)
 			}
 
 			sensitiveSchemaInfo, err = s.getSensitiveSchemaInfo(ctx, instance, databaseList, request.ConnectionDatabase)
@@ -1117,7 +1117,7 @@ func (s *SQLService) preQuery(ctx context.Context, request *v1pb.QueryRequest) (
 		case db.Snowflake:
 			databaseList, err := parser.ExtractDatabaseList(parser.Snowflake, request.Statement, request.ConnectionDatabase)
 			if err != nil {
-				return nil, nil, advisor.Success, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s", request.Statement)
+				return nil, nil, advisor.Success, nil, nil, nil, status.Errorf(codes.Internal, "Failed to get database list: %s with error %v", request.Statement, err)
 			}
 
 			sensitiveSchemaInfo, err = s.getSensitiveSchemaInfo(ctx, instance, databaseList, request.ConnectionDatabase)
@@ -1649,14 +1649,14 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database schema %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
 				}
-				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) {
+				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) && !resourceDBSchema.ViewExists(resource.Schema, resource.Table) {
 					// If table not found, we regard it as a CTE/alias/... and skip.
 					continue
 				}
 				result = append(result, resource)
 				continue
 			}
-			if !dbSchema.TableExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
 				// If table not found, skip.
 				continue
 			}
@@ -1689,7 +1689,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				continue
 			}
 
-			if !dbSchema.TableExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
 				// If table not found, skip.
 				continue
 			}
@@ -1748,7 +1748,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database schema %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
 				}
-				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) {
+				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) && !resourceDBSchema.ViewExists(resource.Schema, resource.Table) {
 					// If table not found, we regard it as a CTE/alias/... and skip.
 					continue
 				}
@@ -1756,7 +1756,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				continue
 			}
 
-			if !dbSchema.TableExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
 				// If table not found, skip.
 				continue
 			}
@@ -1808,14 +1808,14 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database schema %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
 				}
-				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) {
+				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) && !resourceDBSchema.ViewExists(resource.Schema, resource.Table) {
 					// If table not found, we regard it as a CTE/alias/... and skip.
 					continue
 				}
 				result = append(result, resource)
 				continue
 			}
-			if !dbSchema.TableExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
 				// If table not found, skip.
 				continue
 			}
@@ -1900,6 +1900,10 @@ func (s *SQLService) checkQueryRights(
 	databaseMap := make(map[string]bool)
 	for _, resource := range resourceList {
 		databaseMap[resource.Database] = true
+	}
+
+	if databaseName != "" {
+		databaseMap[databaseName] = true
 	}
 
 	var project *store.ProjectMessage

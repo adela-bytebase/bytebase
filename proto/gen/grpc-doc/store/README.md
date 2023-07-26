@@ -96,6 +96,15 @@
   
     - [PlanConfig.ChangeDatabaseConfig.Type](#bytebase-store-PlanConfig-ChangeDatabaseConfig-Type)
   
+- [store/plan_check_run.proto](#store_plan_check_run-proto)
+    - [PlanCheckRunConfig](#bytebase-store-PlanCheckRunConfig)
+    - [PlanCheckRunResult](#bytebase-store-PlanCheckRunResult)
+    - [PlanCheckRunResult.Result](#bytebase-store-PlanCheckRunResult-Result)
+    - [PlanCheckRunResult.Result.SqlReviewReport](#bytebase-store-PlanCheckRunResult-Result-SqlReviewReport)
+    - [PlanCheckRunResult.Result.SqlSummaryReport](#bytebase-store-PlanCheckRunResult-Result-SqlSummaryReport)
+  
+    - [PlanCheckRunResult.Result.Status](#bytebase-store-PlanCheckRunResult-Result-Status)
+  
 - [store/policy.proto](#store_policy-proto)
     - [Binding](#bytebase-store-Binding)
     - [IamPolicy](#bytebase-store-IamPolicy)
@@ -595,6 +604,7 @@ ColumnMetadata is the metadata for columns.
 | character_set | [string](#string) |  | The character_set is the character_set of a column. |
 | collation | [string](#string) |  | The collation is the collation of a column. |
 | comment | [string](#string) |  | The comment is the comment of a column. |
+| category | [string](#string) |  | The category is the category of a table from the comment. |
 
 
 
@@ -826,6 +836,7 @@ TableMetadata is the metadata for tables.
 | data_free | [int64](#int64) |  | The data_free is the estimated free data size of a table. |
 | create_options | [string](#string) |  | The create_options is the create option of a table. |
 | comment | [string](#string) |  | The comment is the comment of a table. |
+| category | [string](#string) |  | The category is the category of a table from the comment. |
 | foreign_keys | [ForeignKeyMetadata](#bytebase-store-ForeignKeyMetadata) | repeated | The foreign_keys is the list of foreign keys in a table. |
 
 
@@ -1455,6 +1466,121 @@ Type is the database change type.
 
 
 
+<a name="store_plan_check_run-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## store/plan_check_run.proto
+
+
+
+<a name="bytebase-store-PlanCheckRunConfig"></a>
+
+### PlanCheckRunConfig
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| sheet_id | [int32](#int32) |  |  |
+| database_id | [int32](#int32) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-PlanCheckRunResult"></a>
+
+### PlanCheckRunResult
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| results | [PlanCheckRunResult.Result](#bytebase-store-PlanCheckRunResult-Result) | repeated |  |
+| error | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-PlanCheckRunResult-Result"></a>
+
+### PlanCheckRunResult.Result
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| status | [PlanCheckRunResult.Result.Status](#bytebase-store-PlanCheckRunResult-Result-Status) |  |  |
+| title | [string](#string) |  |  |
+| content | [string](#string) |  |  |
+| code | [int64](#int64) |  |  |
+| sql_summary_report | [PlanCheckRunResult.Result.SqlSummaryReport](#bytebase-store-PlanCheckRunResult-Result-SqlSummaryReport) |  |  |
+| sql_review_report | [PlanCheckRunResult.Result.SqlReviewReport](#bytebase-store-PlanCheckRunResult-Result-SqlReviewReport) |  |  |
+
+
+
+
+
+
+<a name="bytebase-store-PlanCheckRunResult-Result-SqlReviewReport"></a>
+
+### PlanCheckRunResult.Result.SqlReviewReport
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| line | [int64](#int64) |  |  |
+| detail | [string](#string) |  |  |
+| code | [int64](#int64) |  | Code from sql review. |
+
+
+
+
+
+
+<a name="bytebase-store-PlanCheckRunResult-Result-SqlSummaryReport"></a>
+
+### PlanCheckRunResult.Result.SqlSummaryReport
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| statement_type | [string](#string) |  |  |
+| affected_rows | [int64](#int64) |  |  |
+
+
+
+
+
+ 
+
+
+<a name="bytebase-store-PlanCheckRunResult-Result-Status"></a>
+
+### PlanCheckRunResult.Result.Status
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| STATUS_UNSPECIFIED | 0 |  |
+| ERROR | 1 |  |
+| WARNING | 2 |  |
+| SUCCESS | 3 |  |
+
+
+ 
+
+ 
+
+ 
+
+
+
 <a name="store_policy-proto"></a>
 <p align="right"><a href="#top">Top</a></p>
 
@@ -1609,6 +1735,7 @@ Reference: https://cloud.google.com/pubsub/docs/reference/rpc/google.iam.v1#bind
 | ----- | ---- | ----- | ----------- |
 | id | [string](#string) |  |  |
 | engine | [Engine](#bytebase-store-Engine) |  |  |
+| category | [string](#string) |  |  |
 | column | [ColumnMetadata](#bytebase-store-ColumnMetadata) |  |  |
 
 
@@ -1740,7 +1867,7 @@ We support three types of SMTP encryption: NONE, STARTTLS, and SSL/TLS.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| baseline_sheet_id | [int64](#int64) |  |  |
+| baseline_change_history_id | [string](#string) |  | The baseline instance change history id of the schema design. |
 | engine | [Engine](#bytebase-store-Engine) |  |  |
 
 

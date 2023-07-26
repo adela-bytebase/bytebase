@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/antlr4-go/antlr/v4"
 	mysql "github.com/bytebase/mysql-parser"
+	"github.com/pkg/errors"
 
 	"github.com/bytebase/bytebase/backend/common"
 	enterpriseAPI "github.com/bytebase/bytebase/backend/enterprise/api"
@@ -126,6 +126,9 @@ func (s *SchemaDesignService) CreateSchemaDesign(ctx context.Context, request *v
 	}
 	currentPrincipalID := ctx.Value(common.PrincipalIDContextKey).(int)
 	schemaDesign := request.SchemaDesign
+	if err := checkDatabaseMetadata(schemaDesign.Engine, schemaDesign.SchemaMetadata); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid schema design: %v", err))
+	}
 	instanceID, databaseName, err := getInstanceDatabaseID(schemaDesign.BaselineDatabase)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
@@ -147,25 +150,35 @@ func (s *SchemaDesignService) CreateSchemaDesign(ctx context.Context, request *v
 	if database == nil {
 		return nil, status.Errorf(codes.NotFound, "database %q not found", databaseName)
 	}
-	schemaVersionUID, err := strconv.ParseInt(schemaDesign.SchemaVersion, 10, 64)
-	if err != nil || schemaVersionUID <= 0 {
-		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid schema version %s, must be positive integer", schemaDesign.SchemaVersion))
-	}
-	changeHistory, err := s.store.GetInstanceChangeHistory(ctx, &store.FindInstanceChangeHistoryMessage{
-		ID: &schemaVersionUID,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-	if changeHistory == nil {
-		return nil, status.Errorf(codes.NotFound, "schema version %d not found", schemaVersionUID)
-	}
+
 	schemaDesignSheetPayload := &storepb.SheetPayload{
 		Type: storepb.SheetPayload_SCHEMA_DESIGN,
 		SchemaDesign: &storepb.SheetPayload_SchemaDesign{
-			BaselineSheetId: int64(*changeHistory.SheetID),
-			Engine:          storepb.Engine(schemaDesign.Engine),
+			Engine: storepb.Engine(schemaDesign.Engine),
 		},
+	}
+	if schemaDesign.SchemaVersion != "" {
+		instanceID, _, changeHistoryIDStr, err := getInstanceDatabaseIDChangeHistory(schemaDesign.SchemaVersion)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, err.Error())
+		}
+		instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{
+			ResourceID: &instanceID,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, err.Error())
+		}
+		changeHistory, err := s.store.GetInstanceChangeHistory(ctx, &store.FindInstanceChangeHistoryMessage{
+			ID:         &changeHistoryIDStr,
+			InstanceID: &instance.UID,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, err.Error())
+		}
+		if changeHistory == nil {
+			return nil, status.Errorf(codes.NotFound, "schema version %s not found", changeHistoryIDStr)
+		}
+		schemaDesignSheetPayload.SchemaDesign.BaselineChangeHistoryId = changeHistory.UID
 	}
 	payloadBytes, err := protojson.Marshal(schemaDesignSheetPayload)
 	if err != nil {
@@ -174,6 +187,10 @@ func (s *SchemaDesignService) CreateSchemaDesign(ctx context.Context, request *v
 	schema, err := getDesignSchema(schemaDesign.Engine, schemaDesign.BaselineSchema, schemaDesign.SchemaMetadata)
 	if err != nil {
 		return nil, err
+	}
+	// Try to transform the schema string to database metadata to make sure it's valid.
+	if _, err := transformSchemaStringToDatabaseMetadata(schemaDesign.Engine, schema); err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
 	}
 
 	sheetCreate := &store.SheetMessage{
@@ -201,6 +218,7 @@ func (s *SchemaDesignService) CreateSchemaDesign(ctx context.Context, request *v
 
 // UpdateSchemaDesign updates an existing schema design.
 func (s *SchemaDesignService) UpdateSchemaDesign(ctx context.Context, request *v1pb.UpdateSchemaDesignRequest) (*v1pb.SchemaDesign, error) {
+	currentPrincipalID := ctx.Value(common.PrincipalIDContextKey).(int)
 	_, sheetID, err := getProjectResourceIDAndSchemaDesignSheetID(request.SchemaDesign.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
@@ -212,18 +230,28 @@ func (s *SchemaDesignService) UpdateSchemaDesign(ctx context.Context, request *v
 	if request.UpdateMask == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "update_mask is required")
 	}
-	if !slices.Contains(request.UpdateMask.Paths, "schema") {
-		return nil, status.Errorf(codes.InvalidArgument, "schema is required")
+	if len(request.UpdateMask.Paths) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "update_mask is required")
 	}
 
-	schemaDesign := request.SchemaDesign
-	schema, err := getDesignSchema(schemaDesign.Engine, schemaDesign.BaselineSchema, schemaDesign.SchemaMetadata)
-	if err != nil {
-		return nil, err
-	}
 	sheetUpdate := &store.PatchSheetMessage{
 		UID:       sheetUID,
-		Statement: &schema,
+		UpdaterID: currentPrincipalID,
+	}
+	schemaDesign := request.SchemaDesign
+	if slices.Contains(request.UpdateMask.Paths, "title") {
+		sheetUpdate.Name = &schemaDesign.Title
+	}
+	if slices.Contains(request.UpdateMask.Paths, "schema") {
+		schema, err := getDesignSchema(schemaDesign.Engine, schemaDesign.BaselineSchema, schemaDesign.SchemaMetadata)
+		if err != nil {
+			return nil, err
+		}
+		// Try to transform the schema string to database metadata to make sure it's valid.
+		if _, err := transformSchemaStringToDatabaseMetadata(schemaDesign.Engine, schema); err != nil {
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
+		}
+		sheetUpdate.Statement = &schema
 	}
 	sheet, err := s.store.PatchSheet(ctx, sheetUpdate)
 	if err != nil {
@@ -341,24 +369,17 @@ func (s *SchemaDesignService) convertSheetToSchemaDesign(ctx context.Context, sh
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
 	}
 
-	baselineSheetID := int(sheetPayload.SchemaDesign.BaselineSheetId)
-	baselineSheet, err := s.getSheet(ctx, &store.FindSheetMessage{
-		UID: &baselineSheetID,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to find sheet: %v", err))
-	}
 	baselineSchema := ""
 	schemaVersion := ""
-	if baselineSheet != nil {
-		baselineSchema = baselineSheet.Statement
+	if sheetPayload.SchemaDesign.BaselineChangeHistoryId != "" {
 		changeHistory, err := s.store.GetInstanceChangeHistory(ctx, &store.FindInstanceChangeHistoryMessage{
-			SheetID: &baselineSheet.UID,
+			ID: &sheetPayload.SchemaDesign.BaselineChangeHistoryId,
 		})
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to find change history: %v", err))
 		}
 		if changeHistory != nil {
+			baselineSchema = changeHistory.Schema
 			schemaVersion = changeHistory.UID
 		}
 	}
@@ -495,8 +516,10 @@ func (s *schemaState) convertToSchemaMetadata() *v1pb.SchemaMetadata {
 }
 
 type tableState struct {
-	name    string
-	columns map[string]*columnState
+	name        string
+	columns     map[string]*columnState
+	indexes     map[string]*indexState
+	foreignKeys map[string]*foreignKeyState
 }
 
 func (t *tableState) toString(buf *strings.Builder) error {
@@ -520,6 +543,45 @@ func (t *tableState) toString(buf *strings.Builder) error {
 			return err
 		}
 	}
+
+	indexes := []*indexState{}
+	for _, index := range t.indexes {
+		indexes = append(indexes, index)
+	}
+	sort.Slice(indexes, func(i, j int) bool {
+		return indexes[i].name < indexes[j].name
+	})
+
+	for i, index := range indexes {
+		if i+len(columns) > 0 {
+			if _, err := buf.WriteString(",\n  "); err != nil {
+				return err
+			}
+		}
+		if err := index.toString(buf); err != nil {
+			return err
+		}
+	}
+
+	foreignKeys := []*foreignKeyState{}
+	for _, fk := range t.foreignKeys {
+		foreignKeys = append(foreignKeys, fk)
+	}
+	sort.Slice(foreignKeys, func(i, j int) bool {
+		return foreignKeys[i].name < foreignKeys[j].name
+	})
+
+	for i, fk := range foreignKeys {
+		if i+len(columns)+len(indexes) > 0 {
+			if _, err := buf.WriteString(",\n  "); err != nil {
+				return err
+			}
+		}
+		if err := fk.toString(buf); err != nil {
+			return err
+		}
+	}
+
 	if _, err := buf.WriteString("\n);\n"); err != nil {
 		return err
 	}
@@ -528,8 +590,10 @@ func (t *tableState) toString(buf *strings.Builder) error {
 
 func newTableState(name string) *tableState {
 	return &tableState{
-		name:    name,
-		columns: make(map[string]*columnState),
+		name:        name,
+		columns:     make(map[string]*columnState),
+		indexes:     make(map[string]*indexState),
+		foreignKeys: make(map[string]*foreignKeyState),
 	}
 }
 
@@ -537,6 +601,12 @@ func convertToTableState(table *v1pb.TableMetadata) *tableState {
 	state := newTableState(table.Name)
 	for _, column := range table.Columns {
 		state.columns[column.Name] = convertToColumnState(column)
+	}
+	for _, index := range table.Indexes {
+		state.indexes[index.Name] = convertToIndexState(index)
+	}
+	for _, fk := range table.ForeignKeys {
+		state.foreignKeys[fk.Name] = convertToForeignKeyState(fk)
 	}
 	return state
 }
@@ -549,13 +619,161 @@ func (t *tableState) convertToTableMetadata() *v1pb.TableMetadata {
 	sort.Slice(columns, func(i, j int) bool {
 		return columns[i].Name < columns[j].Name
 	})
-	return &v1pb.TableMetadata{
-		Name:    t.name,
-		Columns: columns,
-		// Unsupported, for tests only.
-		Indexes:     []*v1pb.IndexMetadata{},
-		ForeignKeys: []*v1pb.ForeignKeyMetadata{},
+
+	indexes := []*v1pb.IndexMetadata{}
+	for _, index := range t.indexes {
+		indexes = append(indexes, index.convertToIndexMetadata())
 	}
+	sort.Slice(indexes, func(i, j int) bool {
+		return indexes[i].Name < indexes[j].Name
+	})
+
+	fks := []*v1pb.ForeignKeyMetadata{}
+	for _, fk := range t.foreignKeys {
+		fks = append(fks, fk.convertToForeignKeyMetadata())
+	}
+	sort.Slice(fks, func(i, j int) bool {
+		return fks[i].Name < fks[j].Name
+	})
+
+	return &v1pb.TableMetadata{
+		Name:        t.name,
+		Columns:     columns,
+		Indexes:     indexes,
+		ForeignKeys: fks,
+	}
+}
+
+type foreignKeyState struct {
+	name              string
+	columns           []string
+	referencedTable   string
+	referencedColumns []string
+}
+
+func (f *foreignKeyState) convertToForeignKeyMetadata() *v1pb.ForeignKeyMetadata {
+	return &v1pb.ForeignKeyMetadata{
+		Name:              f.name,
+		Columns:           f.columns,
+		ReferencedTable:   f.referencedTable,
+		ReferencedColumns: f.referencedColumns,
+	}
+}
+
+func convertToForeignKeyState(foreignKey *v1pb.ForeignKeyMetadata) *foreignKeyState {
+	return &foreignKeyState{
+		name:              foreignKey.Name,
+		columns:           foreignKey.Columns,
+		referencedTable:   foreignKey.ReferencedTable,
+		referencedColumns: foreignKey.ReferencedColumns,
+	}
+}
+
+func (f *foreignKeyState) toString(buf *strings.Builder) error {
+	if _, err := buf.WriteString("CONSTRAINT `"); err != nil {
+		return err
+	}
+	if _, err := buf.WriteString(f.name); err != nil {
+		return err
+	}
+	if _, err := buf.WriteString("` FOREIGN KEY ("); err != nil {
+		return err
+	}
+	for i, column := range f.columns {
+		if i > 0 {
+			if _, err := buf.WriteString(", "); err != nil {
+				return err
+			}
+		}
+		if _, err := buf.WriteString("`"); err != nil {
+			return err
+		}
+		if _, err := buf.WriteString(column); err != nil {
+			return err
+		}
+		if _, err := buf.WriteString("`"); err != nil {
+			return err
+		}
+	}
+	if _, err := buf.WriteString(") REFERENCES `"); err != nil {
+		return err
+	}
+	if _, err := buf.WriteString(f.referencedTable); err != nil {
+		return err
+	}
+	if _, err := buf.WriteString("` ("); err != nil {
+		return err
+	}
+	for i, column := range f.referencedColumns {
+		if i > 0 {
+			if _, err := buf.WriteString(", "); err != nil {
+				return err
+			}
+		}
+		if _, err := buf.WriteString("`"); err != nil {
+			return err
+		}
+		if _, err := buf.WriteString(column); err != nil {
+			return err
+		}
+		if _, err := buf.WriteString("`"); err != nil {
+			return err
+		}
+	}
+	if _, err := buf.WriteString(")"); err != nil {
+		return err
+	}
+	return nil
+}
+
+type indexState struct {
+	name    string
+	keys    []string
+	primary bool
+	unique  bool
+}
+
+func (i *indexState) convertToIndexMetadata() *v1pb.IndexMetadata {
+	return &v1pb.IndexMetadata{
+		Name:        i.name,
+		Expressions: i.keys,
+		Primary:     i.primary,
+		Unique:      i.unique,
+		// Unsupported, for tests only.
+		Visible: true,
+	}
+}
+
+func convertToIndexState(index *v1pb.IndexMetadata) *indexState {
+	return &indexState{
+		name:    index.Name,
+		keys:    index.Expressions,
+		primary: index.Primary,
+		unique:  index.Unique,
+	}
+}
+
+func (i *indexState) toString(buf *strings.Builder) error {
+	if i.primary {
+		if _, err := buf.WriteString("PRIMARY KEY ("); err != nil {
+			return err
+		}
+		for i, key := range i.keys {
+			if i > 0 {
+				if _, err := buf.WriteString(", "); err != nil {
+					return err
+				}
+			}
+			if _, err := buf.WriteString(fmt.Sprintf("`%s`", key)); err != nil {
+				return err
+			}
+		}
+		if _, err := buf.WriteString(")"); err != nil {
+			return err
+		}
+	}
+	// TODO: support other type indexes.
+	return nil
 }
 
 type columnState struct {
@@ -567,7 +785,7 @@ type columnState struct {
 }
 
 func (c *columnState) toString(buf *strings.Builder) error {
-	if _, err := buf.WriteString(fmt.Sprintf("`%s`", c.name)); err != nil {
+	if _, err := buf.WriteString(fmt.Sprintf("`%s` %s", c.name, c.tp)); err != nil {
 		return err
 	}
 	if c.nullable {
@@ -581,10 +799,6 @@ func (c *columnState) toString(buf *strings.Builder) error {
 	}
 	if c.defaultValue != nil {
 		if _, err := buf.WriteString(fmt.Sprintf(" DEFAULT %s", *c.defaultValue)); err != nil {
-			return err
-		}
-	} else {
-		if _, err := buf.WriteString(" DEFAULT NULL"); err != nil {
 			return err
 		}
 	}
@@ -650,6 +864,97 @@ func (t *mysqlTransformer) EnterCreateTable(ctx *mysql.CreateTableContext) {
 // ExitCreateTable is called when production createTable is exited.
 func (t *mysqlTransformer) ExitCreateTable(_ *mysql.CreateTableContext) {
 	t.currentTable = ""
+}
+
+// EnterTableConstraintDef is called when production tableConstraintDef is entered.
+func (t *mysqlTransformer) EnterTableConstraintDef(ctx *mysql.TableConstraintDefContext) {
+	if t.err != nil || t.currentTable == "" {
+		return
+	}
+
+	if ctx.GetType_() != nil {
+		switch strings.ToUpper(ctx.GetType_().GetText()) {
+		case "PRIMARY":
+			list := extractKeyListVariants(ctx.KeyListVariants())
+			t.state.schemas[""].tables[t.currentTable].indexes["PRIMARY"] = &indexState{
+				name:    "PRIMARY",
+				keys:    list,
+				primary: true,
+				unique:  true,
+			}
+		case "FOREIGN":
+			var name string
+			if ctx.ConstraintName() != nil && ctx.ConstraintName().Identifier() != nil {
+				name = parser.NormalizeMySQLIdentifier(ctx.ConstraintName().Identifier())
+			} else if ctx.IndexName() != nil {
+				name = parser.NormalizeMySQLIdentifier(ctx.IndexName().Identifier())
+			}
+			keys := extractKeyList(ctx.KeyList())
+			table := t.state.schemas[""].tables[t.currentTable]
+			if table.foreignKeys[name] != nil {
+				t.err = errors.New("multiple foreign keys found: " + name)
+				return
+			}
+			referencedTable, referencedColumns := extractReference(ctx.References())
+			fk := &foreignKeyState{
+				name:              name,
+				columns:           keys,
+				referencedTable:   referencedTable,
+				referencedColumns: referencedColumns,
+			}
+			table.foreignKeys[name] = fk
+		}
+	}
+}
+
+func extractReference(ctx mysql.IReferencesContext) (string, []string) {
+	_, table := parser.NormalizeMySQLTableRef(ctx.TableRef())
+	if ctx.IdentifierListWithParentheses() != nil {
+		columns := extractIdentifierList(ctx.IdentifierListWithParentheses().IdentifierList())
+		return table, columns
+	}
+	return table, nil
+}
+
+func extractIdentifierList(ctx mysql.IIdentifierListContext) []string {
+	var result []string
+	for _, identifier := range ctx.AllIdentifier() {
+		result = append(result, parser.NormalizeMySQLIdentifier(identifier))
+	}
+	return result
+}
+
+func extractKeyListVariants(ctx mysql.IKeyListVariantsContext) []string {
+	if ctx.KeyList() != nil {
+		return extractKeyList(ctx.KeyList())
+	}
+	if ctx.KeyListWithExpression() != nil {
+		return extractKeyListWithExpression(ctx.KeyListWithExpression())
+	}
+	return nil
+}
+
+func extractKeyListWithExpression(ctx mysql.IKeyListWithExpressionContext) []string {
+	var result []string
+	for _, key := range ctx.AllKeyPartOrExpression() {
+		if key.KeyPart() != nil {
+			keyText := parser.NormalizeMySQLIdentifier(key.KeyPart().Identifier())
+			result = append(result, keyText)
+		} else if key.ExprWithParentheses() != nil {
+			keyText := key.GetParser().GetTokenStream().GetTextFromRuleContext(key.ExprWithParentheses())
+			result = append(result, keyText)
+		}
+	}
+	return result
+}
+
+func extractKeyList(ctx mysql.IKeyListContext) []string {
+	var result []string
+	for _, key := range ctx.AllKeyPart() {
+		keyText := parser.NormalizeMySQLIdentifier(key.Identifier())
+		result = append(result, keyText)
+	}
+	return result
 }
 
 // EnterColumnDefinition is called when production columnDefinition is entered.
@@ -752,6 +1057,8 @@ type mysqlDesignSchemaGenerator struct {
 	result              strings.Builder
 	currentTable        *tableState
 	firstElementInTable bool
+	columnDefine        strings.Builder
+	tableConstraints    strings.Builder
 	err                 error
 }
 
@@ -778,6 +1085,8 @@ func (g *mysqlDesignSchemaGenerator) EnterCreateTable(ctx *mysql.CreateTableCont
 
 	g.currentTable = table
 	g.firstElementInTable = true
+	g.columnDefine.Reset()
+	g.tableConstraints.Reset()
 
 	delete(schema.tables, tableName)
 	if _, err := g.result.WriteString("CREATE "); err != nil {
@@ -810,15 +1119,61 @@ func (g *mysqlDesignSchemaGenerator) ExitCreateTable(ctx *mysql.CreateTableConte
 		if g.firstElementInTable {
 			g.firstElementInTable = false
 		} else {
-			if _, err := g.result.WriteString(",\n  "); err != nil {
+			if _, err := g.columnDefine.WriteString(",\n  "); err != nil {
 				g.err = err
 				return
 			}
 		}
-		if err := column.toString(&g.result); err != nil {
+		if err := column.toString(&g.columnDefine); err != nil {
 			g.err = err
 			return
 		}
+	}
+
+	if g.currentTable.indexes["PRIMARY"] != nil {
+		if g.firstElementInTable {
+			g.firstElementInTable = false
+		} else {
+			if _, err := g.columnDefine.WriteString(",\n  "); err != nil {
+				g.err = err
+				return
+			}
+		}
+		if err := g.currentTable.indexes["PRIMARY"].toString(&g.tableConstraints); err != nil {
+			return
+		}
+	}
+
+	var fks []*foreignKeyState
+	for _, fk := range g.currentTable.foreignKeys {
+		fks = append(fks, fk)
+	}
+	sort.Slice(fks, func(i, j int) bool {
+		return fks[i].name < fks[j].name
+	})
+	for _, fk := range fks {
+		if g.firstElementInTable {
+			g.firstElementInTable = false
+		} else {
+			if _, err := g.columnDefine.WriteString(",\n  "); err != nil {
+				g.err = err
+				return
+			}
+		}
+		if err := fk.toString(&g.tableConstraints); err != nil {
+			g.err = err
+			return
+		}
+	}
+
+	if _, err := g.result.WriteString(g.columnDefine.String()); err != nil {
+		g.err = err
+		return
+	}
+
+	if _, err := g.result.WriteString(g.tableConstraints.String()); err != nil {
+		g.err = err
+		return
 	}
 
 	if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
@@ -926,6 +1281,109 @@ func getAttrOrder(attr mysql.IColumnAttributeContext) int {
 	return len(columnAttrOrder) + 1
 }
 
+// EnterTableConstraintDef is called when production tableConstraintDef is entered.
+func (g *mysqlDesignSchemaGenerator) EnterTableConstraintDef(ctx *mysql.TableConstraintDefContext) {
+	if g.err != nil || g.currentTable == nil {
+		return
+	}
+
+	if ctx.GetType_() == nil {
+		if _, err := g.tableConstraints.WriteString(ctx.GetParser().GetTokenStream().GetTextFromRuleContext(ctx)); err != nil {
+			g.err = err
+			return
+		}
+		return
+	}
+
+	switch strings.ToUpper(ctx.GetType_().GetText()) {
+	case "PRIMARY":
+		if g.currentTable.indexes["PRIMARY"] != nil {
+			if g.firstElementInTable {
+				g.firstElementInTable = false
+			} else {
+				if _, err := g.tableConstraints.WriteString(",\n  "); err != nil {
+					g.err = err
+					return
+				}
+			}
+
+			keys := extractKeyListVariants(ctx.KeyListVariants())
+			if equalKeys(keys, g.currentTable.indexes["PRIMARY"].keys) {
+				if _, err := g.tableConstraints.WriteString(ctx.GetParser().GetTokenStream().GetTextFromRuleContext(ctx)); err != nil {
+					g.err = err
+					return
+				}
+			} else {
+				if err := g.currentTable.indexes["PRIMARY"].toString(&g.tableConstraints); err != nil {
+					g.err = err
+					return
+				}
+			}
+			delete(g.currentTable.indexes, "PRIMARY")
+		}
+	case "FOREIGN":
+		var name string
+		if ctx.ConstraintName() != nil && ctx.ConstraintName().Identifier() != nil {
+			name = parser.NormalizeMySQLIdentifier(ctx.ConstraintName().Identifier())
+		} else if ctx.IndexName() != nil {
+			name = parser.NormalizeMySQLIdentifier(ctx.IndexName().Identifier())
+		}
+		if g.currentTable.foreignKeys[name] != nil {
+			if g.firstElementInTable {
+				g.firstElementInTable = false
+			} else {
+				if _, err := g.tableConstraints.WriteString(",\n  "); err != nil {
+					g.err = err
+					return
+				}
+			}
+
+			fk := g.currentTable.foreignKeys[name]
+
+			columns := extractKeyList(ctx.KeyList())
+			referencedTable, referencedColumns := extractReference(ctx.References())
+			equal := equalKeys(columns, fk.columns) && referencedTable == fk.referencedTable && equalKeys(referencedColumns, fk.referencedColumns)
+			if equal {
+				if _, err := g.tableConstraints.WriteString(ctx.GetParser().GetTokenStream().GetTextFromRuleContext(ctx)); err != nil {
+					g.err = err
+					return
+				}
+			} else {
+				if err := fk.toString(&g.tableConstraints); err != nil {
+					g.err = err
+					return
+				}
+			}
+			delete(g.currentTable.foreignKeys, name)
+		}
+	default:
+		if g.firstElementInTable {
+			g.firstElementInTable = false
+		} else {
+			if _, err := g.tableConstraints.WriteString(",\n  "); err != nil {
+				g.err = err
+				return
+			}
+		}
+		if _, err := g.tableConstraints.WriteString(ctx.GetParser().GetTokenStream().GetTextFromRuleContext(ctx)); err != nil {
+			g.err = err
+			return
+		}
+	}
+}
+
+func equalKeys(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, key := range a {
+		if key != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // EnterColumnDefinition is called when production columnDefinition is entered.
 func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefinitionContext) {
 	if g.err != nil || g.currentTable == nil {
@@ -943,7 +1401,7 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 	if g.firstElementInTable {
 		g.firstElementInTable = false
 	} else {
-		if _, err := g.result.WriteString(",\n  "); err != nil {
+		if _, err := g.columnDefine.WriteString(",\n  "); err != nil {
 			g.err = err
 			return
 		}
@@ -953,19 +1411,19 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 	typeCtx := ctx.FieldDefinition().DataType()
 	columnType := ctx.GetParser().GetTokenStream().GetTextFromRuleContext(typeCtx)
 	if columnType != column.tp {
-		if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+		if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 			Start: ctx.GetStart().GetTokenIndex(),
 			Stop:  typeCtx.GetStart().GetTokenIndex() - 1,
 		})); err != nil {
 			g.err = err
 			return
 		}
-		if _, err := g.result.WriteString(column.tp); err != nil {
+		if _, err := g.columnDefine.WriteString(column.tp); err != nil {
 			g.err = err
 			return
 		}
 	} else {
-		if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+		if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 			Start: ctx.GetStart().GetTokenIndex(),
 			Stop:  typeCtx.GetStop().GetTokenIndex(),
 		})); err != nil {
@@ -980,7 +1438,7 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 	for _, attribute := range ctx.FieldDefinition().AllColumnAttribute() {
 		attrOrder := getAttrOrder(attribute)
 		for ; len(newAttr) > 0 && newAttr[0].order < attrOrder; newAttr = newAttr[1:] {
-			if _, err := g.result.WriteString(" " + newAttr[0].text); err != nil {
+			if _, err := g.columnDefine.WriteString(" " + newAttr[0].text); err != nil {
 				g.err = err
 				return
 			}
@@ -991,7 +1449,7 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 			sameNullable := attribute.NOT_SYMBOL() == nil && column.nullable
 			sameNullable = sameNullable || (attribute.NOT_SYMBOL() != nil && !column.nullable)
 			if sameNullable {
-				if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+				if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 					Start: startPos,
 					Stop:  attribute.GetStop().GetTokenIndex(),
 				})); err != nil {
@@ -999,7 +1457,7 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 					return
 				}
 			} else {
-				if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+				if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 					Start: startPos,
 					Stop:  attribute.GetStart().GetTokenIndex() - 1,
 				})); err != nil {
@@ -1007,12 +1465,12 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 					return
 				}
 				if column.nullable {
-					if _, err := g.result.WriteString(" NULL"); err != nil {
+					if _, err := g.columnDefine.WriteString(" NULL"); err != nil {
 						g.err = err
 						return
 					}
 				} else {
-					if _, err := g.result.WriteString(" NOT NULL"); err != nil {
+					if _, err := g.columnDefine.WriteString(" NOT NULL"); err != nil {
 						g.err = err
 						return
 					}
@@ -1025,7 +1483,7 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 				Stop:  attribute.GetStop().GetTokenIndex(),
 			})
 			if column.defaultValue != nil && *column.defaultValue == defaultValue {
-				if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+				if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 					Start: startPos,
 					Stop:  attribute.GetStop().GetTokenIndex(),
 				})); err != nil {
@@ -1033,14 +1491,14 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 					return
 				}
 			} else if column.defaultValue != nil {
-				if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+				if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 					Start: startPos,
 					Stop:  defaultValueStart - 1,
 				})); err != nil {
 					g.err = err
 					return
 				}
-				if _, err := g.result.WriteString(*column.defaultValue); err != nil {
+				if _, err := g.columnDefine.WriteString(*column.defaultValue); err != nil {
 					g.err = err
 					return
 				}
@@ -1052,7 +1510,7 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 				Stop:  attribute.GetStop().GetTokenIndex(),
 			})
 			if commentValue != `''` && len(commentValue) > 2 && column.comment == commentValue[1:len(commentValue)-1] {
-				if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+				if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 					Start: startPos,
 					Stop:  attribute.GetStop().GetTokenIndex(),
 				})); err != nil {
@@ -1060,20 +1518,20 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 					return
 				}
 			} else if column.comment != "" {
-				if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+				if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 					Start: startPos,
 					Stop:  commentStart - 1,
 				})); err != nil {
 					g.err = err
 					return
 				}
-				if _, err := g.result.WriteString(fmt.Sprintf("'%s'", column.comment)); err != nil {
+				if _, err := g.columnDefine.WriteString(fmt.Sprintf("'%s'", column.comment)); err != nil {
 					g.err = err
 					return
 				}
 			}
 		default:
-			if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+			if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 				Start: startPos,
 				Stop:  attribute.GetStop().GetTokenIndex(),
 			})); err != nil {
@@ -1085,13 +1543,13 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 	}
 
 	for _, attr := range newAttr {
-		if _, err := g.result.WriteString(" " + attr.text); err != nil {
+		if _, err := g.columnDefine.WriteString(" " + attr.text); err != nil {
 			g.err = err
 			return
 		}
 	}
 
-	if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+	if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 		Start: startPos,
 		Stop:  ctx.GetStop().GetTokenIndex(),
 	})); err != nil {
@@ -1109,23 +1567,144 @@ func nextDefaultChannelTokenIndex(tokens antlr.TokenStream, currentIndex int) in
 	return 0
 }
 
-// EnterTableConstraintDef is called when production tableConstraintDef is entered.
-func (g *mysqlDesignSchemaGenerator) EnterTableConstraintDef(ctx *mysql.TableConstraintDefContext) {
-	if g.err != nil || g.currentTable == nil {
-		return
+func checkDatabaseMetadata(engine v1pb.Engine, metadata *v1pb.DatabaseMetadata) error {
+	type fkMetadata struct {
+		name                string
+		tableName           string
+		referencedTableName string
+		referencedColumns   []string
 	}
+	fkMap := make(map[string][]*fkMetadata)
+	if engine != v1pb.Engine_MYSQL {
+		return errors.Errorf("only mysql is supported")
+	}
+	for _, schema := range metadata.Schemas {
+		if schema.Name != "" {
+			return errors.Errorf("schema name should be empty for MySQL")
+		}
+		tableNameMap := make(map[string]bool)
+		for _, table := range schema.Tables {
+			if table.Name == "" {
+				return errors.Errorf("table name should not be empty")
+			}
+			if _, ok := tableNameMap[table.Name]; ok {
+				return errors.Errorf("duplicate table name %s", table.Name)
+			}
+			tableNameMap[table.Name] = true
+			columnNameMap := make(map[string]bool)
+			for _, column := range table.Columns {
+				if column.Name == "" {
+					return errors.Errorf("column name should not be empty in table %s", table.Name)
+				}
+				if _, ok := columnNameMap[column.Name]; ok {
+					return errors.Errorf("duplicate column name %s in table %s", column.Name, table.Name)
+				}
 
-	if g.firstElementInTable {
-		g.firstElementInTable = false
-	} else {
-		if _, err := g.result.WriteString(",\n  "); err != nil {
-			g.err = err
-			return
+				columnNameMap[column.Name] = true
+				if column.Type == "" {
+					return errors.Errorf("column %s type should not be empty in table %s", column.Name, table.Name)
+				}
+
+				if !checkMySQLColumnType(column.Type) {
+					return errors.Errorf("column %s type %s is invalid in table %s", column.Name, column.Type, table.Name)
+				}
+			}
+
+			indexNameMap := make(map[string]bool)
+			for _, index := range table.Indexes {
+				if index.Name == "" {
+					return errors.Errorf("index name should not be empty in table %s", table.Name)
+				}
+				if _, ok := indexNameMap[index.Name]; ok {
+					return errors.Errorf("duplicate index name %s in table %s", index.Name, table.Name)
+				}
+				indexNameMap[index.Name] = true
+				if index.Primary {
+					for _, key := range index.Expressions {
+						if _, ok := columnNameMap[key]; !ok {
+							return errors.Errorf("primary key column %s not found in table %s", key, table.Name)
+						}
+					}
+				}
+			}
+
+			for _, fk := range table.ForeignKeys {
+				if fk.Name == "" {
+					return errors.Errorf("foreign key name should not be empty in table %s", table.Name)
+				}
+				if _, ok := indexNameMap[fk.Name]; ok {
+					return errors.Errorf("duplicate foreign key name %s in table %s", fk.Name, table.Name)
+				}
+				indexNameMap[fk.Name] = true
+				for _, key := range fk.Columns {
+					if _, ok := columnNameMap[key]; !ok {
+						return errors.Errorf("foreign key column %s not found in table %s", key, table.Name)
+					}
+				}
+				fks, ok := fkMap[fk.ReferencedTable]
+				if !ok {
+					fks = []*fkMetadata{}
+					fkMap[fk.ReferencedTable] = fks
+				}
+				meta := &fkMetadata{
+					name:                fk.Name,
+					tableName:           table.Name,
+					referencedTableName: fk.ReferencedTable,
+					referencedColumns:   fk.ReferencedColumns,
+				}
+				fks = append(fks, meta)
+				fkMap[fk.ReferencedTable] = fks
+			}
+		}
+
+		// check foreign key reference
+		for _, table := range schema.Tables {
+			fks, ok := fkMap[table.Name]
+			if !ok {
+				continue
+			}
+			columnNameMap := make(map[string]bool)
+			for _, column := range table.Columns {
+				columnNameMap[column.Name] = true
+			}
+			for _, fk := range fks {
+				for _, key := range fk.referencedColumns {
+					if _, ok := columnNameMap[key]; !ok {
+						return errors.Errorf("foreign key %s in table %s references column %s in table %s but not found", fk.name, fk.tableName, key, fk.referencedTableName)
+					}
+				}
+				hasIndex := false
+				for _, index := range table.Indexes {
+					if len(index.Expressions) < len(fk.referencedColumns) {
+						continue
+					}
+					for i, key := range fk.referencedColumns {
+						if index.Expressions[i] != key {
+							break
+						}
+						if i == len(fk.referencedColumns)-1 {
+							hasIndex = true
+						}
+					}
+				}
+				if !hasIndex {
+					return errors.Errorf("missing index for foreign key %s for table %s in the referenced table '%s'", fk.name, fk.tableName, fk.referencedTableName)
+				}
+			}
+			delete(fkMap, table.Name)
+		}
+
+		for _, fks := range fkMap {
+			if len(fks) == 0 {
+				continue
+			}
+			return errors.Errorf("foreign key %s in table %s references table %s but not found", fks[0].name, fks[0].tableName, fks[0].referencedTableName)
 		}
 	}
+	return nil
+}
 
-	if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromRuleContext(ctx)); err != nil {
-		g.err = err
-		return
-	}
+func checkMySQLColumnType(tp string) bool {
+	_, err := parser.ParseMySQL(fmt.Sprintf("CREATE TABLE t (a %s NOT NULL)", tp))
+	return err == nil
 }

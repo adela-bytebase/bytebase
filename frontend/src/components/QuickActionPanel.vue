@@ -12,7 +12,7 @@
           <heroicons-outline:plus-sm class="w-5 h-5" />
         </button>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("quick-action.add-instance") }}
         </h3>
@@ -26,7 +26,7 @@
           <heroicons-outline:users class="w-5 h-5" />
         </router-link>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("quick-action.manage-user") }}
         </h3>
@@ -42,7 +42,7 @@
             <heroicons-outline:database class="w-5 h-5" />
           </button>
           <h3
-            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
           >
             {{ $t("quick-action.new-db") }}
           </h3>
@@ -60,7 +60,7 @@
             <heroicons-outline:pencil-alt class="w-5 h-5" />
           </button>
           <h3
-            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
           >
             {{ $t("database.alter-schema") }}
           </h3>
@@ -74,9 +74,23 @@
             <heroicons-outline:pencil class="w-5 h-5" />
           </button>
           <h3
-            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
           >
             {{ $t("database.change-data") }}
+          </h3>
+        </div>
+
+        <div
+          v-if="quickAction === 'quickaction.bb.database.schema.design'"
+          class="flex flex-col items-center w-24"
+        >
+          <button class="btn-icon-primary p-3" @click.prevent="designSchema">
+            <heroicons-outline:table-cells class="w-5 h-5" />
+          </button>
+          <h3
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
+          >
+            {{ $t("schema-designer.quick-action") }}
           </h3>
         </div>
       </template>
@@ -89,7 +103,7 @@
           <heroicons-outline:hand class="w-5 h-5" />
         </router-link>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("quick-action.troubleshoot") }}
         </h3>
@@ -103,7 +117,7 @@
           <heroicons-outline:plus-sm class="w-5 h-5" />
         </button>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("environment.create") }}
         </h3>
@@ -120,7 +134,7 @@
           <heroicons-outline:selector class="transform rotate-90 w-5 h-5" />
         </button>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("common.reorder") }}
         </h3>
@@ -135,7 +149,7 @@
           <heroicons-outline:template class="w-5 h-5" />
         </button>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("quick-action.new-project") }}
         </h3>
@@ -149,7 +163,7 @@
           <heroicons-outline:chevron-double-down class="w-5 h-5" />
         </button>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("quick-action.transfer-in-db") }}
         </h3>
@@ -166,7 +180,7 @@
           <heroicons-outline:chevron-double-up class="w-5 h-5" />
         </button>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("quick-action.transfer-out-db") }}
         </h3>
@@ -184,7 +198,7 @@
             <heroicons-outline:document-search class="w-5 h-5" />
           </button>
           <h3
-            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
           >
             {{ $t("quick-action.request-query") }}
           </h3>
@@ -201,7 +215,7 @@
             <heroicons-outline:document-download class="w-5 h-5" />
           </button>
           <h3
-            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+            class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
           >
             {{ $t("quick-action.request-export") }}
           </h3>
@@ -223,7 +237,7 @@
           <heroicons-outline:academic-cap class="w-5 h-5" />
         </button>
         <h3
-          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight"
+          class="flex-1 mt-1.5 text-center text-sm font-normal text-main tracking-tight whitespace-nowrap"
         >
           {{ $t("subscription.instance-assignment.assign-license") }}
         </h3>
@@ -259,6 +273,11 @@
       v-if="state.quickActionType === 'quickaction.bb.database.data.update'"
       :project-id="projectId"
       :type="'bb.issue.database.data.update'"
+      @dismiss="state.quickActionType = undefined"
+    />
+    <DesignSchemaPrepForm
+      v-if="state.quickActionType === 'quickaction.bb.database.schema.design'"
+      :project-id="projectId"
       @dismiss="state.quickActionType = undefined"
     />
     <TransferDatabaseForm
@@ -327,6 +346,7 @@ import TransferDatabaseForm from "@/components/TransferDatabaseForm.vue";
 import TransferOutDatabaseForm from "@/components/TransferOutDatabaseForm";
 import RequestExportPanel from "@/components/Issue/panel/RequestExportPanel/index.vue";
 import RequestQueryPanel from "@/components/Issue/panel/RequestQueryPanel/index.vue";
+import DesignSchemaPrepForm from "@/components/SchemaDesigner/PrepForm/index.vue";
 
 interface LocalState {
   feature?: string;
@@ -407,6 +427,10 @@ const createInstance = () => {
 
 const alterSchema = () => {
   state.quickActionType = "quickaction.bb.database.schema.update";
+};
+
+const designSchema = () => {
+  state.quickActionType = "quickaction.bb.database.schema.design";
 };
 
 const changeData = () => {

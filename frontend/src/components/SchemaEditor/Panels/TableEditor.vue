@@ -144,7 +144,7 @@
               <input
                 v-model="column.default"
                 :disabled="disableAlterColumn(column)"
-                :placeholder="column.default === undefined ? 'NULL' : 'EMPTY'"
+                :placeholder="column.default === undefined ? 'EMPTY' : 'NULL'"
                 class="column-field-input !pr-8"
                 type="text"
               />
@@ -282,10 +282,12 @@
     @close="state.showSchemaTemplateDrawer = false"
   >
     <DrawerContent :title="$t('schema-template.field-template')">
-      <SettingWorkspaceSchemaTemplate
-        :engine="databaseEngine"
-        @apply="handleApplyColumnTemplate"
-      />
+      <div class="w-[46rem]">
+        <SettingWorkspaceSchemaTemplate
+          :engine="databaseEngine"
+          @apply="handleApplyColumnTemplate"
+        />
+      </div>
     </DrawerContent>
   </Drawer>
   <FeatureModal
@@ -429,7 +431,7 @@ const columnHeaderList = computed(() => {
     },
     {
       key: "foreign_key",
-      label: "Foreign Key",
+      label: t("schema-editor.column.foreign-key"),
     },
   ];
 });
@@ -652,9 +654,9 @@ const handleColumnDefaultFieldChange = (
   defaultString: string
 ) => {
   if (defaultString === "NULL") {
-    column.default = undefined;
+    column.default = "NULL";
   } else if (defaultString === "EMPTY") {
-    column.default = "";
+    column.default = undefined;
   }
 };
 

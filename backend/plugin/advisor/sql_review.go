@@ -981,11 +981,19 @@ func convertWalkThroughErrorToAdvice(checkContext SQLReviewCheckContext, err err
 			Line:    walkThroughError.Line,
 			Details: details,
 		})
+	case catalog.ErrorTypeInvalidColumnTypeForDefaultValue:
+		res = append(res, Advice{
+			Status:  Error,
+			Code:    InvalidColumnDefault,
+			Title:   "Invalid column default value",
+			Content: walkThroughError.Content,
+			Line:    walkThroughError.Line,
+		})
 	default:
 		res = append(res, Advice{
 			Status:  Error,
 			Code:    Internal,
-			Title:   "Failed to walk-through",
+			Title:   fmt.Sprintf("Failed to walk-through with code %d", walkThroughError.Type),
 			Content: walkThroughError.Content,
 			Line:    walkThroughError.Line,
 		})
@@ -1055,6 +1063,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleWhereRequirement, nil
 		case db.Snowflake:
 			return SnowflakeWhereRequirement, nil
+		case db.MSSQL:
+			return MSSQLWhereRequirement, nil
 		}
 	case SchemaRuleStatementNoLeadingWildcardLike:
 		switch engine {
@@ -1086,6 +1096,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return PostgreSQLMigrationCompatibility, nil
 		case db.Snowflake:
 			return SnowflakeMigrationCompatibility, nil
+		case db.MSSQL:
+			return MSSQLMigrationCompatibility, nil
 		}
 	case SchemaRuleTableNaming:
 		switch engine {
@@ -1097,6 +1109,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleNamingTableConvention, nil
 		case db.Snowflake:
 			return SnowflakeNamingTableConvention, nil
+		case db.MSSQL:
+			return MSSQLNamingTableConvention, nil
 		}
 	case SchemaRuleIDXNaming:
 		switch engine {
@@ -1141,6 +1155,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleTableNamingNoKeyword, nil
 		case db.Snowflake:
 			return SnowflakeTableNamingNoKeyword, nil
+		case db.MSSQL:
+			return MSSQLTableNamingNoKeyword, nil
 		}
 	case SchemaRuleIdentifierNoKeyword:
 		switch engine {
@@ -1148,6 +1164,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleIdentifierNamingNoKeyword, nil
 		case db.Snowflake:
 			return SnowflakeIdentifierNamingNoKeyword, nil
+		case db.MSSQL:
+			return MSSQLIdentifierNamingNoKeyword, nil
 		}
 	case SchemaRuleIdentifierCase:
 		switch engine {
@@ -1166,6 +1184,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleColumnRequirement, nil
 		case db.Snowflake:
 			return SnowflakeColumnRequirement, nil
+		case db.MSSQL:
+			return MSSQLColumnRequirement, nil
 		}
 	case SchemaRuleColumnNotNull:
 		switch engine {
@@ -1177,6 +1197,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleColumnNoNull, nil
 		case db.Snowflake:
 			return SnowflakeColumnNoNull, nil
+		case db.MSSQL:
+			return MSSQLColumnNoNull, nil
 		}
 	case SchemaRuleColumnDisallowChangeType:
 		switch engine {
@@ -1239,6 +1261,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleColumnMaximumVarcharLength, nil
 		case db.Snowflake:
 			return SnowflakeColumnMaximumVarcharLength, nil
+		case db.MSSQL:
+			return MSSQLColumnMaximumVarcharLength, nil
 		}
 	case SchemaRuleColumnAutoIncrementInitialValue:
 		switch engine {
@@ -1278,6 +1302,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleTableRequirePK, nil
 		case db.Snowflake:
 			return SnowflakeTableRequirePK, nil
+		case db.MSSQL:
+			return MSSQLTableRequirePK, nil
 		}
 	case SchemaRuleTableNoFK:
 		switch engine {
@@ -1289,6 +1315,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return OracleTableNoFK, nil
 		case db.Snowflake:
 			return SnowflakeTableNoFK, nil
+		case db.MSSQL:
+			return MSSQLTableNoFK, nil
 		}
 	case SchemaRuleTableDropNamingConvention:
 		switch engine {
@@ -1298,6 +1326,8 @@ func getAdvisorTypeByRule(ruleType SQLReviewRuleType, engine db.Type) (Type, err
 			return PostgreSQLTableDropNamingConvention, nil
 		case db.Snowflake:
 			return SnowflakeTableDropNamingConvention, nil
+		case db.MSSQL:
+			return MSSQLTableDropNamingConvention, nil
 		}
 	case SchemaRuleTableCommentConvention:
 		switch engine {
