@@ -315,6 +315,7 @@ export interface ExternalApprovalSetting_Node {
 
 export interface SchemaTemplateSetting {
   fieldTemplates: SchemaTemplateSetting_FieldTemplate[];
+  columnTypes: SchemaTemplateSetting_ColumnType[];
 }
 
 export interface SchemaTemplateSetting_FieldTemplate {
@@ -322,6 +323,11 @@ export interface SchemaTemplateSetting_FieldTemplate {
   engine: Engine;
   category: string;
   column?: ColumnMetadata | undefined;
+}
+
+export interface SchemaTemplateSetting_ColumnType {
+  engine: Engine;
+  types: string[];
 }
 
 export interface WorkspaceTrialSetting {
@@ -333,19 +339,19 @@ export interface WorkspaceTrialSetting {
   plan: PlanType;
 }
 
-export interface DataCategorySetting {
-  configs: DataCategorySetting_DataCategoryConfig[];
+export interface DataClassificationSetting {
+  configs: DataClassificationSetting_DataClassificationConfig[];
 }
 
 /** Hard-coded schema comment format: [0-9]+-[0-9]+-[0-9]+ */
-export interface DataCategorySetting_DataCategoryConfig {
+export interface DataClassificationSetting_DataClassificationConfig {
   id: string;
   title: string;
-  /** Maps category to level. */
-  categoryLevel: { [key: string]: string };
+  /** Maps classification to level. */
+  classificationLevel: { [key: string]: string };
 }
 
-export interface DataCategorySetting_DataCategoryConfig_CategoryLevelEntry {
+export interface DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry {
   key: string;
   value: string;
 }
@@ -1831,13 +1837,16 @@ export const ExternalApprovalSetting_Node = {
 };
 
 function createBaseSchemaTemplateSetting(): SchemaTemplateSetting {
-  return { fieldTemplates: [] };
+  return { fieldTemplates: [], columnTypes: [] };
 }
 
 export const SchemaTemplateSetting = {
   encode(message: SchemaTemplateSetting, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     for (const v of message.fieldTemplates) {
       SchemaTemplateSetting_FieldTemplate.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    for (const v of message.columnTypes) {
+      SchemaTemplateSetting_ColumnType.encode(v!, writer.uint32(18).fork()).ldelim();
     }
     return writer;
   },
@@ -1856,6 +1865,13 @@ export const SchemaTemplateSetting = {
 
           message.fieldTemplates.push(SchemaTemplateSetting_FieldTemplate.decode(reader, reader.uint32()));
           continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.columnTypes.push(SchemaTemplateSetting_ColumnType.decode(reader, reader.uint32()));
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1870,6 +1886,9 @@ export const SchemaTemplateSetting = {
       fieldTemplates: Array.isArray(object?.fieldTemplates)
         ? object.fieldTemplates.map((e: any) => SchemaTemplateSetting_FieldTemplate.fromJSON(e))
         : [],
+      columnTypes: Array.isArray(object?.columnTypes)
+        ? object.columnTypes.map((e: any) => SchemaTemplateSetting_ColumnType.fromJSON(e))
+        : [],
     };
   },
 
@@ -1882,6 +1901,11 @@ export const SchemaTemplateSetting = {
     } else {
       obj.fieldTemplates = [];
     }
+    if (message.columnTypes) {
+      obj.columnTypes = message.columnTypes.map((e) => e ? SchemaTemplateSetting_ColumnType.toJSON(e) : undefined);
+    } else {
+      obj.columnTypes = [];
+    }
     return obj;
   },
 
@@ -1893,6 +1917,7 @@ export const SchemaTemplateSetting = {
     const message = createBaseSchemaTemplateSetting();
     message.fieldTemplates = object.fieldTemplates?.map((e) => SchemaTemplateSetting_FieldTemplate.fromPartial(e)) ||
       [];
+    message.columnTypes = object.columnTypes?.map((e) => SchemaTemplateSetting_ColumnType.fromPartial(e)) || [];
     return message;
   },
 };
@@ -1992,6 +2017,81 @@ export const SchemaTemplateSetting_FieldTemplate = {
     message.column = (object.column !== undefined && object.column !== null)
       ? ColumnMetadata.fromPartial(object.column)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseSchemaTemplateSetting_ColumnType(): SchemaTemplateSetting_ColumnType {
+  return { engine: 0, types: [] };
+}
+
+export const SchemaTemplateSetting_ColumnType = {
+  encode(message: SchemaTemplateSetting_ColumnType, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.engine !== 0) {
+      writer.uint32(8).int32(message.engine);
+    }
+    for (const v of message.types) {
+      writer.uint32(18).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): SchemaTemplateSetting_ColumnType {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSchemaTemplateSetting_ColumnType();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 8) {
+            break;
+          }
+
+          message.engine = reader.int32() as any;
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.types.push(reader.string());
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SchemaTemplateSetting_ColumnType {
+    return {
+      engine: isSet(object.engine) ? engineFromJSON(object.engine) : 0,
+      types: Array.isArray(object?.types) ? object.types.map((e: any) => String(e)) : [],
+    };
+  },
+
+  toJSON(message: SchemaTemplateSetting_ColumnType): unknown {
+    const obj: any = {};
+    message.engine !== undefined && (obj.engine = engineToJSON(message.engine));
+    if (message.types) {
+      obj.types = message.types.map((e) => e);
+    } else {
+      obj.types = [];
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<SchemaTemplateSetting_ColumnType>): SchemaTemplateSetting_ColumnType {
+    return SchemaTemplateSetting_ColumnType.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<SchemaTemplateSetting_ColumnType>): SchemaTemplateSetting_ColumnType {
+    const message = createBaseSchemaTemplateSetting_ColumnType();
+    message.engine = object.engine ?? 0;
+    message.types = object.types?.map((e) => e) || [];
     return message;
   },
 };
@@ -2119,22 +2219,22 @@ export const WorkspaceTrialSetting = {
   },
 };
 
-function createBaseDataCategorySetting(): DataCategorySetting {
+function createBaseDataClassificationSetting(): DataClassificationSetting {
   return { configs: [] };
 }
 
-export const DataCategorySetting = {
-  encode(message: DataCategorySetting, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const DataClassificationSetting = {
+  encode(message: DataClassificationSetting, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     for (const v of message.configs) {
-      DataCategorySetting_DataCategoryConfig.encode(v!, writer.uint32(10).fork()).ldelim();
+      DataClassificationSetting_DataClassificationConfig.encode(v!, writer.uint32(10).fork()).ldelim();
     }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): DataCategorySetting {
+  decode(input: _m0.Reader | Uint8Array, length?: number): DataClassificationSetting {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDataCategorySetting();
+    const message = createBaseDataClassificationSetting();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -2143,7 +2243,7 @@ export const DataCategorySetting = {
             break;
           }
 
-          message.configs.push(DataCategorySetting_DataCategoryConfig.decode(reader, reader.uint32()));
+          message.configs.push(DataClassificationSetting_DataClassificationConfig.decode(reader, reader.uint32()));
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -2154,49 +2254,55 @@ export const DataCategorySetting = {
     return message;
   },
 
-  fromJSON(object: any): DataCategorySetting {
+  fromJSON(object: any): DataClassificationSetting {
     return {
       configs: Array.isArray(object?.configs)
-        ? object.configs.map((e: any) => DataCategorySetting_DataCategoryConfig.fromJSON(e))
+        ? object.configs.map((e: any) => DataClassificationSetting_DataClassificationConfig.fromJSON(e))
         : [],
     };
   },
 
-  toJSON(message: DataCategorySetting): unknown {
+  toJSON(message: DataClassificationSetting): unknown {
     const obj: any = {};
     if (message.configs) {
-      obj.configs = message.configs.map((e) => e ? DataCategorySetting_DataCategoryConfig.toJSON(e) : undefined);
+      obj.configs = message.configs.map((e) =>
+        e ? DataClassificationSetting_DataClassificationConfig.toJSON(e) : undefined
+      );
     } else {
       obj.configs = [];
     }
     return obj;
   },
 
-  create(base?: DeepPartial<DataCategorySetting>): DataCategorySetting {
-    return DataCategorySetting.fromPartial(base ?? {});
+  create(base?: DeepPartial<DataClassificationSetting>): DataClassificationSetting {
+    return DataClassificationSetting.fromPartial(base ?? {});
   },
 
-  fromPartial(object: DeepPartial<DataCategorySetting>): DataCategorySetting {
-    const message = createBaseDataCategorySetting();
-    message.configs = object.configs?.map((e) => DataCategorySetting_DataCategoryConfig.fromPartial(e)) || [];
+  fromPartial(object: DeepPartial<DataClassificationSetting>): DataClassificationSetting {
+    const message = createBaseDataClassificationSetting();
+    message.configs = object.configs?.map((e) => DataClassificationSetting_DataClassificationConfig.fromPartial(e)) ||
+      [];
     return message;
   },
 };
 
-function createBaseDataCategorySetting_DataCategoryConfig(): DataCategorySetting_DataCategoryConfig {
-  return { id: "", title: "", categoryLevel: {} };
+function createBaseDataClassificationSetting_DataClassificationConfig(): DataClassificationSetting_DataClassificationConfig {
+  return { id: "", title: "", classificationLevel: {} };
 }
 
-export const DataCategorySetting_DataCategoryConfig = {
-  encode(message: DataCategorySetting_DataCategoryConfig, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const DataClassificationSetting_DataClassificationConfig = {
+  encode(
+    message: DataClassificationSetting_DataClassificationConfig,
+    writer: _m0.Writer = _m0.Writer.create(),
+  ): _m0.Writer {
     if (message.id !== "") {
       writer.uint32(10).string(message.id);
     }
     if (message.title !== "") {
       writer.uint32(18).string(message.title);
     }
-    Object.entries(message.categoryLevel).forEach(([key, value]) => {
-      DataCategorySetting_DataCategoryConfig_CategoryLevelEntry.encode(
+    Object.entries(message.classificationLevel).forEach(([key, value]) => {
+      DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry.encode(
         { key: key as any, value },
         writer.uint32(26).fork(),
       ).ldelim();
@@ -2204,10 +2310,10 @@ export const DataCategorySetting_DataCategoryConfig = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): DataCategorySetting_DataCategoryConfig {
+  decode(input: _m0.Reader | Uint8Array, length?: number): DataClassificationSetting_DataClassificationConfig {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDataCategorySetting_DataCategoryConfig();
+    const message = createBaseDataClassificationSetting_DataClassificationConfig();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -2230,9 +2336,12 @@ export const DataCategorySetting_DataCategoryConfig = {
             break;
           }
 
-          const entry3 = DataCategorySetting_DataCategoryConfig_CategoryLevelEntry.decode(reader, reader.uint32());
+          const entry3 = DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry.decode(
+            reader,
+            reader.uint32(),
+          );
           if (entry3.value !== undefined) {
-            message.categoryLevel[entry3.key] = entry3.value;
+            message.classificationLevel[entry3.key] = entry3.value;
           }
           continue;
       }
@@ -2244,12 +2353,12 @@ export const DataCategorySetting_DataCategoryConfig = {
     return message;
   },
 
-  fromJSON(object: any): DataCategorySetting_DataCategoryConfig {
+  fromJSON(object: any): DataClassificationSetting_DataClassificationConfig {
     return {
       id: isSet(object.id) ? String(object.id) : "",
       title: isSet(object.title) ? String(object.title) : "",
-      categoryLevel: isObject(object.categoryLevel)
-        ? Object.entries(object.categoryLevel).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+      classificationLevel: isObject(object.classificationLevel)
+        ? Object.entries(object.classificationLevel).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
@@ -2257,28 +2366,32 @@ export const DataCategorySetting_DataCategoryConfig = {
     };
   },
 
-  toJSON(message: DataCategorySetting_DataCategoryConfig): unknown {
+  toJSON(message: DataClassificationSetting_DataClassificationConfig): unknown {
     const obj: any = {};
     message.id !== undefined && (obj.id = message.id);
     message.title !== undefined && (obj.title = message.title);
-    obj.categoryLevel = {};
-    if (message.categoryLevel) {
-      Object.entries(message.categoryLevel).forEach(([k, v]) => {
-        obj.categoryLevel[k] = v;
+    obj.classificationLevel = {};
+    if (message.classificationLevel) {
+      Object.entries(message.classificationLevel).forEach(([k, v]) => {
+        obj.classificationLevel[k] = v;
       });
     }
     return obj;
   },
 
-  create(base?: DeepPartial<DataCategorySetting_DataCategoryConfig>): DataCategorySetting_DataCategoryConfig {
-    return DataCategorySetting_DataCategoryConfig.fromPartial(base ?? {});
+  create(
+    base?: DeepPartial<DataClassificationSetting_DataClassificationConfig>,
+  ): DataClassificationSetting_DataClassificationConfig {
+    return DataClassificationSetting_DataClassificationConfig.fromPartial(base ?? {});
   },
 
-  fromPartial(object: DeepPartial<DataCategorySetting_DataCategoryConfig>): DataCategorySetting_DataCategoryConfig {
-    const message = createBaseDataCategorySetting_DataCategoryConfig();
+  fromPartial(
+    object: DeepPartial<DataClassificationSetting_DataClassificationConfig>,
+  ): DataClassificationSetting_DataClassificationConfig {
+    const message = createBaseDataClassificationSetting_DataClassificationConfig();
     message.id = object.id ?? "";
     message.title = object.title ?? "";
-    message.categoryLevel = Object.entries(object.categoryLevel ?? {}).reduce<{ [key: string]: string }>(
+    message.classificationLevel = Object.entries(object.classificationLevel ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
           acc[key] = String(value);
@@ -2291,13 +2404,13 @@ export const DataCategorySetting_DataCategoryConfig = {
   },
 };
 
-function createBaseDataCategorySetting_DataCategoryConfig_CategoryLevelEntry(): DataCategorySetting_DataCategoryConfig_CategoryLevelEntry {
+function createBaseDataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry(): DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry {
   return { key: "", value: "" };
 }
 
-export const DataCategorySetting_DataCategoryConfig_CategoryLevelEntry = {
+export const DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry = {
   encode(
-    message: DataCategorySetting_DataCategoryConfig_CategoryLevelEntry,
+    message: DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry,
     writer: _m0.Writer = _m0.Writer.create(),
   ): _m0.Writer {
     if (message.key !== "") {
@@ -2309,10 +2422,13 @@ export const DataCategorySetting_DataCategoryConfig_CategoryLevelEntry = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): DataCategorySetting_DataCategoryConfig_CategoryLevelEntry {
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number,
+  ): DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDataCategorySetting_DataCategoryConfig_CategoryLevelEntry();
+    const message = createBaseDataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -2339,11 +2455,11 @@ export const DataCategorySetting_DataCategoryConfig_CategoryLevelEntry = {
     return message;
   },
 
-  fromJSON(object: any): DataCategorySetting_DataCategoryConfig_CategoryLevelEntry {
+  fromJSON(object: any): DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
 
-  toJSON(message: DataCategorySetting_DataCategoryConfig_CategoryLevelEntry): unknown {
+  toJSON(message: DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
@@ -2351,15 +2467,15 @@ export const DataCategorySetting_DataCategoryConfig_CategoryLevelEntry = {
   },
 
   create(
-    base?: DeepPartial<DataCategorySetting_DataCategoryConfig_CategoryLevelEntry>,
-  ): DataCategorySetting_DataCategoryConfig_CategoryLevelEntry {
-    return DataCategorySetting_DataCategoryConfig_CategoryLevelEntry.fromPartial(base ?? {});
+    base?: DeepPartial<DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry>,
+  ): DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry {
+    return DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry.fromPartial(base ?? {});
   },
 
   fromPartial(
-    object: DeepPartial<DataCategorySetting_DataCategoryConfig_CategoryLevelEntry>,
-  ): DataCategorySetting_DataCategoryConfig_CategoryLevelEntry {
-    const message = createBaseDataCategorySetting_DataCategoryConfig_CategoryLevelEntry();
+    object: DeepPartial<DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry>,
+  ): DataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry {
+    const message = createBaseDataClassificationSetting_DataClassificationConfig_ClassificationLevelEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
     return message;

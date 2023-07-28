@@ -54,7 +54,6 @@ func NewIssueService(store *store.Store, activityManager *activity.Manager, task
 }
 
 // GetIssue gets a issue.
-// Currently, only issue.ApprovalTemplates and issue.Approvers are set.
 func (s *IssueService) GetIssue(ctx context.Context, request *v1pb.GetIssueRequest) (*v1pb.Issue, error) {
 	issue, err := s.getIssueMessage(ctx, request.Name)
 	if err != nil {
@@ -95,6 +94,102 @@ func (s *IssueService) GetIssue(ctx context.Context, request *v1pb.GetIssueReque
 		return nil, status.Errorf(codes.Internal, "failed to convert to issue, error: %v", err)
 	}
 	return issueV1, nil
+}
+
+// CreateIssue creates a issue.
+func (s *IssueService) CreateIssue(ctx context.Context, request *v1pb.CreateIssueRequest) (*v1pb.Issue, error) {
+	creatorID := ctx.Value(common.PrincipalIDContextKey).(int)
+	projectID, err := common.GetProjectID(request.Parent)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get project, error: %v", err)
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project not found for id: %v", projectID)
+	}
+
+	if request.Issue.Plan == "" {
+		// TODO(p0ny): support plan-less issue
+		return nil, status.Errorf(codes.InvalidArgument, "plan is required")
+	}
+
+	var planUID *int64
+	planID, err := common.GetPlanID(request.Issue.Plan)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	plan, err := s.store.GetPlan(ctx, planID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get plan, error: %v", err)
+	}
+	if plan == nil {
+		return nil, status.Errorf(codes.NotFound, "plan not found for id: %d", planID)
+	}
+	planUID = &plan.UID
+
+	issueCreateMessage := &store.IssueMessage{
+		Project:     project,
+		PlanUID:     planUID,
+		PipelineUID: nil,
+		Title:       request.Issue.Title,
+		Status:      api.IssueOpen,
+		Type:        api.IssueDatabaseGeneral,
+		Description: request.Issue.Description,
+		Assignee: &store.UserMessage{
+			ID: api.SystemBotID,
+		},
+		NeedAttention: false,
+	}
+
+	// TODO(p0ny): find approval template
+	issueCreatePayload := &storepb.IssuePayload{
+		Approval: &storepb.IssuePayloadApproval{
+			ApprovalFindingDone: true,
+			ApprovalTemplates:   nil,
+			Approvers:           nil,
+		},
+	}
+	issueCreatePayloadBytes, err := protojson.Marshal(issueCreatePayload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal issue payload, error: %v", err)
+	}
+	issueCreateMessage.Payload = string(issueCreatePayloadBytes)
+
+	issue, err := s.store.CreateIssueV2(ctx, issueCreateMessage, creatorID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create issue, error: %v", err)
+	}
+	createActivityPayload := api.ActivityIssueCreatePayload{
+		IssueName: issue.Title,
+	}
+	bytes, err := json.Marshal(createActivityPayload)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create ActivityIssueCreate activity after creating the issue: %v", issue.Title)
+	}
+	activityCreate := &store.ActivityMessage{
+		CreatorUID:   creatorID,
+		ContainerUID: issue.UID,
+		Type:         api.ActivityIssueCreate,
+		Level:        api.ActivityInfo,
+		Payload:      string(bytes),
+	}
+	if _, err := s.activityManager.CreateActivity(ctx, activityCreate, &activity.Metadata{
+		Issue: issue,
+	}); err != nil {
+		return nil, errors.Wrapf(err, "failed to create ActivityIssueCreate activity after creating the issue: %v", issue.Title)
+	}
+
+	converted, err := convertToIssue(ctx, s.store, issue)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert to issue, error: %v", err)
+	}
+
+	return converted, nil
 }
 
 // ApproveIssue approves the approval flow of the issue.
@@ -675,7 +770,7 @@ func (s *IssueService) onIssueApproved(ctx context.Context, issue *store.IssueMe
 }
 
 func (s *IssueService) getIssueMessage(ctx context.Context, name string) (*store.IssueMessage, error) {
-	issueID, err := getIssueID(name)
+	issueID, err := common.GetIssueID(name)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
 	}
@@ -750,19 +845,20 @@ func convertToIssue(ctx context.Context, s *store.Store, issue *store.IssueMessa
 	}
 
 	issueV1 := &v1pb.Issue{
-		Name:                 fmt.Sprintf("%s%s/%s%d", projectNamePrefix, issue.Project.ResourceID, issuePrefix, issue.UID),
+		Name:                 fmt.Sprintf("%s%s/%s%d", common.ProjectNamePrefix, issue.Project.ResourceID, common.IssuePrefix, issue.UID),
 		Uid:                  fmt.Sprintf("%d", issue.UID),
 		Title:                issue.Title,
 		Description:          issue.Description,
+		Type:                 convertToIssueType(issue.Type),
 		Status:               convertToIssueStatus(issue.Status),
-		Assignee:             fmt.Sprintf("%s%s", userNamePrefix, issue.Assignee.Email),
+		Assignee:             fmt.Sprintf("%s%s", common.UserNamePrefix, issue.Assignee.Email),
 		AssigneeAttention:    issue.NeedAttention,
 		Approvers:            nil,
 		ApprovalTemplates:    nil,
 		ApprovalFindingDone:  false,
 		ApprovalFindingError: "",
 		Subscribers:          nil,
-		Creator:              fmt.Sprintf("%s%s", userNamePrefix, issue.Creator.Email),
+		Creator:              fmt.Sprintf("%s%s", common.UserNamePrefix, issue.Creator.Email),
 		CreateTime:           timestamppb.New(issue.CreatedTime),
 		UpdateTime:           timestamppb.New(issue.UpdatedTime),
 		Plan:                 "",
@@ -770,11 +866,14 @@ func convertToIssue(ctx context.Context, s *store.Store, issue *store.IssueMessa
 	}
 
 	if issue.PlanUID != nil {
-		issueV1.Plan = fmt.Sprintf("%s%s/%s%d", projectNamePrefix, issue.Project.ResourceID, planPrefix, *issue.PlanUID)
+		issueV1.Plan = fmt.Sprintf("%s%s/%s%d", common.ProjectNamePrefix, issue.Project.ResourceID, common.PlanPrefix, *issue.PlanUID)
+	}
+	if issue.PipelineUID != nil {
+		issueV1.Rollout = fmt.Sprintf("%s%s/%s%d", common.ProjectNamePrefix, issue.Project.ResourceID, common.RolloutPrefix, *issue.PipelineUID)
 	}
 
 	for _, subscriber := range issue.Subscribers {
-		issueV1.Subscribers = append(issueV1.Subscribers, fmt.Sprintf("%s%s", userNamePrefix, subscriber.Email))
+		issueV1.Subscribers = append(issueV1.Subscribers, fmt.Sprintf("%s%s", common.UserNamePrefix, subscriber.Email))
 	}
 
 	if issuePayload.Approval != nil {
@@ -795,6 +894,17 @@ func convertToIssue(ctx context.Context, s *store.Store, issue *store.IssueMessa
 	}
 
 	return issueV1, nil
+}
+
+func convertToIssueType(t api.IssueType) v1pb.Issue_Type {
+	switch t {
+	case api.IssueDatabaseCreate, api.IssueDatabaseSchemaUpdate, api.IssueDatabaseSchemaUpdateGhost, api.IssueDatabaseDataUpdate, api.IssueDatabaseRestorePITR, api.IssueDatabaseGeneral:
+		return v1pb.Issue_DATABASE_CHANGE
+	case api.IssueGrantRequest:
+		return v1pb.Issue_GRANT_REQUEST
+	default:
+		return v1pb.Issue_TYPE_UNSPECIFIED
+	}
 }
 
 func convertToIssueStatus(status api.IssueStatus) v1pb.IssueStatus {

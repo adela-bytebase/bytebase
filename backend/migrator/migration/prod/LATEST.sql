@@ -332,7 +332,8 @@ CREATE TABLE instance (
     resource_id TEXT NOT NULL,
     -- activation should set to be TRUE if users assign license to this instance.
     activation BOOLEAN NOT NULL DEFAULT false,
-    options JSONB NOT NULL DEFAULT '{}'
+    options JSONB NOT NULL DEFAULT '{}',
+    metadata JSONB NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX idx_instance_unique_resource_id ON instance(resource_id);
@@ -718,7 +719,7 @@ CREATE TABLE plan_check_run (
     created_ts BIGINT NOT NULL DEFAULT extract(epoch from now()),
     updater_id INTEGER NOT NULL REFERENCES principal (id),
     updated_ts BIGINT NOT NULL DEFAULT extract(epoch from now()),
-    plan_id INTEGER NOT NULL REFERENCES plan (id),
+    plan_id BIGINT NOT NULL REFERENCES plan (id),
     status TEXT NOT NULL CHECK (status IN ('RUNNING', 'DONE', 'FAILED', 'CANCELED')),
     type TEXT NOT NULL CHECK (type LIKE 'bb.plan-check.%'),
     config JSONB NOT NULL DEFAULT '{}',
