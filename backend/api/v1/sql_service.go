@@ -1183,7 +1183,8 @@ func (s *SQLService) getSensitiveSchemaInfo(ctx context.Context, instance *store
 	type sensitiveDataMap map[api.SensitiveData]api.SensitiveDataMaskType
 	isEmpty := true
 	result := &db.SensitiveSchemaInfo{
-		DatabaseList: []db.DatabaseSchema{},
+		IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
+		DatabaseList:        []db.DatabaseSchema{},
 	}
 	for _, name := range databaseList {
 		databaseName := name
@@ -1201,7 +1202,7 @@ func (s *SQLService) getSensitiveSchemaInfo(ctx context.Context, instance *store
 		database, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 			InstanceID:          &instance.ResourceID,
 			DatabaseName:        &databaseName,
-			IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+			IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 		})
 		if err != nil {
 			return nil, err
@@ -1537,7 +1538,7 @@ func (s *SQLService) prepareRelatedMessage(ctx context.Context, instanceToken st
 		database, err = s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 			InstanceID:          &instance.ResourceID,
 			DatabaseName:        &databaseName,
-			IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+			IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 		})
 		if err != nil {
 			return nil, nil, nil, nil, status.Errorf(codes.Internal, "failed to fetch database: %v", err)
@@ -1629,7 +1630,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 		databaseMessage, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 			InstanceID:          &instance.ResourceID,
 			DatabaseName:        &databaseName,
-			IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+			IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 		})
 		if err != nil {
 			if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == echo.ErrNotFound.Code {
@@ -1651,7 +1652,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				resourceDB, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 					InstanceID:          &instance.ResourceID,
 					DatabaseName:        &resource.Database,
-					IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+					IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 				})
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
@@ -1663,14 +1664,16 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database schema %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
 				}
-				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) && !resourceDBSchema.ViewExists(resource.Schema, resource.Table) {
+				if !resourceDBSchema.TableExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) &&
+					!resourceDBSchema.ViewExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) {
 					// If table not found, we regard it as a CTE/alias/... and skip.
 					continue
 				}
 				result = append(result, resource)
 				continue
 			}
-			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) &&
+				!dbSchema.ViewExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) {
 				// If table not found, skip.
 				continue
 			}
@@ -1686,7 +1689,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 		databaseMessage, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 			InstanceID:          &instance.ResourceID,
 			DatabaseName:        &databaseName,
-			IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+			IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 		})
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to fetch database: %v", err)
@@ -1707,7 +1710,8 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				continue
 			}
 
-			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) &&
+				!dbSchema.ViewExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) {
 				// If table not found, skip.
 				continue
 			}
@@ -1738,7 +1742,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 		databaseMessage, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 			InstanceID:          &instance.ResourceID,
 			DatabaseName:        &databaseName,
-			IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+			IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 		})
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to fetch database: %v", err)
@@ -1762,7 +1766,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				resourceDB, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 					InstanceID:          &instance.ResourceID,
 					DatabaseName:        &resource.Database,
-					IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+					IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 				})
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
@@ -1774,7 +1778,8 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database schema %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
 				}
-				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) && !resourceDBSchema.ViewExists(resource.Schema, resource.Table) {
+				if !resourceDBSchema.TableExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) &&
+					!resourceDBSchema.ViewExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) {
 					// If table not found, we regard it as a CTE/alias/... and skip.
 					continue
 				}
@@ -1782,7 +1787,8 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				continue
 			}
 
-			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) &&
+				!dbSchema.ViewExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) {
 				// If table not found, skip.
 				continue
 			}
@@ -1808,7 +1814,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 		databaseMessage, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 			InstanceID:          &instance.ResourceID,
 			DatabaseName:        &databaseName,
-			IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+			IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 		})
 		if err != nil {
 			if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == echo.ErrNotFound.Code {
@@ -1830,7 +1836,7 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				resourceDB, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 					InstanceID:          &instance.ResourceID,
 					DatabaseName:        &resource.Database,
-					IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+					IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 				})
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
@@ -1842,14 +1848,16 @@ func (s *SQLService) extractResourceList(ctx context.Context, engine parser.Engi
 				if err != nil {
 					return nil, status.Errorf(codes.Internal, "failed to get database schema %v in instance %v, err: %v", resource.Database, instance.ResourceID, err)
 				}
-				if !resourceDBSchema.TableExists(resource.Schema, resource.Table) && !resourceDBSchema.ViewExists(resource.Schema, resource.Table) {
+				if !resourceDBSchema.TableExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) &&
+					!resourceDBSchema.ViewExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) {
 					// If table not found, we regard it as a CTE/alias/... and skip.
 					continue
 				}
 				result = append(result, resource)
 				continue
 			}
-			if !dbSchema.TableExists(resource.Schema, resource.Table) && !dbSchema.ViewExists(resource.Schema, resource.Table) {
+			if !dbSchema.TableExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) &&
+				!dbSchema.ViewExists(resource.Schema, resource.Table, store.IgnoreDatabaseAndTableCaseSensitive(instance)) {
 				// If table not found, skip.
 				continue
 			}
@@ -2139,7 +2147,7 @@ func (s *SQLService) getProjectAndDatabaseMessage(ctx context.Context, instance 
 	databaseMessage, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 		InstanceID:          &instance.ResourceID,
 		DatabaseName:        &database,
-		IgnoreCaseSensitive: s.store.IgnoreDatabaseAndTableCaseSensitive(instance),
+		IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
 	})
 	if err != nil {
 		return nil, nil, err
