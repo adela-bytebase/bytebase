@@ -328,10 +328,6 @@ func (r *Runner) startAutoBackups(ctx context.Context) {
 			log.Error("Failed to get database", zap.Error(err))
 			return
 		}
-		if database.DatabaseName == api.AllDatabaseName {
-			// Skip backup job for wildcard database `*`.
-			continue
-		}
 		project, err := r.store.GetProjectV2(ctx, &store.FindProjectMessage{ResourceID: &database.ProjectID})
 		if err != nil {
 			log.Error("Failed to get project", zap.Error(err))
@@ -350,7 +346,7 @@ func (r *Runner) startAutoBackups(ctx context.Context) {
 		if instance.Engine == db.ClickHouse || instance.Engine == db.Snowflake || instance.Engine == db.MongoDB || instance.Engine == db.Spanner || instance.Engine == db.Redis || instance.Engine == db.Oracle {
 			continue
 		}
-		environment, err := r.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &instance.EnvironmentID})
+		environment, err := r.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &database.EffectiveEnvironmentID})
 		if err != nil {
 			log.Error("Failed to get environment", zap.Error(err))
 		}
@@ -413,7 +409,7 @@ func (r *Runner) ScheduleBackupTask(ctx context.Context, database *store.Databas
 	if instance.Deleted {
 		return nil, errors.Errorf("instance %q deleted", database.InstanceID)
 	}
-	environment, err := r.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &instance.EnvironmentID})
+	environment, err := r.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &database.EffectiveEnvironmentID})
 	if err != nil {
 		return nil, err
 	}
@@ -484,19 +480,46 @@ func (r *Runner) ScheduleBackupTask(ctx context.Context, database *store.Databas
 	}
 
 	createdStage := createdStages[0]
-	if _, err := r.store.CreateTasksV2(ctx, &store.TaskMessage{
-		Name:       fmt.Sprintf("backup-%s", backupName),
-		PipelineID: pipeline.ID,
-		StageID:    createdStage.ID,
-		InstanceID: instance.UID,
-		DatabaseID: &database.UID,
-		Status:     api.TaskPending,
-		Type:       api.TaskDatabaseBackup,
-		Payload:    string(bytes),
-		CreatorID:  creatorID,
-	}); err != nil {
-		return nil, errors.Wrapf(err, "failed to create task for backup %q", backupName)
+
+	if r.profile.DevelopmentUseV2Scheduler {
+		tasks, err := r.store.CreateTasksV2(ctx, &store.TaskMessage{
+			Name:       fmt.Sprintf("backup-%s", backupName),
+			PipelineID: pipeline.ID,
+			StageID:    createdStage.ID,
+			InstanceID: instance.UID,
+			DatabaseID: &database.UID,
+			Status:     api.TaskPendingApproval,
+			Type:       api.TaskDatabaseBackup,
+			Payload:    string(bytes),
+			CreatorID:  creatorID,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create task for backup %q", backupName)
+		}
+		task := tasks[0]
+		if err := r.store.CreatePendingTaskRuns(ctx, &store.TaskRunMessage{
+			CreatorID: creatorID,
+			TaskUID:   task.ID,
+			Name:      fmt.Sprintf("%s %d", task.Name, time.Now().Unix()),
+		}); err != nil {
+			return nil, errors.Wrapf(err, "failed to create pending task run for backup %q", backupName)
+		}
+	} else {
+		if _, err := r.store.CreateTasksV2(ctx, &store.TaskMessage{
+			Name:       fmt.Sprintf("backup-%s", backupName),
+			PipelineID: pipeline.ID,
+			StageID:    createdStage.ID,
+			InstanceID: instance.UID,
+			DatabaseID: &database.UID,
+			Status:     api.TaskPending,
+			Type:       api.TaskDatabaseBackup,
+			Payload:    string(bytes),
+			CreatorID:  creatorID,
+		}); err != nil {
+			return nil, errors.Wrapf(err, "failed to create task for backup %q", backupName)
+		}
 	}
+
 	return backupNew, nil
 }
 

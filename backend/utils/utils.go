@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -278,7 +279,7 @@ func GetDatabaseMatrixFromDeploymentSchedule(schedule *api.DeploymentSchedule, d
 	databaseMap := make(map[int]*store.DatabaseMessage)
 	for _, database := range databaseList {
 		databaseMap[database.UID] = database
-		idToLabels[database.UID] = database.Labels
+		idToLabels[database.UID] = database.GetEffectiveLabels()
 	}
 
 	// idsSeen records database id which is already in a stage.
@@ -367,6 +368,17 @@ func GetTaskSkippedAndReason(task *api.Task) (bool, string, error) {
 		return false, "", err
 	}
 	return payload.Skipped, payload.SkippedReason, nil
+}
+
+// GetTaskSkipped gets skipped from a task.
+func GetTaskSkipped(task *store.TaskMessage) (bool, error) {
+	var payload struct {
+		Skipped bool `json:"skipped,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
+		return false, err
+	}
+	return payload.Skipped, nil
 }
 
 // MergeTaskCreateLists merges a matrix of taskCreate and taskIndexDAG to a list of taskCreate and taskIndexDAG.
@@ -477,18 +489,18 @@ func passCheck(taskCheckRunList []*store.TaskCheckRunMessage, checkType api.Task
 }
 
 // ExecuteMigrationDefault executes migration.
-func ExecuteMigrationDefault(ctx context.Context, store *store.Store, driver db.Driver, mi *db.MigrationInfo, statement string, sheetID *int, opts db.ExecuteOptions) (migrationHistoryID string, updatedSchema string, resErr error) {
-	execFunc := func(execStatement string) error {
+func ExecuteMigrationDefault(ctx context.Context, driverCtx context.Context, store *store.Store, driver db.Driver, mi *db.MigrationInfo, statement string, sheetID *int, opts db.ExecuteOptions) (migrationHistoryID string, updatedSchema string, resErr error) {
+	execFunc := func(ctx context.Context, execStatement string) error {
 		if _, err := driver.Execute(ctx, execStatement, false /* createDatabase */, opts); err != nil {
 			return err
 		}
 		return nil
 	}
-	return ExecuteMigrationWithFunc(ctx, store, driver, mi, statement, sheetID, execFunc)
+	return ExecuteMigrationWithFunc(ctx, driverCtx, store, driver, mi, statement, sheetID, execFunc)
 }
 
 // ExecuteMigrationWithFunc executes the migration with custom migration function.
-func ExecuteMigrationWithFunc(ctx context.Context, s *store.Store, driver db.Driver, m *db.MigrationInfo, statement string, sheetID *int, execFunc func(execStatement string) error) (migrationHistoryID string, updatedSchema string, resErr error) {
+func ExecuteMigrationWithFunc(ctx context.Context, driverCtx context.Context, s *store.Store, driver db.Driver, m *db.MigrationInfo, statement string, sheetID *int, execFunc func(ctx context.Context, execStatement string) error) (migrationHistoryID string, updatedSchema string, resErr error) {
 	var prevSchemaBuf bytes.Buffer
 	// Don't record schema if the database hasn't existed yet or is schemaless, e.g. MongoDB.
 	// For baseline migration, we also record the live schema to detect the schema drift.
@@ -541,7 +553,7 @@ func ExecuteMigrationWithFunc(ctx context.Context, s *store.Store, driver db.Dri
 			// To avoid leak the rendered statement, the error message should use the original statement and not the rendered statement.
 			renderedStatement = RenderStatement(statement, materials)
 		}
-		if err := execFunc(renderedStatement); err != nil {
+		if err := execFunc(driverCtx, renderedStatement); err != nil {
 			return "", "", err
 		}
 	}
@@ -956,4 +968,76 @@ func ConvertVcsPushEvent(pushEvent *vcs.PushEvent) *storepb.PushEvent {
 		Commits:            convertVcsPushEventCommits(pushEvent.CommitList),
 		FileCommit:         convertVcsPushEventFileCommit(&pushEvent.FileCommit),
 	}
+}
+
+// GetMatchedAndUnmatchedDatabasesInDatabaseGroup returns the matched and unmatched databases in the given database group.
+func GetMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx context.Context, databaseGroup *store.DatabaseGroupMessage, allDatabases []*store.DatabaseMessage) ([]*store.DatabaseMessage, []*store.DatabaseMessage, error) {
+	prog, err := common.ValidateGroupCELExpr(databaseGroup.Expression.Expression)
+	if err != nil {
+		return nil, nil, err
+	}
+	var matches []*store.DatabaseMessage
+	var unmatches []*store.DatabaseMessage
+
+	// DONOT check bb.feature.database-grouping for instance. The API here is read-only in the frontend, we need to show if the instance is matched but missing required license.
+	// The feature guard will works during issue creation.
+	for _, database := range allDatabases {
+		res, _, err := prog.ContextEval(ctx, map[string]any{
+			"resource": map[string]any{
+				"database_name":    database.DatabaseName,
+				"environment_name": fmt.Sprintf("%s%s", common.EnvironmentNamePrefix, database.EffectiveEnvironmentID),
+				"instance_id":      database.InstanceID,
+			},
+		})
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, err.Error())
+		}
+
+		val, err := res.ConvertToNative(reflect.TypeOf(false))
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "expect bool result")
+		}
+		if boolVal, ok := val.(bool); ok && boolVal {
+			matches = append(matches, database)
+		} else {
+			unmatches = append(unmatches, database)
+		}
+	}
+	return matches, unmatches, nil
+}
+
+// GetMatchedAndUnmatchedTablesInSchemaGroup returns the matched and unmatched tables in the given schema group.
+func GetMatchedAndUnmatchedTablesInSchemaGroup(ctx context.Context, dbSchema *store.DBSchema, schemaGroup *store.SchemaGroupMessage) ([]string, []string, error) {
+	prog, err := common.ValidateGroupCELExpr(schemaGroup.Expression.Expression)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var matched []string
+	var unmatched []string
+
+	for _, schema := range dbSchema.Metadata.Schemas {
+		for _, table := range schema.Tables {
+			res, _, err := prog.ContextEval(ctx, map[string]any{
+				"resource": map[string]any{
+					"table_name": table.Name,
+				},
+			})
+			if err != nil {
+				return nil, nil, status.Errorf(codes.Internal, err.Error())
+			}
+
+			val, err := res.ConvertToNative(reflect.TypeOf(false))
+			if err != nil {
+				return nil, nil, status.Errorf(codes.Internal, "expect bool result")
+			}
+
+			if boolVal, ok := val.(bool); ok && boolVal {
+				matched = append(matched, table.Name)
+			} else {
+				unmatched = append(unmatched, table.Name)
+			}
+		}
+	}
+	return matched, unmatched, nil
 }

@@ -1,9 +1,9 @@
 import { useI18n } from "vue-i18n";
-import planData from "./plan.yaml";
 import {
   PlanType,
   planTypeFromJSON,
 } from "@/types/proto/v1/subscription_service";
+import planData from "./plan.yaml";
 
 // Check api/plan.go to understand what each feature means.
 export type FeatureType =
@@ -17,6 +17,7 @@ export type FeatureType =
   | "bb.feature.disallow-signup"
   | "bb.feature.watermark"
   | "bb.feature.audit-log"
+  | "bb.feature.issue-advanced-search"
   // Branding
   | "bb.feature.branding"
   // Change Workflow
@@ -59,7 +60,6 @@ export const instanceLimitFeature = new Set<FeatureType>([
   "bb.feature.im.approval",
   "bb.feature.schema-drift",
   "bb.feature.encrypted-secrets",
-  "bb.feature.sql-review",
   "bb.feature.task-schedule-time",
   "bb.feature.online-migration",
   // Database Management
@@ -130,7 +130,7 @@ export const userCountLimit = new Map<PlanType, number>([
 ]);
 
 export const instanceCountLimit = new Map<PlanType, number>([
-  [PlanType.FREE, 20],
+  [PlanType.FREE, 10],
   [PlanType.TEAM, 20],
   [PlanType.ENTERPRISE, Number.MAX_VALUE],
 ]);

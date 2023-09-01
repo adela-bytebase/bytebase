@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	v1 "github.com/bytebase/bytebase/backend/api/v1"
 	"github.com/bytebase/bytebase/backend/common"
 	"github.com/bytebase/bytebase/backend/common/log"
 	"github.com/bytebase/bytebase/backend/component/activity"
@@ -134,33 +135,35 @@ func (r *Runner) findApprovalTemplateForIssue(ctx context.Context, issue *store.
 		return true, nil
 	}
 
-	riskSource := getIssueRiskResource(issue)
-
-	// no need to find if
-	// - feature is not enabled
-	// - risk source is RiskSourceUnknown
-	// - approval setting rules are empty
-	if r.licenseService.IsFeatureEnabled(api.FeatureCustomApproval) != nil || ((riskSource == store.RiskSourceUnknown || len(approvalSetting.Rules) == 0) && issue.Type != api.IssueGrantRequest) {
-		if err := updateIssuePayload(ctx, r.store, issue, &storepb.IssuePayload{
-			Approval: &storepb.IssuePayloadApproval{
-				ApprovalFindingDone: true,
-				ApprovalTemplates:   nil,
-				Approvers:           nil,
-			},
-		}); err != nil {
-			return false, errors.Wrap(err, "failed to update issue payload")
+	approvalTemplate, done, err := func() (*storepb.ApprovalTemplate, bool, error) {
+		// no need to find if
+		// - feature is not enabled
+		// - approval setting rules are empty
+		if r.licenseService.IsFeatureEnabled(api.FeatureCustomApproval) != nil || len(approvalSetting.Rules) == 0 {
+			// nolint:nilerr
+			return nil, true, nil
 		}
-		return true, nil
-	}
 
-	riskLevel, done, err := getIssueRiskLevel(ctx, r.store, issue, risks)
+		riskLevel, riskSource, done, err := getIssueRisk(ctx, r.store, r.licenseService, r.dbFactory, issue, risks)
+		if err != nil {
+			err = errors.Wrap(err, "failed to get issue risk level")
+			return nil, false, err
+		}
+		if !done {
+			return nil, false, nil
+		}
+
+		approvalTemplate, err := getApprovalTemplate(approvalSetting, riskLevel, riskSource)
+		if err != nil {
+			err = errors.Wrapf(err, "failed to get approval template, riskLevel: %v", riskLevel)
+		}
+
+		return approvalTemplate, true, err
+	}()
 	if err != nil {
-		err = errors.Wrap(err, "failed to get issue risk level")
-		if updateErr := updateIssuePayload(ctx, r.store, issue, &storepb.IssuePayload{
-			Approval: &storepb.IssuePayloadApproval{
-				ApprovalFindingDone:  true,
-				ApprovalFindingError: err.Error(),
-			},
+		if updateErr := updateIssueApprovalPayload(ctx, r.store, issue, &storepb.IssuePayloadApproval{
+			ApprovalFindingDone:  true,
+			ApprovalFindingError: err.Error(),
 		}); updateErr != nil {
 			return false, multierr.Append(errors.Wrap(updateErr, "failed to update issue payload"), err)
 		}
@@ -168,20 +171,6 @@ func (r *Runner) findApprovalTemplateForIssue(ctx context.Context, issue *store.
 	}
 	if !done {
 		return false, nil
-	}
-
-	approvalTemplate, err := getApprovalTemplate(approvalSetting, riskLevel, riskSource)
-	if err != nil {
-		err = errors.Wrapf(err, "failed to get approval template, riskLevel: %v", riskLevel)
-		if updateErr := updateIssuePayload(ctx, r.store, issue, &storepb.IssuePayload{
-			Approval: &storepb.IssuePayloadApproval{
-				ApprovalFindingDone:  true,
-				ApprovalFindingError: err.Error(),
-			},
-		}); updateErr != nil {
-			return false, multierr.Append(errors.Wrap(updateErr, "failed to update issue payload"), err)
-		}
-		return false, err
 	}
 
 	// Grant privilege and close issue similar to actions on issue approval.
@@ -224,11 +213,9 @@ func (r *Runner) findApprovalTemplateForIssue(ctx context.Context, issue *store.
 	newApprovers, activityCreates, err := utils.HandleIncomingApprovalSteps(ctx, r.store, r.relayRunner.Client, issue, payload.Approval)
 	if err != nil {
 		err = errors.Wrapf(err, "failed to handle incoming approval steps")
-		if updateErr := updateIssuePayload(ctx, r.store, issue, &storepb.IssuePayload{
-			Approval: &storepb.IssuePayloadApproval{
-				ApprovalFindingDone:  true,
-				ApprovalFindingError: err.Error(),
-			},
+		if updateErr := updateIssueApprovalPayload(ctx, r.store, issue, &storepb.IssuePayloadApproval{
+			ApprovalFindingDone:  true,
+			ApprovalFindingError: err.Error(),
 		}); updateErr != nil {
 			return false, multierr.Append(errors.Wrap(updateErr, "failed to update issue payload"), err)
 		}
@@ -236,7 +223,7 @@ func (r *Runner) findApprovalTemplateForIssue(ctx context.Context, issue *store.
 	}
 	payload.Approval.Approvers = append(payload.Approval.Approvers, newApprovers...)
 
-	if err := updateIssuePayload(ctx, r.store, issue, payload); err != nil {
+	if err := updateIssueApprovalPayload(ctx, r.store, issue, payload.Approval); err != nil {
 		return false, errors.Wrap(err, "failed to update issue payload")
 	}
 
@@ -332,73 +319,417 @@ func getApprovalTemplate(approvalSetting *storepb.WorkspaceApprovalSetting, risk
 	return nil, nil
 }
 
-func getIssueRiskResource(issue *store.IssueMessage) store.RiskSource {
-	if issue == nil {
-		return store.RiskSourceUnknown
-	}
-
+func getIssueRisk(ctx context.Context, s *store.Store, licenseService enterpriseAPI.LicenseService, dbFactory *dbfactory.DBFactory, issue *store.IssueMessage, risks []*store.RiskMessage) (int64, store.RiskSource, bool, error) {
 	switch issue.Type {
-	case api.IssueDatabaseSchemaUpdate, api.IssueDatabaseSchemaUpdateGhost:
-		return store.RiskSourceDatabaseSchemaUpdate
-	case api.IssueDatabaseDataUpdate:
-		return store.RiskSourceDatabaseDataUpdate
-	case api.IssueDatabaseCreate:
-		return store.RiskSourceDatabaseCreate
 	case api.IssueGrantRequest:
-		payload := &storepb.IssuePayload{}
-		if err := protojson.Unmarshal([]byte(issue.Payload), payload); err != nil {
-			return store.RiskSourceUnknown
-		}
-
-		if payload.GrantRequest == nil {
-			return store.RiskSourceUnknown
-		}
-		if payload.GrantRequest.Role == "roles/EXPORTER" {
-			return store.RiskRequestExport
-		} else if payload.GrantRequest.Role == "roles/QUERIER" {
-			return store.RiskRequestQuery
-		} else {
-			return store.RiskSourceUnknown
-		}
+		return getGrantRequestIssueRisk(ctx, s, issue, risks)
+	case api.IssueDatabaseCreate, api.IssueDatabaseSchemaUpdate, api.IssueDatabaseSchemaUpdateGhost, api.IssueDatabaseDataUpdate:
+		return getDatabaseChangeIssueRisk(ctx, s, issue, risks)
+	case api.IssueDatabaseRestorePITR:
+		return 0, store.RiskSourceUnknown, true, nil
+	case api.IssueDatabaseGeneral:
+		return getDatabaseGeneralIssueRisk(ctx, s, licenseService, dbFactory, issue, risks)
+	case api.IssueGeneral:
+		return 0, store.RiskSourceUnknown, false, errors.Errorf("unsupported issue type %v", issue.Type)
+	default:
+		return 0, store.RiskSourceUnknown, false, errors.Errorf("unknown issue type %v", issue.Type)
 	}
-
-	return store.RiskSourceUnknown
 }
 
-func getIssueRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMessage, risks []*store.RiskMessage) (int64, bool, error) {
-	if issue.Type == api.IssueGrantRequest {
-		riskLevel, done, err := getGrantRequestRiskLevel(ctx, s, issue, risks)
-		if err != nil {
-			return 0, false, errors.Wrap(err, "failed to get grant request risk level")
+func getDatabaseGeneralIssueRisk(ctx context.Context, s *store.Store, licenseService enterpriseAPI.LicenseService, dbFactory *dbfactory.DBFactory, issue *store.IssueMessage, risks []*store.RiskMessage) (int64, store.RiskSource, bool, error) {
+	if issue.PlanUID == nil {
+		return 0, store.RiskSourceUnknown, false, errors.Errorf("expected plan UID in issue %v", issue.UID)
+	}
+	plan, err := s.GetPlan(ctx, &store.FindPlanMessage{UID: issue.PlanUID})
+	if err != nil {
+		return 0, store.RiskSourceUnknown, false, errors.Wrapf(err, "failed to get plan %v", *issue.PlanUID)
+	}
+	if plan == nil {
+		return 0, store.RiskSourceUnknown, false, errors.Errorf("plan %v not found", *issue.PlanUID)
+	}
+
+	planCheckRuns, err := s.ListPlanCheckRuns(ctx, &store.FindPlanCheckRunMessage{
+		PlanUID: &plan.UID,
+		Type:    &[]store.PlanCheckRunType{store.PlanCheckDatabaseStatementSummaryReport},
+	})
+	if err != nil {
+		return 0, store.RiskSourceUnknown, false, errors.Wrapf(err, "failed to list plan check runs for plan %v", plan.UID)
+	}
+	type Key struct {
+		InstanceUID  int
+		DatabaseName string
+	}
+	latestPlanCheckRun := map[Key]*store.PlanCheckRunMessage{}
+	for _, run := range planCheckRuns {
+		key := Key{
+			InstanceUID:  int(run.Config.InstanceUid),
+			DatabaseName: run.Config.DatabaseName,
 		}
-		if !done {
-			return 0, false, nil
+		oldValue, ok := latestPlanCheckRun[key]
+		if !ok || oldValue.UID < run.UID {
+			latestPlanCheckRun[key] = run
 		}
-		return riskLevel, true, nil
+	}
+	for _, run := range latestPlanCheckRun {
+		// the latest plan check run is not done yet, return done=false
+		if run.Status != store.PlanCheckRunStatusDone {
+			return 0, store.RiskSourceUnknown, false, nil
+		}
+	}
+
+	pipelineCreate, err := v1.GetPipelineCreate(ctx, s, licenseService, dbFactory, plan.Config.Steps, issue.Project)
+	if err != nil {
+		return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to get pipeline create")
+	}
+
+	// Conclude risk source from task types.
+	seenTaskType := map[api.TaskType]bool{}
+	for _, stage := range pipelineCreate.Stages {
+		for _, task := range stage.TaskList {
+			seenTaskType[task.Type] = true
+		}
+	}
+	riskSource := func() store.RiskSource {
+		if seenTaskType[api.TaskDatabaseCreate] {
+			return store.RiskSourceDatabaseCreate
+		}
+		if seenTaskType[api.TaskDatabaseSchemaUpdate] || seenTaskType[api.TaskDatabaseSchemaUpdateSDL] || seenTaskType[api.TaskDatabaseSchemaUpdateGhostSync] {
+			return store.RiskSourceDatabaseSchemaUpdate
+		}
+		if seenTaskType[api.TaskDatabaseDataUpdate] {
+			return store.RiskSourceDatabaseDataUpdate
+		}
+		return store.RiskSourceUnknown
+	}()
+
+	// cannot conclude risk source
+	if riskSource == store.RiskSourceUnknown {
+		return 0, store.RiskSourceUnknown, true, nil
+	}
+
+	e, err := cel.NewEnv(common.RiskFactors...)
+	if err != nil {
+		return 0, store.RiskSourceUnknown, false, err
+	}
+
+	var maxRiskLevel int64
+	for _, stage := range pipelineCreate.Stages {
+		for _, task := range stage.TaskList {
+			instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{
+				UID: &task.InstanceID,
+			})
+			if err != nil {
+				return 0, store.RiskSourceUnknown, false, errors.Wrapf(err, "failed to get instance %v", task.InstanceID)
+			}
+			if instance.Deleted {
+				continue
+			}
+
+			environmentID := instance.EnvironmentID
+			var databaseName string
+			if task.Type == api.TaskDatabaseCreate {
+				payload := &api.TaskDatabaseCreatePayload{}
+				if err := json.Unmarshal([]byte(task.Payload), payload); err != nil {
+					return 0, store.RiskSourceUnknown, false, err
+				}
+				databaseName = payload.DatabaseName
+				if payload.EnvironmentID != "" {
+					environmentID = payload.EnvironmentID
+				}
+			} else {
+				database, err := s.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
+					UID: task.DatabaseID,
+				})
+				if err != nil {
+					return 0, store.RiskSourceUnknown, false, err
+				}
+				databaseName = database.DatabaseName
+				environmentID = database.EffectiveEnvironmentID
+			}
+
+			risk, err := func() (int64, error) {
+				for _, risk := range risks {
+					if !risk.Active {
+						continue
+					}
+					if risk.Source != riskSource {
+						continue
+					}
+					if risk.Expression == nil || risk.Expression.Expression == "" {
+						continue
+					}
+					ast, issues := e.Parse(risk.Expression.Expression)
+					if issues != nil && issues.Err() != nil {
+						return 0, errors.Errorf("failed to parse expression: %v", issues.Err())
+					}
+					prg, err := e.Program(ast)
+					if err != nil {
+						return 0, err
+					}
+					// TODO(p0ny): implement sql type and affected rows
+					args := map[string]any{
+						"environment_id": environmentID,
+						"project_id":     issue.Project.ResourceID,
+						"database_name":  databaseName,
+						// convert to string type otherwise cel-go will complain that db.Type is not string type.
+						"db_engine":     string(instance.Engine),
+						"sql_type":      "UNKNOWN",
+						"affected_rows": 0,
+					}
+
+					res, _, err := prg.Eval(args)
+					if err != nil {
+						return 0, err
+					}
+					val, err := res.ConvertToNative(reflect.TypeOf(false))
+					if err != nil {
+						return 0, errors.Wrap(err, "expect bool result")
+					}
+					if boolVal, ok := val.(bool); ok && boolVal {
+						return risk.Level, nil
+					}
+
+					if run, ok := latestPlanCheckRun[Key{
+						InstanceUID:  instance.UID,
+						DatabaseName: databaseName,
+					}]; ok {
+						for _, result := range run.Result.Results {
+							report := result.GetSqlSummaryReport()
+							if report == nil {
+								continue
+							}
+							args["affected_rows"] = report.AffectedRows
+							for _, statementType := range report.StatementTypes {
+								args["sql_type"] = statementType
+								res, _, err := prg.Eval(args)
+								if err != nil {
+									return 0, err
+								}
+								val, err := res.ConvertToNative(reflect.TypeOf(false))
+								if err != nil {
+									return 0, errors.Wrap(err, "expect bool result")
+								}
+								if boolVal, ok := val.(bool); ok && boolVal {
+									return risk.Level, nil
+								}
+							}
+						}
+					}
+				}
+				return 0, nil
+			}()
+			if err != nil {
+				return 0, store.RiskSourceUnknown, false, errors.Wrapf(err, "failed to evaluate risk expression for risk source %v", riskSource)
+			}
+
+			if maxRiskLevel < risk {
+				maxRiskLevel = risk
+			}
+		}
+	}
+
+	return maxRiskLevel, riskSource, true, nil
+}
+
+func getDatabaseChangeIssueRisk(ctx context.Context, s *store.Store, issue *store.IssueMessage, risks []*store.RiskMessage) (int64, store.RiskSource, bool, error) {
+	var riskSource store.RiskSource
+	switch issue.Type {
+	case api.IssueDatabaseCreate:
+		riskSource = store.RiskSourceDatabaseCreate
+	case api.IssueDatabaseSchemaUpdate, api.IssueDatabaseSchemaUpdateGhost:
+		riskSource = store.RiskSourceDatabaseSchemaUpdate
+	case api.IssueDatabaseDataUpdate:
+		riskSource = store.RiskSourceDatabaseDataUpdate
+	default:
+		return 0, store.RiskSourceUnknown, false, errors.Errorf("unexpected issue type %v in getDatabaseChangeIssueRisk", issue.Type)
 	}
 
 	var maxRiskLevel int64
 	tasks, err := s.ListTasks(ctx, &api.TaskFind{
 		PipelineID: issue.PipelineUID,
+		// TODO(p0ny): use latestTaskRunStatus
 		StatusList: &[]api.TaskStatus{api.TaskPendingApproval},
 	})
 	if err != nil {
-		return 0, false, err
+		return 0, store.RiskSourceUnknown, false, err
 	}
 
 	for _, task := range tasks {
-		riskLevel, done, err := getTaskRiskLevel(ctx, s, issue, task, risks)
+		riskLevel, done, err := getTaskRiskLevel(ctx, s, issue, task, risks, riskSource)
 		if err != nil {
-			return 0, false, errors.Wrapf(err, "failed to get task risk level for task %v", task.ID)
+			return 0, store.RiskSourceUnknown, false, errors.Wrapf(err, "failed to get task risk level for task %v", task.ID)
 		}
 		if !done {
-			return 0, false, nil
+			return 0, store.RiskSourceUnknown, false, nil
 		}
 		if riskLevel > maxRiskLevel {
 			maxRiskLevel = riskLevel
 		}
 	}
-	return maxRiskLevel, true, nil
+	return maxRiskLevel, riskSource, true, nil
+}
+
+func getGrantRequestIssueRisk(ctx context.Context, s *store.Store, issue *store.IssueMessage, risks []*store.RiskMessage) (int64, store.RiskSource, bool, error) {
+	payload := &storepb.IssuePayload{}
+	if err := protojson.Unmarshal([]byte(issue.Payload), payload); err != nil {
+		return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to unmarshal issue payload")
+	}
+	if payload.GrantRequest == nil {
+		return 0, store.RiskSourceUnknown, false, errors.New("grant request payload not found")
+	}
+
+	var riskSource store.RiskSource
+	switch payload.GrantRequest.Role {
+	case "roles/EXPORTER":
+		riskSource = store.RiskRequestExport
+	case "roles/QUERIER":
+		riskSource = store.RiskRequestQuery
+	default:
+		return 0, store.RiskSourceUnknown, false, errors.Errorf("unknown grant request role %v", payload.GrantRequest.Role)
+	}
+
+	// fast path, no risks so return the DEFAULT risk level "0"
+	if len(risks) == 0 {
+		return 0, riskSource, true, nil
+	}
+
+	// higher risks go first
+	sort.Slice(risks, func(i, j int) bool {
+		return risks[i].Level > risks[j].Level
+	})
+
+	e, err := cel.NewEnv(common.RiskFactors...)
+	if err != nil {
+		return 0, store.RiskSourceUnknown, false, err
+	}
+
+	factors, err := common.GetQueryExportFactors(payload.GrantRequest.Condition.Expression)
+	if err != nil {
+		return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to get query export factors")
+	}
+	expirationDays := payload.GrantRequest.Expiration.AsDuration().Hours() / 24
+	databases := []*store.DatabaseMessage{}
+	if len(factors.DatabaseNames) == 0 {
+		list, err := s.ListDatabases(ctx, &store.FindDatabaseMessage{
+			ProjectID: &issue.Project.ResourceID,
+		})
+		if err != nil {
+			return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to list databases")
+		}
+		databases = list
+	} else {
+		for _, dbName := range factors.DatabaseNames {
+			instanceID, databaseName, err := getInstanceDatabaseID(dbName)
+			if err != nil {
+				return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to get instance database id")
+			}
+
+			instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{ResourceID: &instanceID})
+			if err != nil {
+				return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to get instance")
+			}
+			database, err := s.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
+				ProjectID:           &issue.Project.ResourceID,
+				InstanceID:          &instanceID,
+				DatabaseName:        &databaseName,
+				IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
+			})
+			if err != nil {
+				return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to get database")
+			}
+			if database == nil {
+				return 0, store.RiskSourceUnknown, false, errors.Errorf("database %q not found", databaseName)
+			}
+			databases = append(databases, database)
+		}
+	}
+
+	var maxRisk int64
+	for _, risk := range risks {
+		if !risk.Active {
+			continue
+		}
+		if risk.Source != riskSource {
+			continue
+		}
+		if risk.Expression == nil || risk.Expression.Expression == "" {
+			continue
+		}
+
+		ast, issues := e.Parse(risk.Expression.Expression)
+		if issues != nil && issues.Err() != nil {
+			return 0, store.RiskSourceUnknown, false, errors.Errorf("failed to parse expression: %v", issues.Err())
+		}
+		prg, err := e.Program(ast)
+		if err != nil {
+			return 0, store.RiskSourceUnknown, false, err
+		}
+
+		if riskSource == store.RiskRequestExport {
+			for _, database := range databases {
+				instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{
+					ResourceID: &database.InstanceID,
+				})
+				if err != nil {
+					return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to get instance")
+				}
+				args := map[string]any{
+					"environment_id":  database.EffectiveEnvironmentID,
+					"project_id":      issue.Project.ResourceID,
+					"database_name":   database.DatabaseName,
+					"db_engine":       instance.Engine,
+					"export_rows":     factors.ExportRows,
+					"expiration_days": expirationDays,
+				}
+				res, _, err := prg.Eval(args)
+				if err != nil {
+					return 0, store.RiskSourceUnknown, false, err
+				}
+
+				val, err := res.ConvertToNative(reflect.TypeOf(false))
+				if err != nil {
+					return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "expect bool result")
+				}
+				if boolVal, ok := val.(bool); ok && boolVal {
+					if risk.Level > maxRisk {
+						maxRisk = risk.Level
+					}
+				}
+			}
+		} else if riskSource == store.RiskRequestQuery {
+			for _, database := range databases {
+				instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{
+					ResourceID: &database.InstanceID,
+				})
+				if err != nil {
+					return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "failed to get instance")
+				}
+				args := map[string]any{
+					"environment_id":  database.EffectiveEnvironmentID,
+					"project_id":      issue.Project.ResourceID,
+					"database_name":   database.DatabaseName,
+					"db_engine":       instance.Engine,
+					"expiration_days": expirationDays,
+				}
+				res, _, err := prg.Eval(args)
+				if err != nil {
+					return 0, store.RiskSourceUnknown, false, err
+				}
+
+				val, err := res.ConvertToNative(reflect.TypeOf(false))
+				if err != nil {
+					return 0, store.RiskSourceUnknown, false, errors.Wrap(err, "expect bool result")
+				}
+				if boolVal, ok := val.(bool); ok && boolVal {
+					if risk.Level > maxRisk {
+						maxRisk = risk.Level
+					}
+				}
+			}
+		}
+	}
+
+	return maxRisk, riskSource, true, nil
 }
 
 func getReportResult(ctx context.Context, s *store.Store, task *store.TaskMessage, taskCheckType api.TaskCheckType) ([]api.TaskCheckResult, bool, error) {
@@ -429,160 +760,7 @@ func getReportResult(ctx context.Context, s *store.Store, task *store.TaskMessag
 	return payload.ResultList, true, nil
 }
 
-func getGrantRequestRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMessage, risks []*store.RiskMessage) (int64, bool, error) {
-	if len(risks) == 0 {
-		return 0, true, nil
-	}
-
-	// higher risks go first
-	sort.Slice(risks, func(i, j int) bool {
-		return risks[i].Level > risks[j].Level
-	})
-
-	e, err := cel.NewEnv(common.RiskFactors...)
-	if err != nil {
-		return 0, false, err
-	}
-
-	riskSource := getIssueRiskResource(issue)
-	if riskSource == store.RiskSourceUnknown {
-		return 0, false, nil
-	}
-	payload := &storepb.IssuePayload{}
-	if err := protojson.Unmarshal([]byte(issue.Payload), payload); err != nil {
-		return 0, false, errors.Wrap(err, "failed to unmarshal issue payload")
-	}
-	if payload.GrantRequest == nil {
-		return 0, false, errors.New("grant request payload not found")
-	}
-
-	factors, err := common.GetQueryExportFactors(payload.GrantRequest.Condition.Expression)
-	if err != nil {
-		return 0, false, errors.Wrap(err, "failed to get query export factors")
-	}
-	expirationDays := payload.GrantRequest.Expiration.AsDuration().Hours() / 24
-	databases := []*store.DatabaseMessage{}
-	if len(factors.DatabaseNames) == 0 {
-		list, err := s.ListDatabases(ctx, &store.FindDatabaseMessage{
-			ProjectID: &issue.Project.ResourceID,
-		})
-		if err != nil {
-			return 0, false, errors.Wrap(err, "failed to list databases")
-		}
-		databases = list
-	} else {
-		for _, dbName := range factors.DatabaseNames {
-			instanceID, databaseName, err := getInstanceDatabaseID(dbName)
-			if err != nil {
-				return 0, false, errors.Wrap(err, "failed to get instance database id")
-			}
-
-			instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{ResourceID: &instanceID})
-			if err != nil {
-				return 0, false, errors.Wrap(err, "failed to get instance")
-			}
-			database, err := s.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
-				ProjectID:           &issue.Project.ResourceID,
-				InstanceID:          &instanceID,
-				DatabaseName:        &databaseName,
-				IgnoreCaseSensitive: store.IgnoreDatabaseAndTableCaseSensitive(instance),
-			})
-			if err != nil {
-				return 0, false, errors.Wrap(err, "failed to get database")
-			}
-			databases = append(databases, database)
-		}
-	}
-
-	var maxRisk int64
-	for _, risk := range risks {
-		if !risk.Active {
-			continue
-		}
-		if risk.Source != riskSource {
-			continue
-		}
-		if risk.Expression == nil || risk.Expression.Expression == "" {
-			continue
-		}
-
-		ast, issues := e.Parse(risk.Expression.Expression)
-		if issues != nil && issues.Err() != nil {
-			return 0, false, errors.Errorf("failed to parse expression: %v", issues.Err())
-		}
-		prg, err := e.Program(ast)
-		if err != nil {
-			return 0, false, err
-		}
-
-		if riskSource == store.RiskRequestExport {
-			for _, database := range databases {
-				instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{
-					ResourceID: &database.InstanceID,
-				})
-				if err != nil {
-					return 0, false, errors.Wrap(err, "failed to get instance")
-				}
-				args := map[string]any{
-					"environment_id":  database.EffectiveEnvironmentID,
-					"project_id":      issue.Project.ResourceID,
-					"database_name":   database.DatabaseName,
-					"db_engine":       instance.Engine,
-					"export_rows":     factors.ExportRows,
-					"expiration_days": expirationDays,
-				}
-				res, _, err := prg.Eval(args)
-				if err != nil {
-					return 0, false, err
-				}
-
-				val, err := res.ConvertToNative(reflect.TypeOf(false))
-				if err != nil {
-					return 0, false, errors.Wrap(err, "expect bool result")
-				}
-				if boolVal, ok := val.(bool); ok && boolVal {
-					if risk.Level > maxRisk {
-						maxRisk = risk.Level
-					}
-				}
-			}
-		} else if riskSource == store.RiskRequestQuery {
-			for _, database := range databases {
-				instance, err := s.GetInstanceV2(ctx, &store.FindInstanceMessage{
-					ResourceID: &database.InstanceID,
-				})
-				if err != nil {
-					return 0, false, errors.Wrap(err, "failed to get instance")
-				}
-				args := map[string]any{
-					"environment_id":  database.EffectiveEnvironmentID,
-					"project_id":      issue.Project.ResourceID,
-					"database_name":   database.DatabaseName,
-					"db_engine":       instance.Engine,
-					"expiration_days": expirationDays,
-				}
-				res, _, err := prg.Eval(args)
-				if err != nil {
-					return 0, false, err
-				}
-
-				val, err := res.ConvertToNative(reflect.TypeOf(false))
-				if err != nil {
-					return 0, false, errors.Wrap(err, "expect bool result")
-				}
-				if boolVal, ok := val.(bool); ok && boolVal {
-					if risk.Level > maxRisk {
-						maxRisk = risk.Level
-					}
-				}
-			}
-		}
-	}
-
-	return maxRisk, true, nil
-}
-
-func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMessage, task *store.TaskMessage, risks []*store.RiskMessage) (int64, bool, error) {
+func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMessage, task *store.TaskMessage, risks []*store.RiskMessage, riskSource store.RiskSource) (int64, bool, error) {
 	// Fall through to "DEFAULT" risk level if risks are empty.
 	if len(risks) == 0 {
 		return 0, true, nil
@@ -620,6 +798,7 @@ func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMes
 		return 0, false, errors.New("affected rows report result and statement type report result length mismatch")
 	}
 
+	environmentID := instance.EnvironmentID
 	var databaseName string
 	if task.Type == api.TaskDatabaseCreate {
 		payload := &api.TaskDatabaseCreatePayload{}
@@ -627,6 +806,9 @@ func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMes
 			return 0, false, err
 		}
 		databaseName = payload.DatabaseName
+		if payload.EnvironmentID != "" {
+			environmentID = payload.EnvironmentID
+		}
 	} else {
 		database, err := s.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 			UID: task.DatabaseID,
@@ -635,6 +817,11 @@ func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMes
 			return 0, false, err
 		}
 		databaseName = database.DatabaseName
+		environment, err := s.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &database.EffectiveEnvironmentID})
+		if err != nil {
+			return 0, false, err
+		}
+		environmentID = environment.ResourceID
 	}
 
 	e, err := cel.NewEnv(common.RiskFactors...)
@@ -646,7 +833,6 @@ func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMes
 	sort.Slice(risks, func(i, j int) bool {
 		return risks[i].Level > risks[j].Level
 	})
-	riskSource := getIssueRiskResource(issue)
 	var maxRisk int64
 	for _, risk := range risks {
 		if !risk.Active {
@@ -668,7 +854,7 @@ func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMes
 			return 0, false, err
 		}
 		args := map[string]any{
-			"environment_id": instance.EnvironmentID,
+			"environment_id": environmentID,
 			"project_id":     issue.Project.ResourceID,
 			"database_name":  databaseName,
 			// convert to string type otherwise cel-go will complain that db.Type is not string type.
@@ -726,16 +912,13 @@ func getTaskRiskLevel(ctx context.Context, s *store.Store, issue *store.IssueMes
 	return maxRisk, true, nil
 }
 
-func updateIssuePayload(ctx context.Context, s *store.Store, issue *store.IssueMessage, payload *storepb.IssuePayload) error {
+func updateIssueApprovalPayload(ctx context.Context, s *store.Store, issue *store.IssueMessage, approval *storepb.IssuePayloadApproval) error {
 	originalPayload := &storepb.IssuePayload{}
 	if err := protojson.Unmarshal([]byte(issue.Payload), originalPayload); err != nil {
 		return errors.Wrapf(err, "failed to unmarshal original issue payload")
 	}
-	// TODO(xz): need to refactor this to do field-wise payload updates.
-	if originalPayload.Grouping != nil {
-		payload.Grouping = originalPayload.Grouping
-	}
-	payloadBytes, err := protojson.Marshal(payload)
+	originalPayload.Approval = approval
+	payloadBytes, err := protojson.Marshal(originalPayload)
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal payload")
 	}

@@ -48,7 +48,10 @@
           {{ $t("issue.format-on-save") }}
         </NCheckbox>
 
-        <UploadProgressButton :upload="handleUploadFile" size="tiny">
+        <UploadProgressButton
+          :upload="create ? handleUploadFile : handleUploadAndOverwrite"
+          size="tiny"
+        >
           {{ $t("issue.upload-sql") }}
         </UploadProgressButton>
       </template>
@@ -141,7 +144,6 @@ import {
   useSheetV1Store,
   useDatabaseV1Store,
 } from "@/store";
-import { isGroupingChangeIssue, useIssueLogic } from "./logic";
 import {
   ComposedDatabase,
   dialectOfEngineV1,
@@ -152,21 +154,22 @@ import {
   TaskId,
   UNKNOWN_ID,
 } from "@/types";
-import {
-  getBacktracePayloadWithIssue,
-  sheetNameOfTask,
-  useInstanceV1EditorLanguage,
-} from "@/utils";
 import { TableMetadata } from "@/types/proto/store/database";
-import MonacoEditor from "../MonacoEditor/MonacoEditor.vue";
-import { useSQLAdviceMarkers } from "./logic/useSQLAdviceMarkers";
-import UploadProgressButton from "../misc/UploadProgressButton.vue";
-import DownloadSheetButton from "../Sheet/DownloadSheetButton.vue";
 import {
   Sheet_Visibility,
   Sheet_Source,
   Sheet_Type,
 } from "@/types/proto/v1/sheet_service";
+import {
+  extractSheetUID,
+  sheetNameOfTask,
+  useInstanceV1EditorLanguage,
+} from "@/utils";
+import MonacoEditor from "../MonacoEditor/MonacoEditor.vue";
+import DownloadSheetButton from "../Sheet/DownloadSheetButton.vue";
+import UploadProgressButton from "../misc/UploadProgressButton.vue";
+import { isGroupingChangeIssue, useIssueLogic } from "./logic";
+import { useSQLAdviceMarkers } from "./logic/useSQLAdviceMarkers";
 
 interface LocalState {
   taskSheetName?: string;
@@ -365,7 +368,7 @@ const isValidSheetName = computed(() => {
   if (!state.taskSheetName) {
     return false;
   }
-  return sheetV1Store.getSheetUid(state.taskSheetName) !== UNKNOWN_ID;
+  return extractSheetUID(state.taskSheetName) !== String(UNKNOWN_ID);
 });
 
 const isTaskSheetOversize = computed(() => {
@@ -506,10 +509,6 @@ const handleUploadAndOverwrite = async (event: Event) => {
       100
     );
     const projectName = selectedDatabase.value.project;
-    let payload = {};
-    if (!create.value) {
-      payload = getBacktracePayloadWithIssue(issue.value as Issue);
-    }
     // TODO: upload process
     const sheet = await sheetV1Store.createSheet(projectName, {
       title: filename,
@@ -517,11 +516,10 @@ const handleUploadAndOverwrite = async (event: Event) => {
       visibility: Sheet_Visibility.VISIBILITY_PROJECT,
       source: Sheet_Source.SOURCE_BYTEBASE_ARTIFACT,
       type: Sheet_Type.TYPE_SQL,
-      payload: JSON.stringify(payload),
     });
 
     resetTempEditState();
-    await updateSheetId(sheetV1Store.getSheetUid(sheet.name));
+    await updateSheetId(Number(extractSheetUID(sheet.name)));
     if (selectedTask.value) {
       updateEditorHeight();
     }
@@ -533,6 +531,7 @@ const handleUploadAndOverwrite = async (event: Event) => {
     });
   } finally {
     state.isUploadingFile = false;
+    state.editing = false;
   }
 };
 

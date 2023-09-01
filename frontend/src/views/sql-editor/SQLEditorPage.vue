@@ -95,6 +95,12 @@
 
     <Quickstart />
 
+    <Drawer v-model:show="showSheetPanel">
+      <DrawerContent :title="$t('sql-editor.sheet.self')">
+        <SheetPanel @close="showSheetPanel = false" />
+      </DrawerContent>
+    </Drawer>
+
     <SchemaEditorModal
       v-if="alterSchemaState.showModal"
       :database-id-list="alterSchemaState.databaseIdList.map((id) => `${id}`)"
@@ -106,12 +112,13 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive } from "vue";
-import { Splitpanes, Pane } from "splitpanes";
-import { stringify } from "qs";
+import { useWindowSize } from "@vueuse/core";
 import { NDrawer } from "naive-ui";
-
-import { DatabaseId, TabMode, UNKNOWN_ID } from "@/types";
+import { stringify } from "qs";
+import { Splitpanes, Pane } from "splitpanes";
+import { computed, reactive } from "vue";
+import SchemaEditorModal from "@/components/AlterSchemaPrepForm/SchemaEditorModal.vue";
+import { Drawer, DrawerContent, InstanceV1Name } from "@/components/v2";
 import {
   useCurrentUserV1,
   useDatabaseV1Store,
@@ -119,21 +126,20 @@ import {
   useSQLEditorStore,
   useTabStore,
 } from "@/store";
-import AsidePanel from "./AsidePanel/AsidePanel.vue";
-import EditorPanel from "./EditorPanel/EditorPanel.vue";
-import TerminalPanelV1 from "./TerminalPanel/TerminalPanelV1.vue";
-import TabList from "./TabList";
-import ResultPanel from "./ResultPanel";
+import { DatabaseId, TabMode, UNKNOWN_ID } from "@/types";
 import {
   allowUsingSchemaEditorV1,
   instanceV1HasReadonlyMode,
   isDatabaseV1Queryable,
 } from "@/utils";
+import AsidePanel from "./AsidePanel/AsidePanel.vue";
 import AdminModeButton from "./EditorCommon/AdminModeButton.vue";
-import SchemaEditorModal from "@/components/AlterSchemaPrepForm/SchemaEditorModal.vue";
-import { useWindowSize } from "@vueuse/core";
-import { InstanceV1Name } from "@/components/v2";
-import { provideSheetPanelContext } from "./TabList/SheetPanel/common";
+import EditorPanel from "./EditorPanel/EditorPanel.vue";
+import ResultPanel from "./ResultPanel";
+import { provideSheetContext } from "./Sheet";
+import SheetPanel from "./SheetPanel";
+import TabList from "./TabList";
+import TerminalPanelV1 from "./TerminalPanel/TerminalPanelV1.vue";
 
 type LocalState = {
   sidebarExpanded: boolean;
@@ -152,6 +158,8 @@ const tabStore = useTabStore();
 const databaseStore = useDatabaseV1Store();
 const sqlEditorStore = useSQLEditorStore();
 const currentUserV1 = useCurrentUserV1();
+// provide context for sheets
+const { showPanel: showSheetPanel } = provideSheetContext();
 
 const isDisconnected = computed(() => tabStore.isDisconnected);
 const isFetchingSheet = computed(() => sqlEditorStore.isFetchingSheet);
@@ -217,9 +225,6 @@ const handleAlterSchema = async (params: {
     window.open(url, "_blank");
   }
 };
-
-// provide context for SheetPanel
-provideSheetPanelContext();
 </script>
 
 <style>
@@ -259,6 +264,6 @@ provideSheetPanelContext();
   --color-branding: #4f46e5;
   --border-color: rgba(200, 200, 200, 0.2);
 
-  @apply flex-1 overflow-hidden flex flex-col pt-2;
+  @apply flex-1 overflow-hidden flex flex-col pt-1;
 }
 </style>

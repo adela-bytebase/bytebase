@@ -120,7 +120,10 @@
             >
               <input
                 v-model="column.type"
-                :disabled="disableAlterColumn(column)"
+                :disabled="
+                  disableAlterColumn(column) ||
+                  schemaTemplateColumnTypes.length > 0
+                "
                 placeholder="column type"
                 class="column-field-input column-type-input !pr-8"
                 type="text"
@@ -281,8 +284,8 @@
     :show="state.showSchemaTemplateDrawer"
     @close="state.showSchemaTemplateDrawer = false"
   >
-    <DrawerContent :title="$t('schema-template.field-template')">
-      <div class="w-[46rem]">
+    <DrawerContent :title="$t('schema-template.field-template.self')">
+      <div class="w-[calc(100vw-36rem)] min-w-[64rem] max-w-[calc(100vw-8rem)]">
         <FieldTemplates
           :engine="databaseEngine"
           @apply="handleApplyColumnTemplate"
@@ -299,19 +302,25 @@
 
 <script lang="ts" setup>
 import { cloneDeep, isUndefined, flatten } from "lodash-es";
+import { NDropdown } from "naive-ui";
 import scrollIntoView from "scroll-into-view-if-needed";
+import { v1 as uuidv1 } from "uuid";
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { NDropdown } from "naive-ui";
-import { v1 as uuidv1 } from "uuid";
+import { BBCheckbox, BBSpin } from "@/bbkit";
+import HighlightCodeBlock from "@/components/HighlightCodeBlock";
+import { Drawer, DrawerContent } from "@/components/v2";
 import {
   hasFeature,
   generateUniqueTabId,
   useNotificationStore,
   useSchemaEditorStore,
+  useSettingV1Store,
 } from "@/store/modules";
 import { TableTabContext } from "@/types";
 import { ColumnMetadata } from "@/types/proto/store/database";
+import { Engine } from "@/types/proto/v1/common";
+import { SchemaTemplateSetting_FieldTemplate } from "@/types/proto/v1/setting_service";
 import { DatabaseEdit, SchemaEditorTabType } from "@/types/schemaEditor";
 import {
   Column,
@@ -321,16 +330,11 @@ import {
   ForeignKey,
 } from "@/types/schemaEditor/atomType";
 import { getDataTypeSuggestionList } from "@/utils";
-import { BBCheckbox, BBSpin } from "@/bbkit";
-import HighlightCodeBlock from "@/components/HighlightCodeBlock";
+import { diffSchema } from "@/utils/schemaEditor/diffSchema";
+import FieldTemplates from "@/views/SchemaTemplate/FieldTemplates.vue";
+import EditColumnForeignKeyModal from "../Modals/EditColumnForeignKeyModal.vue";
 import { isColumnChanged } from "../utils/column";
 import { isTableChanged } from "../utils/table";
-import { diffSchema } from "@/utils/schemaEditor/diffSchema";
-import EditColumnForeignKeyModal from "../Modals/EditColumnForeignKeyModal.vue";
-import { Engine } from "@/types/proto/v1/common";
-import { Drawer, DrawerContent } from "@/components/v2";
-import FieldTemplates from "@/views/SchemaTemplate/FieldTemplates.vue";
-import { SchemaTemplateSetting_FieldTemplate } from "@/types/proto/v1/setting_service";
 
 type SubtabType = "column-list" | "raw-sql";
 
@@ -344,6 +348,7 @@ interface LocalState {
 }
 
 const { t } = useI18n();
+const settingStore = useSettingV1Store();
 const editorStore = useSchemaEditorStore();
 const notificationStore = useNotificationStore();
 const currentTab = computed(() => editorStore.currentTab as TableTabContext);
@@ -440,7 +445,30 @@ const databaseEngine = computed(() => {
   return databaseSchema.database.instanceEntity.engine;
 });
 
+const schemaTemplateColumnTypes = computed(() => {
+  const setting = settingStore.getSettingByName("bb.workspace.schema-template");
+  const columnTypes = setting?.value?.schemaTemplateSettingValue?.columnTypes;
+  if (columnTypes && columnTypes.length > 0) {
+    const columnType = columnTypes.find(
+      (columnType) => columnType.engine === databaseEngine.value
+    );
+    if (columnType && columnType.enabled) {
+      return columnType.types;
+    }
+  }
+  return [];
+});
+
 const dataTypeOptions = computed(() => {
+  if (schemaTemplateColumnTypes.value.length > 0) {
+    return schemaTemplateColumnTypes.value.map((columnType) => {
+      return {
+        label: columnType,
+        key: columnType,
+      };
+    });
+  }
+
   return getDataTypeSuggestionList(databaseEngine.value).map((dataType) => {
     return {
       label: dataType,
@@ -629,6 +657,7 @@ const handleApplyColumnTemplate = (
     type: template.column.type,
     nullable: template.column.nullable,
     comment: template.column.comment,
+    userComment: template.column.userComment,
     default: template.column.default,
     status: "created",
   };

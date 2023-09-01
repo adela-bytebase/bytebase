@@ -10,10 +10,10 @@
         <EnvironmentTabFilter
           v-if="filterTypes.includes('environment')"
           class="flex-1"
-          :environment="params.environment?.uid ?? String(UNKNOWN_ID)"
+          :environment="params.environment?.name"
           :include-all="true"
           :disabled="loading"
-          @update:environment="changeEnvironmentId"
+          @update:environment="changeEnvironment"
         />
       </div>
 
@@ -50,6 +50,7 @@
           :include-all="true"
           :filter="(db) => instanceFilter(db.instanceEntity)"
           :disabled="loading"
+          :consistent-menu-width="false"
           @update:database="changeDatabaseId"
         />
         <NDatePicker
@@ -91,11 +92,15 @@
   </div>
 </template>
 <script lang="ts" setup>
-import { computed } from "vue";
-import { NDatePicker, NInputGroup } from "naive-ui";
 import dayjs from "dayjs";
-
-import { UNKNOWN_ID } from "@/types";
+import { NDatePicker, NInputGroup } from "naive-ui";
+import { computed } from "vue";
+import {
+  ProjectSelect,
+  InstanceSelect,
+  EnvironmentTabFilter,
+  DatabaseSelect,
+} from "@/components/v2";
 import {
   useCurrentUserV1,
   useDatabaseV1Store,
@@ -104,15 +109,10 @@ import {
   useProjectV1Store,
   useSlowQueryPolicyList,
 } from "@/store";
+import { UNKNOWN_ID } from "@/types";
+import { Instance } from "@/types/proto/v1/instance_service";
 import { hasWorkspacePermissionV1, instanceV1SupportSlowQuery } from "@/utils";
 import type { FilterType, SlowQueryFilterParams } from "./types";
-import {
-  ProjectSelect,
-  InstanceSelect,
-  EnvironmentTabFilter,
-  DatabaseSelect,
-} from "@/components/v2";
-import { Instance } from "@/types/proto/v1/instance_service";
 
 const props = defineProps<{
   params: SlowQueryFilterParams;
@@ -134,8 +134,8 @@ const canVisitDefaultProject = computed(() => {
   );
 });
 
-const changeEnvironmentId = (id: string) => {
-  const environment = useEnvironmentV1Store().getEnvironmentByUID(id);
+const changeEnvironment = (name: string) => {
+  const environment = useEnvironmentV1Store().getEnvironmentByName(name);
   update({ environment });
 };
 const changeInstanceId = (uid: string | undefined) => {

@@ -89,14 +89,15 @@ const (
 
 // TaskCheckResult is the result of task checks.
 type TaskCheckResult struct {
-	Namespace Namespace       `json:"namespace,omitempty"`
-	Code      int             `json:"code,omitempty"`
-	Status    TaskCheckStatus `json:"status,omitempty"`
-	Title     string          `json:"title,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	Line      int             `json:"line,omitempty"`
-	Column    int             `json:"column"`
-	Details   string          `json:"details,omitempty"`
+	Namespace        Namespace       `json:"namespace,omitempty"`
+	Code             int             `json:"code,omitempty"`
+	Status           TaskCheckStatus `json:"status,omitempty"`
+	Title            string          `json:"title,omitempty"`
+	Content          string          `json:"content,omitempty"`
+	Line             int             `json:"line,omitempty"`
+	Column           int             `json:"column"`
+	Details          string          `json:"details,omitempty"`
+	ChangedResources string          `json:"changedResources,omitempty"`
 }
 
 // TaskCheckRunResultPayload is the result payload of a task check run.
@@ -156,7 +157,7 @@ func IsStatementTypeCheckSupported(dbType db.Type) bool {
 // IsTaskCheckReportSupported checks if the task report supports the engine type.
 func IsTaskCheckReportSupported(dbType db.Type) bool {
 	switch dbType {
-	case db.Postgres, db.MySQL, db.MariaDB, db.OceanBase:
+	case db.Postgres, db.MySQL, db.MariaDB, db.OceanBase, db.Oracle:
 		return true
 	default:
 		return false

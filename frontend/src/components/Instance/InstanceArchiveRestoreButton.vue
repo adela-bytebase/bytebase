@@ -14,6 +14,7 @@
             'instance.archived-instances-will-not-be-shown-on-the-normal-interface-you-can-still-restore-later-from-the-archive-page'
           )
         "
+        class="!border-none"
         @confirm="archiveOrRestoreInstance(true)"
       >
         <div class="mt-3">
@@ -37,6 +38,7 @@
           ])
         "
         :confirm-description="''"
+        class="!border-none"
         @confirm="archiveOrRestoreInstance(false)"
       />
     </template>
@@ -49,10 +51,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive } from "vue";
 import { NCheckbox } from "naive-ui";
+import { computed, ref, reactive } from "vue";
 import { useI18n } from "vue-i18n";
-
 import {
   useCurrentUserV1,
   useInstanceV1Store,

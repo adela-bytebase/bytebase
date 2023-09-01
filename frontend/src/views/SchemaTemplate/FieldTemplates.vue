@@ -7,7 +7,7 @@
     <div class="space-y-4">
       <div class="flex items-center justify-between gap-x-6">
         <div class="flex-1 textinfolabel">
-          {{ $t("schema-template.description") }}
+          {{ $t("schema-template.field-template.description") }}
         </div>
         <div>
           <NButton
@@ -20,26 +20,28 @@
         </div>
       </div>
     </div>
-    <div class="flex items-center gap-x-5 my-5 pb-5 border-b">
-      <label
-        v-for="item in engineList"
-        :key="item"
-        class="flex items-center gap-x-1 text-sm text-gray-600"
-      >
-        <input
-          type="checkbox"
-          :value="item"
-          :checked="state.selectedEngine.has(item)"
-          class="h-4 w-4 border-gray-300 rounded text-indigo-600 focus:ring-indigo-500"
-          @input="toggleEngineCheck(item)"
-        />
-        <EngineIcon :engine="item" custom-class="ml-0 mr-1" />
-        <span
-          class="items-center text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-800"
+    <div class="flex items-center gap-x-5 my-4 pb-5 border-b">
+      <template v-if="showEngineFilter">
+        <label
+          v-for="item in engineList"
+          :key="item"
+          class="flex items-center gap-x-1 text-sm text-gray-600"
         >
-          {{ countTemplateByEngine(item) }}
-        </span>
-      </label>
+          <input
+            type="checkbox"
+            :value="item"
+            :checked="state.selectedEngine.has(item)"
+            class="h-4 w-4 border-gray-300 rounded text-indigo-600 focus:ring-indigo-500"
+            @input="toggleEngineCheck(item)"
+          />
+          <EngineIcon :engine="item" custom-class="ml-0 mr-1" />
+          <span
+            class="items-center text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-800"
+          >
+            {{ countTemplateByEngine(item) }}
+          </span>
+        </label>
+      </template>
       <BBTableSearch
         ref="searchField"
         class="ml-auto"
@@ -70,17 +72,16 @@
 </template>
 
 <script lang="ts" setup>
-import { reactive, computed, onMounted } from "vue";
 import { NButton } from "naive-ui";
-import { Drawer } from "@/components/v2";
 import { v1 as uuidv1 } from "uuid";
-
-import { featureToRef, useSchemaEditorStore } from "@/store";
-import { useWorkspacePermissionV1 } from "@/utils";
-import { SchemaTemplateSetting_FieldTemplate } from "@/types/proto/v1/setting_service";
-import { Engine } from "@/types/proto/v1/common";
+import { reactive, computed, onMounted } from "vue";
 import { engineList } from "@/components/SchemaTemplate/utils";
+import { Drawer } from "@/components/v2";
+import { featureToRef, useSchemaEditorStore } from "@/store";
+import { Engine } from "@/types/proto/v1/common";
 import { ColumnMetadata } from "@/types/proto/v1/database_service";
+import { SchemaTemplateSetting_FieldTemplate } from "@/types/proto/v1/setting_service";
+import { useWorkspacePermissionV1 } from "@/utils";
 
 interface LocalState {
   template: SchemaTemplateSetting_FieldTemplate;
@@ -92,6 +93,7 @@ interface LocalState {
 
 const props = defineProps<{
   engine?: Engine;
+  showEngineFilter?: boolean;
 }>();
 
 defineEmits<{

@@ -64,8 +64,7 @@ func (s *Store) composeInstance(ctx context.Context, instance *InstanceMessage) 
 		composedInstance.DataSourceList = append(composedInstance.DataSourceList, &api.DataSource{
 			ID:         ds.UID,
 			InstanceID: instance.UID,
-			DatabaseID: ds.DatabaseID,
-			Name:       ds.Title,
+			Name:       ds.ID,
 			Type:       ds.Type,
 			Username:   ds.Username,
 			Host:       ds.Host,
@@ -267,13 +266,8 @@ func (s *Store) CreateInstanceV2(ctx context.Context, instanceCreate *InstanceMe
 		return nil, err
 	}
 
-	allDatabaseUID, err := s.createDatabaseDefaultImpl(ctx, tx, instanceID, &DatabaseMessage{DatabaseName: api.AllDatabaseName})
-	if err != nil {
-		return nil, err
-	}
-
 	for _, ds := range instanceCreate.DataSources {
-		if err := s.addDataSourceToInstanceImplV2(ctx, tx, instanceID, allDatabaseUID, creatorID, ds); err != nil {
+		if err := s.addDataSourceToInstanceImplV2(ctx, tx, instanceID, creatorID, ds); err != nil {
 			return nil, err
 		}
 	}
@@ -340,10 +334,20 @@ func (s *Store) UpdateInstanceV2(ctx context.Context, patch *UpdateInstanceMessa
 		set, args = append(set, fmt.Sprintf(`"row_status" = $%d`, len(args)+1)), append(args, rowStatus)
 	}
 	if v := patch.Options; v != nil {
-		set, args = append(set, fmt.Sprintf("options = $%d", len(args)+1)), append(args, v)
+		options, err := protojson.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+
+		set, args = append(set, fmt.Sprintf("options = $%d", len(args)+1)), append(args, options)
 	}
 	if v := patch.Metadata; v != nil {
-		set, args = append(set, fmt.Sprintf("metadata = $%d", len(args)+1)), append(args, v)
+		metadata, err := protojson.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+
+		set, args = append(set, fmt.Sprintf("metadata = $%d", len(args)+1)), append(args, metadata)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -406,22 +410,12 @@ func (s *Store) UpdateInstanceV2(ctx context.Context, patch *UpdateInstanceMessa
 	}
 
 	if patch.DataSources != nil {
-		allDatabaseName := api.AllDatabaseName
-		allDatabase, err := s.getDatabaseImplV2(ctx, tx, &FindDatabaseMessage{
-			InstanceID:         &instance.ResourceID,
-			DatabaseName:       &allDatabaseName,
-			IncludeAllDatabase: true,
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		if err := s.clearDataSourceImpl(ctx, tx, instance.UID, allDatabase.UID); err != nil {
+		if err := s.clearDataSourceImpl(ctx, tx, instance.UID); err != nil {
 			return nil, err
 		}
 
 		for _, ds := range *patch.DataSources {
-			if err := s.addDataSourceToInstanceImplV2(ctx, tx, instance.UID, allDatabase.UID, patch.UpdaterID, ds); err != nil {
+			if err := s.addDataSourceToInstanceImplV2(ctx, tx, instance.UID, patch.UpdaterID, ds); err != nil {
 				return nil, err
 			}
 		}
@@ -616,6 +610,11 @@ func IgnoreDatabaseAndTableCaseSensitive(instance *InstanceMessage) bool {
 		return true
 	case db.MySQL, db.MariaDB:
 		return instance.Metadata != nil && instance.Metadata.MysqlLowerCaseTableNames != 0
+	case db.MSSQL:
+		// In fact, SQL Server is possible to create a case-sensitive database and case-insensitive database on one instance.
+		// https://www.webucator.com/article/how-to-check-case-sensitivity-in-sql-server/
+		// But by default, SQL Server is case-insensitive.
+		return true
 	default:
 		return false
 	}

@@ -2,10 +2,10 @@
   <div class="relative px-2 py-1" :class="classes" @click="handleClick">
     <!-- eslint-disable-next-line vue/no-v-html -->
     <div ref="wrapperRef" class="overflow-hidden" v-html="html"></div>
-    <div v-if="clickable" class="absolute right-0 top-1/2 translate-y-[-50%]">
+    <div v-if="clickable" class="absolute right-1 top-1/2 translate-y-[-45%]">
       <NButton size="tiny" circle class="dark:!bg-dark-bg" @click="showDetail">
         <template #icon>
-          <heroicons:arrows-pointing-out class="w-4 h-4" />
+          <heroicons:arrows-pointing-out class="w-3 h-3" />
         </template>
       </NButton>
     </div>
@@ -13,16 +13,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { NButton } from "naive-ui";
 import { useResizeObserver } from "@vueuse/core";
 import { escape } from "lodash-es";
-
-import { useSQLResultViewContext } from "../context";
-import { getHighlightHTMLByRegExp } from "@/utils";
+import { NButton } from "naive-ui";
+import { computed, ref } from "vue";
 import { useDatabaseV1Store, useTabStore } from "@/store";
 import { UNKNOWN_ID } from "@/types";
 import { Engine } from "@/types/proto/v1/common";
+import { getHighlightHTMLByRegExp } from "@/utils";
+import { useSQLResultViewContext } from "../context";
 
 const props = defineProps<{
   value: unknown;
@@ -53,7 +52,10 @@ const clickable = computed(() => {
   if (conn.databaseId !== String(UNKNOWN_ID)) {
     const db = useDatabaseV1Store().getDatabaseByUID(conn.databaseId);
     if (db.instanceEntity.engine === Engine.MONGODB) {
-      return true;
+      // A cheap way to check JSON string without paying the parsing cost.
+      return (
+        String(props.value).startsWith("{") && String(props.value).endsWith("}")
+      );
     }
   }
   return false;
@@ -72,6 +74,9 @@ const classes = computed(() => {
 });
 
 const html = computed(() => {
+  if (props.value === null) {
+    return `<span class="text-gray-400 italic">NULL</span>`;
+  }
   const str = String(props.value);
   if (str.length === 0) {
     return `<br style="min-width: 1rem; display: inline-flex;" />`;

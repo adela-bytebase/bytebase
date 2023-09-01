@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgtype"
 	"github.com/pkg/errors"
 
 	"github.com/bytebase/bytebase/backend/common"
@@ -45,6 +45,8 @@ type TaskMessage struct {
 	DatabaseName string
 	// Statement used by grouping batch change, Bytebase use it to render.
 	Statement string
+
+	LatestTaskRunStatus api.TaskRunStatus
 }
 
 func (task *TaskMessage) toTask() *api.Task {
@@ -65,11 +67,12 @@ func (task *TaskMessage) toTask() *api.Task {
 		DatabaseID: task.DatabaseID,
 
 		// Domain specific fields
-		Name:              task.Name,
-		Status:            task.Status,
-		Type:              task.Type,
-		Payload:           task.Payload,
-		EarliestAllowedTs: task.EarliestAllowedTs,
+		Name:                task.Name,
+		Status:              task.Status,
+		Type:                task.Type,
+		Payload:             task.Payload,
+		EarliestAllowedTs:   task.EarliestAllowedTs,
+		LatestTaskRunStatus: task.LatestTaskRunStatus,
 	}
 	for _, block := range task.BlockedBy {
 		composedTask.BlockedBy = append(composedTask.BlockedBy, fmt.Sprintf("%d", block))
@@ -318,6 +321,9 @@ func (s *Store) ListTasks(ctx context.Context, find *api.TaskFind) ([]*TaskMessa
 	if v := find.ID; v != nil {
 		where, args = append(where, fmt.Sprintf("task.id = $%d", len(args)+1)), append(args, *v)
 	}
+	if v := find.IDs; v != nil {
+		where, args = append(where, fmt.Sprintf("task.id = ANY($%d)", len(args)+1)), append(args, *v)
+	}
 	if v := find.PipelineID; v != nil {
 		where, args = append(where, fmt.Sprintf("task.pipeline_id = $%d", len(args)+1)), append(args, *v)
 	}
@@ -334,6 +340,10 @@ func (s *Store) ListTasks(ctx context.Context, find *api.TaskFind) ([]*TaskMessa
 			args = append(args, status)
 		}
 		where = append(where, fmt.Sprintf("task.status in (%s)", strings.Join(list, ",")))
+	}
+	if v := find.LatestTaskRunStatusList; v != nil {
+		where = append(where, fmt.Sprintf("latest_task_run.status = ANY($%d)", len(args)+1))
+		args = append(args, *v)
 	}
 	if v := find.TypeList; v != nil {
 		var list []string
@@ -372,14 +382,21 @@ func (s *Store) ListTasks(ctx context.Context, find *api.TaskFind) ([]*TaskMessa
 			task.database_id,
 			task.name,
 			task.status,
+			COALESCE(latest_task_run.status, 'NOT_STARTED') AS latest_task_run_status,
 			task.type,
 			task.payload,
 			task.earliest_allowed_ts,
-			ARRAY_AGG (task_dag.from_task_id) blocked_by
+			(SELECT ARRAY_AGG (task_dag.from_task_id) FROM task_dag WHERE task_dag.to_task_id = task.id) blocked_by
 		FROM task
-		LEFT JOIN task_dag ON task.id = task_dag.to_task_id
+		LEFT JOIN LATERAL (
+			SELECT
+				task_run.status
+			FROM task_run
+			WHERE task_run.task_id = task.id
+			ORDER BY task_run.id DESC
+			LIMIT 1
+		) AS latest_task_run ON TRUE
 		WHERE %s
-		GROUP BY task.id
 		ORDER BY task.id ASC`, strings.Join(where, " AND ")),
 		args...,
 	)
@@ -391,7 +408,7 @@ func (s *Store) ListTasks(ctx context.Context, find *api.TaskFind) ([]*TaskMessa
 	var tasks []*TaskMessage
 	for rows.Next() {
 		task := &TaskMessage{}
-		var blockedBy []sql.NullInt32
+		var blockedBy pgtype.Int4Array
 		if err := rows.Scan(
 			&task.ID,
 			&task.CreatorID,
@@ -404,17 +421,16 @@ func (s *Store) ListTasks(ctx context.Context, find *api.TaskFind) ([]*TaskMessa
 			&task.DatabaseID,
 			&task.Name,
 			&task.Status,
+			&task.LatestTaskRunStatus,
 			&task.Type,
 			&task.Payload,
 			&task.EarliestAllowedTs,
-			pq.Array(&blockedBy),
+			&blockedBy,
 		); err != nil {
 			return nil, err
 		}
-		for _, v := range blockedBy {
-			if v.Valid {
-				task.BlockedBy = append(task.BlockedBy, int(v.Int32))
-			}
+		if err := blockedBy.AssignTo(&task.BlockedBy); err != nil {
+			return nil, err
 		}
 		tasks = append(tasks, task)
 	}
@@ -546,11 +562,14 @@ func (s *Store) UpdateTaskStatusV2(ctx context.Context, patch *api.TaskStatusPat
 	}
 	if taskRun == nil {
 		if patch.Status == api.TaskRunning {
-			if err := s.createTaskRunImpl(ctx, tx, &TaskRunMessage{
-				TaskUID: task.ID,
-				Name:    fmt.Sprintf("%s %d", task.Name, time.Now().Unix()),
-				Type:    task.Type,
-			}, patch.UpdaterID); err != nil {
+			if err := s.createTaskRunImpl(ctx, tx,
+				&TaskRunMessage{
+					TaskUID: task.ID,
+					Name:    fmt.Sprintf("%s %d", task.Name, time.Now().Unix()),
+				},
+				api.TaskRunRunning,
+				patch.UpdaterID,
+			); err != nil {
 				return nil, err
 			}
 		}
@@ -563,7 +582,6 @@ func (s *Store) UpdateTaskStatusV2(ctx context.Context, patch *api.TaskStatusPat
 			UpdaterID: patch.UpdaterID,
 			Code:      patch.Code,
 			Result:    patch.Result,
-			Comment:   patch.Comment,
 		}
 		switch patch.Status {
 		case api.TaskDone:
@@ -628,4 +646,53 @@ func (s *Store) UpdateTaskStatusV2(ctx context.Context, patch *api.TaskStatusPat
 	}
 
 	return updatedTask, nil
+}
+
+// BatchSkipTasks batch skip tasks.
+func (s *Store) BatchSkipTasks(ctx context.Context, taskUIDs []int, comment string, updaterUID int) error {
+	query := `
+	UPDATE task
+	SET updater_id = $1, payload = payload || jsonb_build_object('skipped', to_jsonb($2::BOOLEAN)) || jsonb_build_object('skippedReason', to_jsonb($3::TEXT))
+	WHERE id = ANY($4)`
+	args := []any{updaterUID, true, comment, taskUIDs}
+
+	if _, err := s.db.db.ExecContext(ctx, query, args...); err != nil {
+		return errors.Wrapf(err, "failed to batch skip tasks")
+	}
+
+	return nil
+}
+
+// ListNotSkippedTasksWithNoTaskRun returns tasks that have no task run.
+func (s *Store) ListNotSkippedTasksWithNoTaskRun(ctx context.Context) ([]int, error) {
+	rows, err := s.db.db.QueryContext(ctx, `
+	SELECT
+		task.id
+	FROM task
+	LEFT JOIN LATERAL
+		(SELECT 1 AS e FROM task_run WHERE task_run.task_id = task.id LIMIT 1) task_run
+		ON TRUE
+	WHERE task_run.e IS NULL
+	AND COALESCE((task.payload->>'skipped')::BOOLEAN, FALSE) IS FALSE
+	ORDER BY task.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int
+
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return ids, nil
 }

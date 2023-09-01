@@ -1,20 +1,18 @@
-import { defineStore } from "pinia";
-import { computed, reactive, ref, toRef, watch } from "vue";
-import { pick } from "lodash-es";
 import { watchThrottled } from "@vueuse/core";
+import { pick } from "lodash-es";
+import { defineStore } from "pinia";
+import { computed, nextTick, reactive, ref, toRef, watch } from "vue";
 import { TabInfo, CoreTabInfo, AnyTabInfo, TabMode } from "@/types";
-import { UNKNOWN_ID } from "@/types";
 import {
   getDefaultTab,
   INITIAL_TAB,
   isTempTab,
   isSimilarTab,
   WebStorageHelper,
+  isDisconnectedTab,
 } from "@/utils";
-import { useInstanceV1Store } from "./v1/instance";
-import { useSheetV1Store } from "./v1/sheet";
-import { Engine } from "@/types/proto/v1/common";
 import { useWebTerminalV1Store } from "./v1";
+import { useSheetV1Store } from "./v1/sheet";
 
 const LOCAL_STORAGE_KEY_PREFIX = "bb.sql-editor.tab-list";
 const KEYS = {
@@ -39,7 +37,6 @@ type PersistentTabInfo = Pick<TabInfo, typeof PERSISTENT_TAB_FIELDS[number]>;
 
 export const useTabStore = defineStore("tab", () => {
   const storage = new WebStorageHelper("bb.sql-editor.tab-list", localStorage);
-  const instanceStore = useInstanceV1Store();
 
   // states
   // We store the tabIdList and the tabs separately.
@@ -48,6 +45,7 @@ export const useTabStore = defineStore("tab", () => {
   const tabs = ref(new Map<string, TabInfo>());
   const tabIdList = ref<string[]>([]);
   const currentTabId = ref<string>();
+  const asidePanelTab = ref<"databases" | "sheets">("databases");
 
   // getters
   const getTabById = (id: string) => {
@@ -59,16 +57,7 @@ export const useTabStore = defineStore("tab", () => {
     return tab ?? getDefaultTab();
   });
   const isDisconnected = computed((): boolean => {
-    const { instanceId, databaseId } = currentTab.value.connection;
-    if (instanceId === String(UNKNOWN_ID)) {
-      return true;
-    }
-    const instance = instanceStore.getInstanceByUID(instanceId);
-    if (instance.engine === Engine.MYSQL || instance.engine === Engine.TIDB) {
-      // Connecting to instance directly.
-      return false;
-    }
-    return databaseId === String(UNKNOWN_ID);
+    return isDisconnectedTab(currentTab.value);
   });
 
   // actions
@@ -87,6 +76,14 @@ export const useTabStore = defineStore("tab", () => {
     }
     currentTabId.value = id;
     tabs.value.set(id, newTab);
+
+    nextTick(() => {
+      if (!currentTab.value.sheetName && isDisconnectedTab(currentTab.value)) {
+        // Switch the tab to "database" after adding a new sheet
+        // because users need to select a database to continue editing
+        asidePanelTab.value = "databases";
+      }
+    });
 
     watchTab(newTab, false);
   };
@@ -133,7 +130,7 @@ export const useTabStore = defineStore("tab", () => {
       }
     }
   };
-  const selectOrAddTempTab = () => {
+  const selectOrAddTempTab = (newTab?: AnyTabInfo) => {
     if (isDisconnected.value) {
       return;
     }
@@ -144,7 +141,7 @@ export const useTabStore = defineStore("tab", () => {
     if (tempTab) {
       setCurrentTabId(tempTab.id);
     } else {
-      addTab();
+      addTab(newTab);
     }
   };
   const _cleanup = (tabIdList: string[]) => {
@@ -160,6 +157,15 @@ export const useTabStore = defineStore("tab", () => {
 
   // watchers
   const watchTab = (tab: TabInfo, immediate: boolean) => {
+    const dirtyFields = [
+      () => tab.name,
+      () => tab.sheetName,
+      () => tab.statement,
+    ];
+    watch(dirtyFields, () => {
+      tab.isFreshNew = false;
+    });
+
     // Use a throttled watcher to reduce the performance overhead when writing.
     watchThrottled(
       () => pick(tab, ...PERSISTENT_TAB_FIELDS),
@@ -255,6 +261,7 @@ export const useTabStore = defineStore("tab", () => {
     selectOrAddTempTab,
     selectOrAddSimilarTab,
     reset,
+    asidePanelTab,
   };
 });
 
@@ -278,4 +285,18 @@ const maybeMigrateLegacyTab = (
     storage.save(KEYS.tab(tab.id), tab);
   }
   return tab;
+};
+
+export const isTabClosable = (tab: TabInfo) => {
+  const { tabList } = useTabStore();
+
+  if (tabList.length > 1) {
+    // Not the only one tab
+    return true;
+  }
+  if (tabList.length === 1) {
+    // It's the only one tab, and it's closable if it's a sheet tab
+    return !!tab.sheetName;
+  }
+  return false;
 };

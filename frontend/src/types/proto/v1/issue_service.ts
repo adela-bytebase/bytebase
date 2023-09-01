@@ -92,6 +92,8 @@ export interface ListIssuesRequest {
    * the call that provided the page token.
    */
   pageToken: string;
+  /** Filter is used to filter issues returned in the list. */
+  filter: string;
 }
 
 export interface ListIssuesResponse {
@@ -118,7 +120,63 @@ export interface UpdateIssueRequest {
   updateMask?: string[] | undefined;
 }
 
-export interface BatchUpdateIssuesRequest {
+export interface SearchIssuesRequest {
+  /**
+   * The parent, which owns this collection of issues.
+   * Format: projects/{project}.
+   * Use "projects/-" to search all issues.
+   */
+  parent: string;
+  /**
+   * The maximum number of issues to return. The service may return fewer than
+   * this value.
+   * If unspecified, at most 50 issues will be returned.
+   * The maximum value is 1000; values above 1000 will be coerced to 1000.
+   */
+  pageSize: number;
+  /**
+   * A page token, received from a previous `SearchIssues` call.
+   * Provide this to retrieve the subsequent page.
+   *
+   * When paginating, all other parameters provided to `SearchIssues` must match
+   * the call that provided the page token.
+   */
+  pageToken: string;
+  /** Query is the query statement. */
+  query: string;
+  /**
+   * Filter is used to filter issues returned in the list,
+   * follow the [ebnf](https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form) syntax.
+   * Supported field in filter:
+   * - principal, example:
+   *    - principal = "users/{email}"
+   * - creator, example:
+   *    - creator = "users/{email}"
+   * - assignee, example:
+   *    - assignee = "users/{email}"
+   * - subscriber, example:
+   *    - subscriber = "users/{email}"
+   * - status, example:
+   *    - status = "OPEN"
+   *    - status = "DONE" | "CANCELED"
+   * - create_time, example:
+   *    - create_time <= "2022-01-01T12:00:00.000Z"
+   *    - create_time >= "2022-01-01T12:00:00.000Z"
+   */
+  filter: string;
+}
+
+export interface SearchIssuesResponse {
+  /** The issues from the specified request. */
+  issues: Issue[];
+  /**
+   * A token, which can be sent as `page_token` to retrieve the next page.
+   * If this field is omitted, there are no subsequent pages.
+   */
+  nextPageToken: string;
+}
+
+export interface BatchUpdateIssuesStatusRequest {
   /**
    * The parent resource shared by all issues being updated.
    * Format: projects/{project}
@@ -127,15 +185,16 @@ export interface BatchUpdateIssuesRequest {
    */
   parent: string;
   /**
-   * The request message specifying the resources to update.
-   * A maximum of 1000 databases can be modified in a batch.
+   * The list of issues to update.
+   * Format: projects/{project}/issues/{issue}
    */
-  requests: UpdateIssueRequest[];
+  issues: string[];
+  /** The new status. */
+  status: IssueStatus;
+  reason: string;
 }
 
-export interface BatchUpdateIssuesResponse {
-  /** Issues updated. */
-  issues: Issue[];
+export interface BatchUpdateIssuesStatusResponse {
 }
 
 export interface ApproveIssueRequest {
@@ -649,7 +708,7 @@ export const CreateIssueRequest = {
 };
 
 function createBaseListIssuesRequest(): ListIssuesRequest {
-  return { parent: "", pageSize: 0, pageToken: "" };
+  return { parent: "", pageSize: 0, pageToken: "", filter: "" };
 }
 
 export const ListIssuesRequest = {
@@ -662,6 +721,9 @@ export const ListIssuesRequest = {
     }
     if (message.pageToken !== "") {
       writer.uint32(26).string(message.pageToken);
+    }
+    if (message.filter !== "") {
+      writer.uint32(34).string(message.filter);
     }
     return writer;
   },
@@ -694,6 +756,13 @@ export const ListIssuesRequest = {
 
           message.pageToken = reader.string();
           continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.filter = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -708,6 +777,7 @@ export const ListIssuesRequest = {
       parent: isSet(object.parent) ? String(object.parent) : "",
       pageSize: isSet(object.pageSize) ? Number(object.pageSize) : 0,
       pageToken: isSet(object.pageToken) ? String(object.pageToken) : "",
+      filter: isSet(object.filter) ? String(object.filter) : "",
     };
   },
 
@@ -716,6 +786,7 @@ export const ListIssuesRequest = {
     message.parent !== undefined && (obj.parent = message.parent);
     message.pageSize !== undefined && (obj.pageSize = Math.round(message.pageSize));
     message.pageToken !== undefined && (obj.pageToken = message.pageToken);
+    message.filter !== undefined && (obj.filter = message.filter);
     return obj;
   },
 
@@ -728,6 +799,7 @@ export const ListIssuesRequest = {
     message.parent = object.parent ?? "";
     message.pageSize = object.pageSize ?? 0;
     message.pageToken = object.pageToken ?? "";
+    message.filter = object.filter ?? "";
     return message;
   },
 };
@@ -878,25 +950,216 @@ export const UpdateIssueRequest = {
   },
 };
 
-function createBaseBatchUpdateIssuesRequest(): BatchUpdateIssuesRequest {
-  return { parent: "", requests: [] };
+function createBaseSearchIssuesRequest(): SearchIssuesRequest {
+  return { parent: "", pageSize: 0, pageToken: "", query: "", filter: "" };
 }
 
-export const BatchUpdateIssuesRequest = {
-  encode(message: BatchUpdateIssuesRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const SearchIssuesRequest = {
+  encode(message: SearchIssuesRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.parent !== "") {
       writer.uint32(10).string(message.parent);
     }
-    for (const v of message.requests) {
-      UpdateIssueRequest.encode(v!, writer.uint32(18).fork()).ldelim();
+    if (message.pageSize !== 0) {
+      writer.uint32(16).int32(message.pageSize);
+    }
+    if (message.pageToken !== "") {
+      writer.uint32(26).string(message.pageToken);
+    }
+    if (message.query !== "") {
+      writer.uint32(34).string(message.query);
+    }
+    if (message.filter !== "") {
+      writer.uint32(42).string(message.filter);
     }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): BatchUpdateIssuesRequest {
+  decode(input: _m0.Reader | Uint8Array, length?: number): SearchIssuesRequest {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBatchUpdateIssuesRequest();
+    const message = createBaseSearchIssuesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.parent = reader.string();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.pageSize = reader.int32();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.pageToken = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.query = reader.string();
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.filter = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SearchIssuesRequest {
+    return {
+      parent: isSet(object.parent) ? String(object.parent) : "",
+      pageSize: isSet(object.pageSize) ? Number(object.pageSize) : 0,
+      pageToken: isSet(object.pageToken) ? String(object.pageToken) : "",
+      query: isSet(object.query) ? String(object.query) : "",
+      filter: isSet(object.filter) ? String(object.filter) : "",
+    };
+  },
+
+  toJSON(message: SearchIssuesRequest): unknown {
+    const obj: any = {};
+    message.parent !== undefined && (obj.parent = message.parent);
+    message.pageSize !== undefined && (obj.pageSize = Math.round(message.pageSize));
+    message.pageToken !== undefined && (obj.pageToken = message.pageToken);
+    message.query !== undefined && (obj.query = message.query);
+    message.filter !== undefined && (obj.filter = message.filter);
+    return obj;
+  },
+
+  create(base?: DeepPartial<SearchIssuesRequest>): SearchIssuesRequest {
+    return SearchIssuesRequest.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<SearchIssuesRequest>): SearchIssuesRequest {
+    const message = createBaseSearchIssuesRequest();
+    message.parent = object.parent ?? "";
+    message.pageSize = object.pageSize ?? 0;
+    message.pageToken = object.pageToken ?? "";
+    message.query = object.query ?? "";
+    message.filter = object.filter ?? "";
+    return message;
+  },
+};
+
+function createBaseSearchIssuesResponse(): SearchIssuesResponse {
+  return { issues: [], nextPageToken: "" };
+}
+
+export const SearchIssuesResponse = {
+  encode(message: SearchIssuesResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.issues) {
+      Issue.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.nextPageToken !== "") {
+      writer.uint32(18).string(message.nextPageToken);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): SearchIssuesResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSearchIssuesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.issues.push(Issue.decode(reader, reader.uint32()));
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.nextPageToken = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SearchIssuesResponse {
+    return {
+      issues: Array.isArray(object?.issues) ? object.issues.map((e: any) => Issue.fromJSON(e)) : [],
+      nextPageToken: isSet(object.nextPageToken) ? String(object.nextPageToken) : "",
+    };
+  },
+
+  toJSON(message: SearchIssuesResponse): unknown {
+    const obj: any = {};
+    if (message.issues) {
+      obj.issues = message.issues.map((e) => e ? Issue.toJSON(e) : undefined);
+    } else {
+      obj.issues = [];
+    }
+    message.nextPageToken !== undefined && (obj.nextPageToken = message.nextPageToken);
+    return obj;
+  },
+
+  create(base?: DeepPartial<SearchIssuesResponse>): SearchIssuesResponse {
+    return SearchIssuesResponse.fromPartial(base ?? {});
+  },
+
+  fromPartial(object: DeepPartial<SearchIssuesResponse>): SearchIssuesResponse {
+    const message = createBaseSearchIssuesResponse();
+    message.issues = object.issues?.map((e) => Issue.fromPartial(e)) || [];
+    message.nextPageToken = object.nextPageToken ?? "";
+    return message;
+  },
+};
+
+function createBaseBatchUpdateIssuesStatusRequest(): BatchUpdateIssuesStatusRequest {
+  return { parent: "", issues: [], status: 0, reason: "" };
+}
+
+export const BatchUpdateIssuesStatusRequest = {
+  encode(message: BatchUpdateIssuesStatusRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.parent !== "") {
+      writer.uint32(10).string(message.parent);
+    }
+    for (const v of message.issues) {
+      writer.uint32(18).string(v!);
+    }
+    if (message.status !== 0) {
+      writer.uint32(24).int32(message.status);
+    }
+    if (message.reason !== "") {
+      writer.uint32(34).string(message.reason);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): BatchUpdateIssuesStatusRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseBatchUpdateIssuesStatusRequest();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -912,7 +1175,21 @@ export const BatchUpdateIssuesRequest = {
             break;
           }
 
-          message.requests.push(UpdateIssueRequest.decode(reader, reader.uint32()));
+          message.issues.push(reader.string());
+          continue;
+        case 3:
+          if (tag !== 24) {
+            break;
+          }
+
+          message.status = reader.int32() as any;
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.reason = reader.string();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -923,62 +1200,58 @@ export const BatchUpdateIssuesRequest = {
     return message;
   },
 
-  fromJSON(object: any): BatchUpdateIssuesRequest {
+  fromJSON(object: any): BatchUpdateIssuesStatusRequest {
     return {
       parent: isSet(object.parent) ? String(object.parent) : "",
-      requests: Array.isArray(object?.requests) ? object.requests.map((e: any) => UpdateIssueRequest.fromJSON(e)) : [],
+      issues: Array.isArray(object?.issues) ? object.issues.map((e: any) => String(e)) : [],
+      status: isSet(object.status) ? issueStatusFromJSON(object.status) : 0,
+      reason: isSet(object.reason) ? String(object.reason) : "",
     };
   },
 
-  toJSON(message: BatchUpdateIssuesRequest): unknown {
+  toJSON(message: BatchUpdateIssuesStatusRequest): unknown {
     const obj: any = {};
     message.parent !== undefined && (obj.parent = message.parent);
-    if (message.requests) {
-      obj.requests = message.requests.map((e) => e ? UpdateIssueRequest.toJSON(e) : undefined);
+    if (message.issues) {
+      obj.issues = message.issues.map((e) => e);
     } else {
-      obj.requests = [];
+      obj.issues = [];
     }
+    message.status !== undefined && (obj.status = issueStatusToJSON(message.status));
+    message.reason !== undefined && (obj.reason = message.reason);
     return obj;
   },
 
-  create(base?: DeepPartial<BatchUpdateIssuesRequest>): BatchUpdateIssuesRequest {
-    return BatchUpdateIssuesRequest.fromPartial(base ?? {});
+  create(base?: DeepPartial<BatchUpdateIssuesStatusRequest>): BatchUpdateIssuesStatusRequest {
+    return BatchUpdateIssuesStatusRequest.fromPartial(base ?? {});
   },
 
-  fromPartial(object: DeepPartial<BatchUpdateIssuesRequest>): BatchUpdateIssuesRequest {
-    const message = createBaseBatchUpdateIssuesRequest();
+  fromPartial(object: DeepPartial<BatchUpdateIssuesStatusRequest>): BatchUpdateIssuesStatusRequest {
+    const message = createBaseBatchUpdateIssuesStatusRequest();
     message.parent = object.parent ?? "";
-    message.requests = object.requests?.map((e) => UpdateIssueRequest.fromPartial(e)) || [];
+    message.issues = object.issues?.map((e) => e) || [];
+    message.status = object.status ?? 0;
+    message.reason = object.reason ?? "";
     return message;
   },
 };
 
-function createBaseBatchUpdateIssuesResponse(): BatchUpdateIssuesResponse {
-  return { issues: [] };
+function createBaseBatchUpdateIssuesStatusResponse(): BatchUpdateIssuesStatusResponse {
+  return {};
 }
 
-export const BatchUpdateIssuesResponse = {
-  encode(message: BatchUpdateIssuesResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    for (const v of message.issues) {
-      Issue.encode(v!, writer.uint32(10).fork()).ldelim();
-    }
+export const BatchUpdateIssuesStatusResponse = {
+  encode(_: BatchUpdateIssuesStatusResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): BatchUpdateIssuesResponse {
+  decode(input: _m0.Reader | Uint8Array, length?: number): BatchUpdateIssuesStatusResponse {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseBatchUpdateIssuesResponse();
+    const message = createBaseBatchUpdateIssuesStatusResponse();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.issues.push(Issue.decode(reader, reader.uint32()));
-          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -988,27 +1261,21 @@ export const BatchUpdateIssuesResponse = {
     return message;
   },
 
-  fromJSON(object: any): BatchUpdateIssuesResponse {
-    return { issues: Array.isArray(object?.issues) ? object.issues.map((e: any) => Issue.fromJSON(e)) : [] };
+  fromJSON(_: any): BatchUpdateIssuesStatusResponse {
+    return {};
   },
 
-  toJSON(message: BatchUpdateIssuesResponse): unknown {
+  toJSON(_: BatchUpdateIssuesStatusResponse): unknown {
     const obj: any = {};
-    if (message.issues) {
-      obj.issues = message.issues.map((e) => e ? Issue.toJSON(e) : undefined);
-    } else {
-      obj.issues = [];
-    }
     return obj;
   },
 
-  create(base?: DeepPartial<BatchUpdateIssuesResponse>): BatchUpdateIssuesResponse {
-    return BatchUpdateIssuesResponse.fromPartial(base ?? {});
+  create(base?: DeepPartial<BatchUpdateIssuesStatusResponse>): BatchUpdateIssuesStatusResponse {
+    return BatchUpdateIssuesStatusResponse.fromPartial(base ?? {});
   },
 
-  fromPartial(object: DeepPartial<BatchUpdateIssuesResponse>): BatchUpdateIssuesResponse {
-    const message = createBaseBatchUpdateIssuesResponse();
-    message.issues = object.issues?.map((e) => Issue.fromPartial(e)) || [];
+  fromPartial(_: DeepPartial<BatchUpdateIssuesStatusResponse>): BatchUpdateIssuesStatusResponse {
+    const message = createBaseBatchUpdateIssuesStatusResponse();
     return message;
   },
 };
@@ -2435,6 +2702,62 @@ export const IssueServiceDefinition = {
         },
       },
     },
+    searchIssues: {
+      name: "SearchIssues",
+      requestType: SearchIssuesRequest,
+      requestStream: false,
+      responseType: SearchIssuesResponse,
+      responseStream: false,
+      options: {
+        _unknownFields: {
+          8410: [new Uint8Array([0])],
+          578365826: [
+            new Uint8Array([
+              39,
+              18,
+              37,
+              47,
+              118,
+              49,
+              47,
+              123,
+              112,
+              97,
+              114,
+              101,
+              110,
+              116,
+              61,
+              112,
+              114,
+              111,
+              106,
+              101,
+              99,
+              116,
+              115,
+              47,
+              42,
+              125,
+              47,
+              105,
+              115,
+              115,
+              117,
+              101,
+              115,
+              58,
+              115,
+              101,
+              97,
+              114,
+              99,
+              104,
+            ]),
+          ],
+        },
+      },
+    },
     createIssueComment: {
       name: "CreateIssueComment",
       requestType: CreateIssueCommentRequest,
@@ -2643,22 +2966,22 @@ export const IssueServiceDefinition = {
         },
       },
     },
-    batchUpdateIssues: {
-      name: "BatchUpdateIssues",
-      requestType: BatchUpdateIssuesRequest,
+    batchUpdateIssuesStatus: {
+      name: "BatchUpdateIssuesStatus",
+      requestType: BatchUpdateIssuesStatusRequest,
       requestStream: false,
-      responseType: BatchUpdateIssuesResponse,
+      responseType: BatchUpdateIssuesStatusResponse,
       responseStream: false,
       options: {
         _unknownFields: {
           578365826: [
             new Uint8Array([
-              47,
+              53,
               58,
               1,
               42,
               34,
-              42,
+              48,
               47,
               118,
               49,
@@ -2701,6 +3024,12 @@ export const IssueServiceDefinition = {
               97,
               116,
               101,
+              83,
+              116,
+              97,
+              116,
+              117,
+              115,
             ]),
           ],
         },
@@ -2893,6 +3222,10 @@ export interface IssueServiceImplementation<CallContextExt = {}> {
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ListIssuesResponse>>;
   updateIssue(request: UpdateIssueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Issue>>;
+  searchIssues(
+    request: SearchIssuesRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<SearchIssuesResponse>>;
   createIssueComment(
     request: CreateIssueCommentRequest,
     context: CallContext & CallContextExt,
@@ -2901,10 +3234,10 @@ export interface IssueServiceImplementation<CallContextExt = {}> {
     request: UpdateIssueCommentRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<IssueComment>>;
-  batchUpdateIssues(
-    request: BatchUpdateIssuesRequest,
+  batchUpdateIssuesStatus(
+    request: BatchUpdateIssuesStatusRequest,
     context: CallContext & CallContextExt,
-  ): Promise<DeepPartial<BatchUpdateIssuesResponse>>;
+  ): Promise<DeepPartial<BatchUpdateIssuesStatusResponse>>;
   approveIssue(request: ApproveIssueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Issue>>;
   rejectIssue(request: RejectIssueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Issue>>;
   requestIssue(request: RequestIssueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Issue>>;
@@ -2918,6 +3251,10 @@ export interface IssueServiceClient<CallOptionsExt = {}> {
     options?: CallOptions & CallOptionsExt,
   ): Promise<ListIssuesResponse>;
   updateIssue(request: DeepPartial<UpdateIssueRequest>, options?: CallOptions & CallOptionsExt): Promise<Issue>;
+  searchIssues(
+    request: DeepPartial<SearchIssuesRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<SearchIssuesResponse>;
   createIssueComment(
     request: DeepPartial<CreateIssueCommentRequest>,
     options?: CallOptions & CallOptionsExt,
@@ -2926,10 +3263,10 @@ export interface IssueServiceClient<CallOptionsExt = {}> {
     request: DeepPartial<UpdateIssueCommentRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<IssueComment>;
-  batchUpdateIssues(
-    request: DeepPartial<BatchUpdateIssuesRequest>,
+  batchUpdateIssuesStatus(
+    request: DeepPartial<BatchUpdateIssuesStatusRequest>,
     options?: CallOptions & CallOptionsExt,
-  ): Promise<BatchUpdateIssuesResponse>;
+  ): Promise<BatchUpdateIssuesStatusResponse>;
   approveIssue(request: DeepPartial<ApproveIssueRequest>, options?: CallOptions & CallOptionsExt): Promise<Issue>;
   rejectIssue(request: DeepPartial<RejectIssueRequest>, options?: CallOptions & CallOptionsExt): Promise<Issue>;
   requestIssue(request: DeepPartial<RequestIssueRequest>, options?: CallOptions & CallOptionsExt): Promise<Issue>;

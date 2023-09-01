@@ -164,16 +164,17 @@
 
 <script lang="ts" setup>
 import { head } from "lodash-es";
-import { computed, reactive, watchEffect, PropType } from "vue";
-import { ComposedDatabase, DataSource } from "../types";
+import { computed, reactive, watchEffect, PropType, onMounted } from "vue";
+import { useRoute } from "vue-router";
 import { useAnomalyV1List, useDBSchemaV1Store } from "@/store";
+import { Anomaly } from "@/types/proto/v1/anomaly_service";
+import { Engine, State } from "@/types/proto/v1/common";
 import { BBTableSectionDataSource } from "../bbkit/types";
 import AnomalyTable from "../components/AnomalyTable.vue";
+import FunctionTable from "../components/FunctionTable.vue";
 import TableTable from "../components/TableTable.vue";
 import ViewTable from "../components/ViewTable.vue";
-import FunctionTable from "../components/FunctionTable.vue";
-import { Engine, State } from "@/types/proto/v1/common";
-import { Anomaly } from "@/types/proto/v1/anomaly_service";
+import { ComposedDatabase, DataSource } from "../types";
 import StreamTable from "./StreamTable.vue";
 import TaskTable from "./TaskTable.vue";
 
@@ -188,9 +189,16 @@ const props = defineProps({
     type: Object as PropType<ComposedDatabase>,
   },
 });
-
+const route = useRoute();
 const state = reactive<LocalState>({
   selectedSchemaName: "",
+});
+
+onMounted(() => {
+  const schema = route.query.schema as string;
+  if (schema) {
+    state.selectedSchemaName = schema;
+  }
 });
 
 const dbSchemaStore = useDBSchemaV1Store();
@@ -206,14 +214,30 @@ const hasSchemaProperty = computed(() => {
     databaseEngine.value === Engine.ORACLE ||
     databaseEngine.value === Engine.DM ||
     databaseEngine.value === Engine.MSSQL ||
-    databaseEngine.value === Engine.REDSHIFT
+    databaseEngine.value === Engine.REDSHIFT ||
+    databaseEngine.value === Engine.RISINGWAVE
   );
 });
 
 const prepareDatabaseMetadata = async () => {
   await dbSchemaStore.getOrFetchDatabaseMetadata(props.database.name);
   if (hasSchemaProperty.value && schemaList.value.length > 0) {
-    state.selectedSchemaName = head(schemaList.value)?.name || "";
+    const schemaInQuery = route.query.schema as string;
+    if (
+      schemaInQuery &&
+      schemaList.value.find((schema) => schema.name === schemaInQuery)
+    ) {
+      state.selectedSchemaName = schemaInQuery;
+    } else {
+      const publicSchema = schemaList.value.find(
+        (schema) => schema.name.toLowerCase() === "public"
+      );
+      if (publicSchema) {
+        state.selectedSchemaName = publicSchema.name;
+      } else {
+        state.selectedSchemaName = head(schemaList.value)?.name || "";
+      }
+    }
   }
 };
 

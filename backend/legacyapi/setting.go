@@ -40,6 +40,10 @@ const (
 	SettingWorkspaceMailDelivery SettingName = "bb.workspace.mail-delivery"
 	// SettingSchemaTemplate is the setting name for schema template.
 	SettingSchemaTemplate SettingName = "bb.workspace.schema-template"
+	// SettingDataClassification is the setting name for data classification.
+	SettingDataClassification SettingName = "bb.workspace.data-classification"
+	// SettingSemanticCategory is the setting name for semantic category.
+	SettingSemanticCategory SettingName = "bb.workspace.semantic-category"
 )
 
 // IMType is the type of IM.

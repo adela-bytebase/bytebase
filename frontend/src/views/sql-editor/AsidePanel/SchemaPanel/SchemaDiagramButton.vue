@@ -32,12 +32,11 @@
 </template>
 
 <script lang="ts" setup>
-import { reactive } from "vue";
 import { NButton } from "naive-ui";
-
-import type { DatabaseMetadata } from "@/types/proto/store/database";
-import type { ComposedDatabase } from "@/types";
+import { reactive } from "vue";
 import { SchemaDiagram, SchemaDiagramIcon } from "@/components/SchemaDiagram";
+import type { ComposedDatabase } from "@/types";
+import type { DatabaseMetadata } from "@/types/proto/v1/database_service";
 
 type LocalState = {
   show: boolean;

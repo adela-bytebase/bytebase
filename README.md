@@ -89,9 +89,9 @@
   Want to control the data access but don't know how?
 </p>
 
-|                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |                                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| <b>All-in-one SQL Editor</b><br />Web-based IDE specifically for performing SQL specific tasks.<br /><br/><b>Data Anonymization</b><br />State-of-the-art [column level anonymization](https://www.bytebase.com/docs/sql-editor/anonymize-data) engine to cover complex situations like subquery, CTE.<br /><br /><b>Data Access Control</b><br />Organization level policy to centralize the [data access control](https://www.bytebase.com/docs/security/data-access-control). | <img src="https://raw.githubusercontent.com/bytebase/bytebase/main/docs/assets/sql-editor.webp" /> |
+|                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |                                                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| <b>All-in-one SQL Editor</b><br />Web-based IDE specifically for performing SQL specific tasks.<br /><br/><b>Data Masking</b><br />State-of-the-art [column level masking](https://www.bytebase.com/docs/sql-editor/mask-data) engine to cover complex situations like subquery, CTE.<br /><br /><b>Data Access Control</b><br />Organization level policy to centralize the [data access control](https://www.bytebase.com/docs/security/data-access-control). | <img src="https://raw.githubusercontent.com/bytebase/bytebase/main/docs/assets/sql-editor.webp" /> |
 
 <br />
 
@@ -173,7 +173,7 @@ our product experts.
 
 # 👩‍🏫 Tutorials
 
-Product tutorials are available at https://www.bytebase.com/tutorial
+Product tutorials are available at https://www.bytebase.com/tutorial.
 
 ## Integrations
 
@@ -263,7 +263,7 @@ Below diagram describes a typical mapping between an engineering org and the cor
 
 ### Prerequisites
 
-- [Go](https://golang.org/doc/install) (1.20.1 or later)
+- [Go](https://golang.org/doc/install) (1.21.0 or later)
 - [pnpm](https://pnpm.io/installation)
 - [Air](https://github.com/bytebase/air) (**our forked repo @87187cc with the proper signal handling**). This is for backend live reload.
   ```bash
@@ -278,9 +278,17 @@ Below diagram describes a typical mapping between an engineering org and the cor
    git clone https://github.com/bytebase/bytebase
    ```
 
+1. Create an external Postgres database on localhost.
+
+  ```sql
+  CREATE USER bbdev SUPERUSER;
+  CREATE DATABASE bbdev;
+  ```
+
 1. Start backend using air (with live reload).
 
    ```bash
+   PG_URL=postgresql://bbdev@localhost/bbdev
    air -c scripts/.air.toml
    ```
 
@@ -304,6 +312,12 @@ Below diagram describes a typical mapping between an engineering org and the cor
 
    Bytebase should now be running at http://localhost:3000 and change either frontend or backend code would trigger live reload.
 
+### Tips
+
+* Use [Code Inspector](https://en.inspector.fe-dev.cn/guide/start.html#method1-recommend) to locate
+frontend code from UI. Hold `Option + Shift` on Mac or `Alt + Shift` on Windows
+
+
 <br />
 
 # Bytebase vs Flyway, Liquibase
@@ -315,7 +329,7 @@ Either Flyway or Liquibase is a library and CLI focusing on schema change. While
 solution covering the entire database development lifecycle for Developers and DBAs to collaborate.
 
 Another key difference is Bytebase **doesn't** support Oracle and SQL Server. This is a conscious
-decision we make so that we can focus on supporting other databases without good tooliing support.
+decision we make so that we can focus on supporting other databases without good tooling support.
 In particular, many of our users tell us Bytebase is by far the best (and sometimes the only) database
 tool that can support their PostgreSQL and ClickHouse use cases.
 

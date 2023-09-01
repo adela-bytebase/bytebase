@@ -19,7 +19,7 @@ CREATE TABLE idp (
   resource_id TEXT NOT NULL,
   name TEXT NOT NULL,
   domain TEXT NOT NULL,
-  type TEXT NOT NULL CONSTRAINT idp_type_check CHECK (type IN ('OAUTH2', 'OIDC')),
+  type TEXT NOT NULL CONSTRAINT idp_type_check CHECK (type IN ('OAUTH2', 'OIDC', 'LDAP')),
   -- config stores the corresponding configuration of the IdP, which may vary depending on the type of the IdP.
   config JSONB NOT NULL DEFAULT '{}'
 );
@@ -224,7 +224,8 @@ CREATE TABLE project (
     db_name_template TEXT NOT NULL,
     schema_version_type TEXT NOT NULL CHECK (schema_version_type IN ('TIMESTAMP', 'SEMANTIC')) DEFAULT 'TIMESTAMP',
     schema_change_type TEXT NOT NULL CHECK (schema_change_type IN ('DDL', 'SDL')) DEFAULT 'DDL',
-    resource_id TEXT NOT NULL
+    resource_id TEXT NOT NULL,
+    data_classification_config_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX idx_project_unique_key ON project(key);
@@ -391,7 +392,8 @@ CREATE TABLE db (
     secrets JSONB NOT NULL DEFAULT '{}',
     datashare BOOLEAN NOT NULL DEFAULT FALSE,
     -- service_name is the Oracle specific field.
-    service_name TEXT NOT NULL DEFAULT ''
+    service_name TEXT NOT NULL DEFAULT '',
+    metadata JSONB NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX idx_db_instance_id ON db(instance_id);
@@ -440,7 +442,6 @@ CREATE TABLE data_source (
     updater_id INTEGER NOT NULL REFERENCES principal (id),
     updated_ts BIGINT NOT NULL DEFAULT extract(epoch from now()),
     instance_id INTEGER NOT NULL REFERENCES instance (id),
-    database_id INTEGER NOT NULL REFERENCES db (id),
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('ADMIN', 'RW', 'RO')),
     username TEXT NOT NULL,
@@ -454,9 +455,7 @@ CREATE TABLE data_source (
     database TEXT NOT NULL DEFAULT ''
 );
 
-CREATE INDEX idx_data_source_instance_id ON data_source(instance_id);
-
-CREATE UNIQUE INDEX idx_data_source_unique_database_id_name ON data_source(database_id, name);
+CREATE UNIQUE INDEX idx_data_source_unique_instance_id_name ON data_source(instance_id, name);
 
 ALTER SEQUENCE data_source_id_seq RESTART WITH 101;
 
@@ -639,13 +638,10 @@ CREATE TABLE task_run (
     updated_ts BIGINT NOT NULL DEFAULT extract(epoch from now()),
     task_id INTEGER NOT NULL REFERENCES task (id),
     name TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('RUNNING', 'DONE', 'FAILED', 'CANCELED')),
-    type TEXT NOT NULL CHECK (type LIKE 'bb.task.%'),
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'RUNNING', 'DONE', 'FAILED', 'CANCELED')),
     code INTEGER NOT NULL DEFAULT 0,
-    comment TEXT NOT NULL DEFAULT '',
     -- result saves the task run result in json format
-    result  JSONB NOT NULL DEFAULT '{}',
-    payload JSONB NOT NULL DEFAULT '{}'
+    result  JSONB NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX idx_task_run_task_id ON task_run(task_id);
@@ -758,7 +754,8 @@ CREATE TABLE issue (
     -- While changing assignee_id, one should only change it to a non-robot DBA/owner.
     assignee_id INTEGER NOT NULL REFERENCES principal (id),
     assignee_need_attention BOOLEAN NOT NULL DEFAULT FALSE, 
-    payload JSONB NOT NULL DEFAULT '{}'
+    payload JSONB NOT NULL DEFAULT '{}',
+    ts_vector TSVECTOR
 );
 
 CREATE INDEX idx_issue_project_id ON issue(project_id);
@@ -772,6 +769,8 @@ CREATE INDEX idx_issue_creator_id ON issue(creator_id);
 CREATE INDEX idx_issue_assignee_id ON issue(assignee_id);
 
 CREATE INDEX idx_issue_created_ts ON issue(created_ts);
+
+CREATE INDEX idx_issue_ts_vector ON issue USING GIN(ts_vector);
 
 ALTER SEQUENCE issue_id_seq RESTART WITH 101;
 

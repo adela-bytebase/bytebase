@@ -82,7 +82,7 @@ func (exec *StatementTypeExecutor) Run(ctx context.Context, _ *store.TaskCheckRu
 	renderedStatement := backendutils.RenderStatement(statement, materials)
 
 	switch instance.Engine {
-	case db.Postgres:
+	case db.Postgres, db.RisingWave:
 		result, err = postgresqlStatementTypeCheck(renderedStatement, task.Type)
 		if err != nil {
 			return nil, err
@@ -267,19 +267,6 @@ func mysqlStatementTypeCheck(statement string, charset string, collation string,
 	p.EnableWindowFunc(true)
 
 	stmts, _, err := p.Parse(supportStmt, charset, collation)
-	if err != nil {
-		// nolint: nilerr
-		return []api.TaskCheckResult{
-			{
-				Status:    api.TaskCheckStatusError,
-				Namespace: api.AdvisorNamespace,
-				Code:      advisor.StatementSyntaxError.Int(),
-				Title:     "Syntax error",
-				Content:   err.Error(),
-			},
-		}, nil
-	}
-
 	if err != nil {
 		// nolint: nilerr
 		return []api.TaskCheckResult{

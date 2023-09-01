@@ -238,7 +238,9 @@ func (s *DatabaseService) UpdateDatabase(ctx context.Context, request *v1pb.Upda
 			}
 			patch.ProjectID = &project.ResourceID
 		case "labels":
-			patch.Labels = &request.Database.Labels
+			metadata := database.Metadata
+			metadata.Labels = request.Database.Labels
+			patch.Metadata = metadata
 		case "environment":
 			if request.Database.Environment == "" {
 				unsetEnvironment := ""
@@ -370,18 +372,19 @@ func (s *DatabaseService) BatchUpdateDatabases(ctx context.Context, request *v1p
 		return nil, status.Errorf(codes.FailedPrecondition, "project %q is deleted", projectID)
 	}
 
-	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
-	updatedDatabases, err := s.store.BatchUpdateDatabaseProject(ctx, databases, project.ResourceID, principalID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-	if err := s.createTransferProjectActivity(ctx, project, principalID, databases...); err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-
 	response := &v1pb.BatchUpdateDatabasesResponse{}
-	for _, database := range updatedDatabases {
-		response.Databases = append(response.Databases, convertToDatabase(database))
+	principalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	if len(databases) > 0 {
+		updatedDatabases, err := s.store.BatchUpdateDatabaseProject(ctx, databases, project.ResourceID, principalID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, err.Error())
+		}
+		if err := s.createTransferProjectActivity(ctx, project, principalID, databases...); err != nil {
+			return nil, status.Errorf(codes.Internal, err.Error())
+		}
+		for _, database := range updatedDatabases {
+			response.Databases = append(response.Databases, convertToDatabase(database))
+		}
 	}
 	return response, nil
 }
@@ -684,6 +687,8 @@ func (s *DatabaseService) ListChangeHistories(ctx context.Context, request *v1pb
 		}
 		limit = int(pageToken.Limit)
 		offset = int(pageToken.Offset)
+	} else {
+		limit = int(request.PageSize)
 	}
 	if limit <= 0 {
 		limit = 10
@@ -701,6 +706,9 @@ func (s *DatabaseService) ListChangeHistories(ctx context.Context, request *v1pb
 	}
 	if request.View == v1pb.ChangeHistoryView_CHANGE_HISTORY_VIEW_FULL {
 		find.ShowFull = true
+	}
+	if request.Filter != "" {
+		find.ResourcesFilter = &request.Filter
 	}
 	changeHistories, err := s.store.ListInstanceChangeHistory(ctx, find)
 	if err != nil {
@@ -839,7 +847,46 @@ func convertToChangeHistory(h *store.InstanceChangeHistoryMessage) (*v1pb.Change
 	if h.IssueUID != nil {
 		v1pbHistory.Issue = fmt.Sprintf("%s%s/%s%d", common.ProjectNamePrefix, h.IssueProjectID, common.IssuePrefix, *h.IssueUID)
 	}
+	if h.Payload != nil && h.Payload.ChangedResources != nil {
+		v1pbHistory.ChangedResources = convertToChangedResources(h.Payload.ChangedResources)
+	}
 	return v1pbHistory, nil
+}
+
+func convertToChangedResources(r *storepb.ChangedResources) *v1pb.ChangedResources {
+	if r == nil {
+		return nil
+	}
+	result := &v1pb.ChangedResources{}
+	for _, database := range r.Databases {
+		v1Database := &v1pb.ChangedResourceDatabase{
+			Name:    database.Name,
+			Schemas: []*v1pb.ChangedResourceSchema{},
+		}
+		for _, schema := range database.Schemas {
+			v1Schema := &v1pb.ChangedResourceSchema{
+				Name:   schema.Name,
+				Tables: []*v1pb.ChangedResourceTable{},
+			}
+			for _, table := range schema.Tables {
+				v1Schema.Tables = append(v1Schema.Tables, &v1pb.ChangedResourceTable{
+					Name: table.Name,
+				})
+			}
+			sort.Slice(v1Schema.Tables, func(i, j int) bool {
+				return v1Schema.Tables[i].Name < v1Schema.Tables[j].Name
+			})
+			v1Database.Schemas = append(v1Database.Schemas, v1Schema)
+		}
+		sort.Slice(v1Database.Schemas, func(i, j int) bool {
+			return v1Database.Schemas[i].Name < v1Database.Schemas[j].Name
+		})
+		result.Databases = append(result.Databases, v1Database)
+	}
+	sort.Slice(result.Databases, func(i, j int) bool {
+		return result.Databases[i].Name < result.Databases[j].Name
+	})
+	return result
 }
 
 func convertToPushEvent(e *storepb.PushEvent) *v1pb.PushEvent {
@@ -1501,23 +1548,27 @@ func convertToDatabase(database *store.DatabaseMessage) *v1pb.Database {
 	case api.NotFound:
 		syncState = v1pb.State_DELETED
 	}
-	environment := ""
+	environment, effectiveEnvironment := "", ""
+	if database.EnvironmentID != "" {
+		environment = fmt.Sprintf("%s%s", common.EnvironmentNamePrefix, database.EnvironmentID)
+	}
 	if database.EffectiveEnvironmentID != "" {
-		environment = fmt.Sprintf("%s%s", common.EnvironmentNamePrefix, database.EffectiveEnvironmentID)
+		effectiveEnvironment = fmt.Sprintf("%s%s", common.EnvironmentNamePrefix, database.EffectiveEnvironmentID)
 	}
 	return &v1pb.Database{
-		Name:               fmt.Sprintf("instances/%s/databases/%s", database.InstanceID, database.DatabaseName),
-		Uid:                fmt.Sprintf("%d", database.UID),
-		SyncState:          syncState,
-		SuccessfulSyncTime: timestamppb.New(time.Unix(database.SuccessfulSyncTimeTs, 0)),
-		Project:            fmt.Sprintf("%s%s", common.ProjectNamePrefix, database.ProjectID),
-		Environment:        environment,
-		SchemaVersion:      database.SchemaVersion,
-		Labels:             database.Labels,
+		Name:                 fmt.Sprintf("instances/%s/databases/%s", database.InstanceID, database.DatabaseName),
+		Uid:                  fmt.Sprintf("%d", database.UID),
+		SyncState:            syncState,
+		SuccessfulSyncTime:   timestamppb.New(time.Unix(database.SuccessfulSyncTimeTs, 0)),
+		Project:              fmt.Sprintf("%s%s", common.ProjectNamePrefix, database.ProjectID),
+		Environment:          environment,
+		EffectiveEnvironment: effectiveEnvironment,
+		SchemaVersion:        database.SchemaVersion,
+		Labels:               database.GetEffectiveLabels(),
 	}
 }
 
-func convertDatabaseMetadata(metadata *storepb.DatabaseMetadata) *v1pb.DatabaseMetadata {
+func convertDatabaseMetadata(metadata *storepb.DatabaseSchemaMetadata) *v1pb.DatabaseMetadata {
 	m := &v1pb.DatabaseMetadata{
 		Name:         metadata.Name,
 		CharacterSet: metadata.CharacterSet,
@@ -1909,6 +1960,9 @@ func (s *DatabaseService) AdviseIndex(ctx context.Context, request *v1pb.AdviseI
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get database: %v", err)
 	}
+	if database == nil {
+		return nil, status.Errorf(codes.NotFound, "database %q not found", databaseName)
+	}
 
 	switch instance.Engine {
 	case db.Postgres:
@@ -1951,6 +2005,9 @@ func (s *DatabaseService) mysqlAdviseIndex(ctx context.Context, request *v1pb.Ad
 			database, err := s.store.GetDatabaseV2(ctx, findDatabase)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "Failed to get database: %v", err)
+			}
+			if database == nil {
+				return nil, status.Errorf(codes.NotFound, "database %q not found", db)
 			}
 			schema, err := s.store.GetDBSchema(ctx, database.UID)
 			if err != nil {

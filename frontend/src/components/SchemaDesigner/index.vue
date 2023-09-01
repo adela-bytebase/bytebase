@@ -14,17 +14,19 @@
 </template>
 
 <script lang="ts" setup>
+import { cloneDeep, isEqual } from "lodash-es";
 import { Splitpanes, Pane } from "splitpanes";
-import { ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
+import { useSettingV1Store } from "@/store";
+import { Schema, convertSchemaMetadataList } from "@/types";
+import { Engine } from "@/types/proto/v1/common";
 import { DatabaseMetadata } from "@/types/proto/v1/database_service";
 import { SchemaDesign } from "@/types/proto/v1/schema_design_service";
-import { Engine } from "@/types/proto/v1/common";
-import { provideSchemaDesignerContext } from "./common";
-import { SchemaDesignerTabState } from "./common/type";
 import AsidePanel from "./AsidePanel.vue";
 import Designer from "./Designer.vue";
-import { Schema, convertSchemaMetadataList } from "@/types";
-import { cloneDeep, isEqual } from "lodash-es";
+import { provideSchemaDesignerContext } from "./common";
+import { SchemaDesignerTabState } from "./common/type";
+import { rebuildEditableSchemas } from "./common/util";
 
 const props = defineProps<{
   readonly: boolean;
@@ -32,6 +34,7 @@ const props = defineProps<{
   schemaDesign: SchemaDesign;
 }>();
 
+const settingStore = useSettingV1Store();
 const readonly = ref(props.readonly);
 const engine = ref(props.engine);
 const metadata = ref<DatabaseMetadata>(DatabaseMetadata.fromPartial({}));
@@ -44,9 +47,19 @@ const tabState = ref<SchemaDesignerTabState>({
   tabMap: new Map(),
 });
 
+// Prepare schema template contexts.
+onMounted(async () => {
+  await settingStore.getOrFetchSettingByName("bb.workspace.schema-template");
+});
+
 const rebuildEditingState = () => {
-  editableSchemas.value = convertSchemaMetadataList(metadata.value.schemas);
-  originalSchemas.value = cloneDeep(editableSchemas.value);
+  originalSchemas.value = convertSchemaMetadataList(
+    baselineMetadata.value.schemas
+  );
+  editableSchemas.value = rebuildEditableSchemas(
+    originalSchemas.value,
+    metadata.value.schemas
+  );
   tabState.value = {
     tabMap: new Map(),
   };

@@ -67,19 +67,6 @@ func (s *Scheduler) Register(planCheckRunType store.PlanCheckRunType, executor E
 	s.executors[planCheckRunType] = executor
 }
 
-// SchedulePlanChecksForPlan schedules plan checks for the given plan.
-func (s *Scheduler) SchedulePlanChecksForPlan(ctx context.Context, planUID int64) error {
-	plan, err := s.store.GetPlan(ctx, planUID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get plan by UID %v", planUID)
-	}
-	planCheckRuns, err := getPlanCheckRunsForPlan(ctx, s.store, plan)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get plan check runs for plan")
-	}
-	return s.store.CreatePlanCheckRuns(ctx, planCheckRuns...)
-}
-
 func (s *Scheduler) runOnce(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -116,28 +103,14 @@ func (s *Scheduler) runPlanCheckRun(ctx context.Context, planCheckRun *store.Pla
 		return
 	}
 
-	databaseUID := int(planCheckRun.Config.DatabaseId)
-	db, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{UID: &databaseUID})
-	if err != nil {
-		log.Error("failed to get db for plan check run")
-		s.markPlanCheckRunFailed(ctx, planCheckRun, errors.Wrapf(err, "failed to get database for plan check run").Error())
-		return
-	}
-	instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{
-		ResourceID: &db.InstanceID,
-	})
-	if err != nil {
-		log.Error("failed to get instance for plan check run")
-		s.markPlanCheckRunFailed(ctx, planCheckRun, errors.Wrapf(err, "failed to get instance for plan check run").Error())
-		return
-	}
+	instanceUID := int(planCheckRun.Config.InstanceUid)
 
 	s.stateCfg.Lock()
-	if s.stateCfg.InstanceOutstandingConnections[instance.UID] >= state.InstanceMaximumConnectionNumber {
+	if s.stateCfg.InstanceOutstandingConnections[instanceUID] >= state.InstanceMaximumConnectionNumber {
 		s.stateCfg.Unlock()
 		return
 	}
-	s.stateCfg.InstanceOutstandingConnections[instance.UID]++
+	s.stateCfg.InstanceOutstandingConnections[instanceUID]++
 	s.stateCfg.Unlock()
 
 	s.stateCfg.RunningPlanChecks.Store(planCheckRun.UID, true)
@@ -145,10 +118,10 @@ func (s *Scheduler) runPlanCheckRun(ctx context.Context, planCheckRun *store.Pla
 		defer func() {
 			s.stateCfg.RunningPlanChecks.Delete(planCheckRun.UID)
 			s.stateCfg.Lock()
-			s.stateCfg.InstanceOutstandingConnections[instance.UID]--
+			s.stateCfg.InstanceOutstandingConnections[instanceUID]--
 			s.stateCfg.Unlock()
 		}()
-		results, err := executor.Run(ctx, planCheckRun)
+		results, err := runExecutorOnce(ctx, executor, planCheckRun)
 		if err != nil {
 			s.markPlanCheckRunFailed(ctx, planCheckRun, err.Error())
 			return

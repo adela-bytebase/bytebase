@@ -11,7 +11,7 @@
           size="small"
           type="text"
           :placeholder="t('sql-editor.search-results')"
-          @update:value="debouncedUpdateKeyword"
+          @update:value="updateKeyword"
         >
           <template #prefix>
             <heroicons-outline:search class="h-5 w-5 text-gray-300" />
@@ -45,23 +45,29 @@
         >
           {{ $t("sql-editor.visualize-explain") }}
         </NButton>
-        <NDropdown
+        <NTooltip v-if="DISMISS_PLACEHOLDER">
+          <template #trigger>
+            <NButton
+              size="small"
+              style="--n-padding: 0 8px"
+              @click="DISMISS_PLACEHOLDER = false"
+            >
+              <template #icon>
+                <heroicons:academic-cap class="w-4 h-4" />
+              </template>
+            </NButton>
+          </template>
+          <template #default>
+            {{ $t("plugin.ai.chat-sql") }}
+          </template>
+        </NTooltip>
+        <DataExportButton
           v-if="showExportButton"
-          trigger="hover"
-          :options="exportDropdownOptions"
-          @select="handleExportBtnClick"
-        >
-          <NButton
-            size="small"
-            :loading="isExportingData"
-            :disabled="isExportingData"
-          >
-            <template #icon>
-              <heroicons-outline:download class="h-5 w-5" />
-            </template>
-            {{ t("common.export") }}
-          </NButton>
-        </NDropdown>
+          size="small"
+          :disabled="props.result === null || isEmpty(props.result)"
+          :support-formats="['CSV', 'JSON', 'SQL', 'XLSX']"
+          @export="handleExportBtnClick"
+        />
         <NButton v-else @click="state.showRequestExportPanel = true">
           {{ $t("quick-action.request-export") }}
         </NButton>
@@ -113,48 +119,36 @@
   <RequestExportPanel
     v-if="state.showRequestExportPanel"
     :database-id="currentTab.connection.databaseId"
-    :statement="currentTab.statement"
+    :statement="result.statement"
     @close="state.showRequestExportPanel = false"
   />
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive, ref } from "vue";
-import { NInput, NPagination } from "naive-ui";
-import { useI18n } from "vue-i18n";
-import { useDebounceFn } from "@vueuse/core";
 import {
   ColumnDef,
   getCoreRowModel,
   getPaginationRowModel,
   useVueTable,
 } from "@tanstack/vue-table";
+import { useDebounceFn } from "@vueuse/core";
 import { isEmpty } from "lodash-es";
-
-import {
-  createExplainToken,
-  extractEnvironmentNameListFromExpr,
-  extractSQLRowValue,
-  hasWorkspacePermissionV1,
-  instanceV1HasStructuredQueryResult,
-} from "@/utils";
+import { NInput, NPagination, NTooltip } from "naive-ui";
+import { BinaryLike } from "node:crypto";
+import { computed, reactive, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { ExportFormat } from "@/components/DataExportButton.vue";
+import RequestExportPanel from "@/components/Issue/panel/RequestExportPanel/index.vue";
+import { DISMISS_PLACEHOLDER } from "@/plugins/ai/components/state";
 import {
   useInstanceV1Store,
   useTabStore,
   RESULT_ROWS_LIMIT,
   featureToRef,
-  useCurrentUserIamPolicy,
   useDatabaseV1Store,
   useCurrentUserV1,
-  usePolicyV1Store,
-  useDatabaseV1ByUID,
 } from "@/store";
-import DataTable from "./DataTable";
-import EmptyView from "./EmptyView.vue";
-import ErrorView from "./ErrorView.vue";
-import { useSQLResultViewContext } from "./context";
-import { Engine } from "@/types/proto/v1/common";
-import { QueryResult } from "@/types/proto/v1/sql_service";
+import { useExportData } from "@/store/modules/export";
 import {
   ExecuteConfig,
   ExecuteOption,
@@ -162,10 +156,18 @@ import {
   TabMode,
   UNKNOWN_ID,
 } from "@/types";
-import { useExportData } from "./useExportData";
-import RequestExportPanel from "@/components/Issue/panel/RequestExportPanel/index.vue";
-import { resolveCELExpr } from "@/plugins/cel";
-import { Expr } from "@/types/proto/google/api/expr/v1alpha1/syntax";
+import { Engine } from "@/types/proto/v1/common";
+import { QueryResult } from "@/types/proto/v1/sql_service";
+import {
+  createExplainToken,
+  extractSQLRowValue,
+  hasWorkspacePermissionV1,
+  instanceV1HasStructuredQueryResult,
+} from "@/utils";
+import DataTable from "./DataTable";
+import EmptyView from "./EmptyView.vue";
+import ErrorView from "./ErrorView.vue";
+import { useSQLResultViewContext } from "./context";
 
 type LocalState = {
   search: string;
@@ -199,11 +201,8 @@ const instanceStore = useInstanceV1Store();
 const databaseStore = useDatabaseV1Store();
 const currentUserV1 = useCurrentUserV1();
 const dataTable = ref<InstanceType<typeof DataTable>>();
-const { isExportingData, exportData } = useExportData();
+const { exportData } = useExportData();
 const currentTab = computed(() => tabStore.currentTab);
-const { database } = useDatabaseV1ByUID(
-  computed(() => currentTab.value.connection.databaseId)
-);
 
 const viewMode = computed((): ViewMode => {
   const { result } = props;
@@ -251,32 +250,17 @@ const allowToExportData = computed(() => {
     return true;
   }
 
-  const policy = usePolicyV1Store().getPolicyByName("policies/WORKSPACE_IAM");
-  if (database.value && policy) {
-    const bindings = policy.workspaceIamPolicy?.bindings;
-    if (bindings) {
-      const querierBinding = bindings.find(
-        (binding) => binding.role === "roles/EXPORTER"
-      );
-      if (querierBinding) {
-        const simpleExpr = resolveCELExpr(
-          querierBinding.parsedExpr?.expr || Expr.fromPartial({})
-        );
-        const envNameList = extractEnvironmentNameListFromExpr(simpleExpr);
-        if (envNameList.includes(database.value.instanceEntity.environment)) {
-          return true;
-        }
-      }
-    }
-  }
-
-  return useCurrentUserIamPolicy().allowToExportDatabaseV1(database.value);
+  return currentTab.value.sqlResultSet?.allowExport || false;
 });
 
 // use a debounced value to improve performance when typing rapidly
 const debouncedUpdateKeyword = useDebounceFn((value: string) => {
   keyword.value = value;
 }, 200);
+const updateKeyword = (value: string) => {
+  state.search = value;
+  debouncedUpdateKeyword(value);
+};
 
 const columns = computed(() => {
   const columns = props.result.columnNames;
@@ -326,30 +310,10 @@ const pageSize = computed(() => {
   return table.getState().pagination.pageSize;
 });
 
-const exportDropdownOptions = computed(() => [
-  {
-    label: t("sql-editor.download-as-file", { file: "CSV" }),
-    key: "CSV",
-    disabled: props.result === null || isEmpty(props.result),
-  },
-  {
-    label: t("sql-editor.download-as-file", { file: "JSON" }),
-    key: "JSON",
-    disabled: props.result === null || isEmpty(props.result),
-  },
-  {
-    label: t("sql-editor.download-as-file", { file: "SQL" }),
-    key: "SQL",
-    disabled: props.result === null || isEmpty(props.result),
-  },
-  {
-    label: t("sql-editor.download-as-file", { file: "XLSX" }),
-    key: "XLSX",
-    disabled: props.result === null || isEmpty(props.result),
-  },
-]);
-
-const handleExportBtnClick = (format: "CSV" | "JSON" | "SQL" | "XLSX") => {
+const handleExportBtnClick = async (
+  format: ExportFormat,
+  callback: (content: BinaryLike | Blob, format: ExportFormat) => void
+) => {
   const { instanceId, databaseId } = tabStore.currentTab.connection;
   const instance = instanceStore.getInstanceByUID(instanceId).name;
   const database =
@@ -359,7 +323,8 @@ const handleExportBtnClick = (format: "CSV" | "JSON" | "SQL" | "XLSX") => {
   const statement = props.result.statement;
   const admin = tabStore.currentTab.mode === TabMode.Admin;
   const limit = admin ? 0 : RESULT_ROWS_LIMIT;
-  exportData({
+
+  const content = await exportData({
     database,
     instance,
     format,
@@ -367,6 +332,8 @@ const handleExportBtnClick = (format: "CSV" | "JSON" | "SQL" | "XLSX") => {
     limit,
     admin,
   });
+
+  callback(content, format);
 };
 
 const showVisualizeButton = computed((): boolean => {

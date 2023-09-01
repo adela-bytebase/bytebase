@@ -1,12 +1,17 @@
 <template>
-  <div ref="editorContainerRef" v-bind="$attrs"></div>
-  <BBSpin
-    v-if="!isEditorLoaded"
-    class="h-full w-full flex items-center justify-center"
-  />
+  <div ref="editorContainerRef" v-bind="$attrs" class="relative">
+    <div
+      v-if="!isEditorLoaded"
+      class="absolute inset-0 flex flex-col items-center justify-center"
+    >
+      <BBSpin />
+    </div>
+  </div>
 </template>
 
 <script lang="ts" setup>
+import type { useLanguageClient } from "@sql-lsp/client";
+import type { editor as Editor } from "monaco-editor";
 import {
   onMounted,
   ref,
@@ -18,14 +23,13 @@ import {
   onBeforeUnmount,
   watchEffect,
 } from "vue";
-import type { editor as Editor } from "monaco-editor";
 import { ComposedDatabase, Database, Language, SQLDialect } from "@/types";
 import { TableMetadata } from "@/types/proto/store/database";
-import { MonacoHelper, useMonaco } from "./useMonaco";
+import { ExtractPromiseType } from "@/utils";
 import { useLineDecorations } from "./lineDecorations";
-import type { useLanguageClient } from "@sql-lsp/client";
-import type { AdviceOption } from "./types";
 import { useAdvices } from "./plugins/useAdvices";
+import type { AdviceOption } from "./types";
+import { MonacoHelper, useMonaco } from "./useMonaco";
 
 const props = defineProps({
   value: {
@@ -72,11 +76,12 @@ const monacoInstanceRef = ref<MonacoHelper>();
 const editorContainerRef = ref<HTMLDivElement>();
 // use shallowRef to avoid deep conversion which will cause page crash.
 const editorInstanceRef = shallowRef<Editor.IStandaloneCodeEditor>();
-const languageClientRef = ref<ReturnType<typeof useLanguageClient>>();
+const languageClientRef =
+  ref<ExtractPromiseType<ReturnType<typeof useLanguageClient>>>();
 
 const isEditorLoaded = ref(false);
 
-const initEditorInstance = () => {
+const initEditorInstance = async () => {
   const { monaco, formatContent, setPositionAtEndOfLine } =
     monacoInstanceRef.value!;
 
@@ -98,7 +103,7 @@ const initEditorInstance = () => {
     },
     wordWrap: "on",
     fixedOverflowWidgets: true,
-    fontSize: 15,
+    fontSize: 14,
     lineHeight: 24,
     scrollBeyondLastLine: false,
     padding: {
@@ -226,10 +231,8 @@ const initEditorInstance = () => {
 
 onMounted(async () => {
   // Load monaco-editor and sql-lsp/client asynchronously.
-  const [monacoHelper, { useLanguageClient }] = await Promise.all([
-    useMonaco(),
-    import("@sql-lsp/client"),
-  ]);
+  const monacoHelper = await useMonaco();
+  const { useLanguageClient } = await import("@sql-lsp/client");
 
   if (!editorContainerRef.value) {
     // Give up creating monaco editor if the component has been unmounted
@@ -240,15 +243,15 @@ onMounted(async () => {
     return;
   }
 
+  const languageClient = await useLanguageClient();
+  languageClientRef.value = languageClient;
+  languageClient.start();
+
   const { setPositionAtEndOfLine } = monacoHelper;
   monacoInstanceRef.value = monacoHelper;
 
-  const editorInstance = initEditorInstance();
+  const editorInstance = await initEditorInstance();
   editorInstanceRef.value = editorInstance;
-
-  const languageClient = useLanguageClient();
-  languageClientRef.value = languageClient;
-  languageClient.start();
 
   // set the editor focus when the tab is selected
   if (!readOnly.value && props.autoFocus) {
@@ -423,5 +426,8 @@ defineExpose({
 }
 .monaco-editor .scroll-decoration {
   display: none !important;
+}
+.monaco-editor .line-numbers {
+  @apply pr-2;
 }
 </style>

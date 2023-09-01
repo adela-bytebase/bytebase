@@ -44,12 +44,12 @@ func (driver *Driver) SyncInstance(ctx context.Context) (*db.InstanceMetadata, e
 		return nil, err
 	}
 
-	var filteredDatabases []*storepb.DatabaseMetadata
+	var filteredDatabases []*storepb.DatabaseSchemaMetadata
 	for _, database := range databases {
 		if database == bytebaseDatabase {
 			continue
 		}
-		filteredDatabases = append(filteredDatabases, &storepb.DatabaseMetadata{Name: database})
+		filteredDatabases = append(filteredDatabases, &storepb.DatabaseSchemaMetadata{Name: database})
 	}
 
 	return &db.InstanceMetadata{
@@ -60,14 +60,14 @@ func (driver *Driver) SyncInstance(ctx context.Context) (*db.InstanceMetadata, e
 }
 
 // SyncDBSchema syncs a single database schema.
-func (driver *Driver) SyncDBSchema(ctx context.Context) (*storepb.DatabaseMetadata, error) {
+func (driver *Driver) SyncDBSchema(ctx context.Context) (*storepb.DatabaseSchemaMetadata, error) {
 	// Query db info
 	databases, err := driver.getDatabases(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	databaseMetadata := &storepb.DatabaseMetadata{
+	databaseMetadata := &storepb.DatabaseSchemaMetadata{
 		Name: driver.databaseName,
 	}
 	found := false
@@ -468,7 +468,7 @@ func (driver *Driver) getTableSchema(ctx context.Context, database string) (map[
 		if columns, ok := columnMap[db.TableKey{Schema: schemaName, Table: view.Name}]; ok {
 			for _, column := range columns {
 				// TODO(zp): We get column by query the INFORMATION_SCHEMA.COLUMNS, which does not contains the view column belongs to which database.
-				// So in the Snowflake, one view column may belongs to different databases, it may cause some confusing behavior in the Data Anonymization.
+				// So in the Snowflake, one view column may belongs to different databases, it may cause some confusing behavior in the Data Masking.
 				view.DependentColumns = append(view.DependentColumns, &storepb.DependentColumn{
 					Schema: schemaName,
 					Table:  view.Name,

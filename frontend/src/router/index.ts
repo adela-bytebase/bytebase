@@ -1,3 +1,5 @@
+import { useTitle } from "@vueuse/core";
+import { pull, startCase } from "lodash-es";
 import { nextTick, ref } from "vue";
 import {
   createRouter,
@@ -5,37 +7,15 @@ import {
   RouteLocationNormalized,
   RouteRecordRaw,
 } from "vue-router";
-import { useTitle } from "@vueuse/core";
-import { pull, startCase } from "lodash-es";
-
 import BodyLayout from "@/layouts/BodyLayout.vue";
 import DashboardLayout from "@/layouts/DashboardLayout.vue";
 import DatabaseLayout from "@/layouts/DatabaseLayout.vue";
 import InstanceLayout from "@/layouts/InstanceLayout.vue";
-import SplashLayout from "@/layouts/SplashLayout.vue";
 import SQLEditorLayout from "@/layouts/SQLEditorLayout.vue";
 import SheetDashboardLayout from "@/layouts/SheetDashboardLayout.vue";
+import SplashLayout from "@/layouts/SplashLayout.vue";
+import { useConversationStore } from "@/plugins/ai/store";
 import { t } from "@/plugins/i18n";
-import {
-  DEFAULT_PROJECT_ID,
-  DEFAULT_PROJECT_V1_NAME,
-  QuickActionType,
-  unknownUser,
-  UNKNOWN_ID,
-} from "@/types";
-import {
-  hasPermissionInProjectV1,
-  hasWorkspacePermissionV1,
-  idFromSlug,
-  sheetNameFromSlug,
-  isOwnerOfProjectV1,
-  extractChangeHistoryUID,
-} from "@/utils";
-import Signin from "@/views/auth/Signin.vue";
-import Signup from "@/views/auth/Signup.vue";
-import MultiFactor from "@/views/auth/MultiFactor.vue";
-import DashboardSidebar from "@/views/DashboardSidebar.vue";
-import Home from "@/views/Home.vue";
 import {
   hasFeature,
   useVCSV1Store,
@@ -60,8 +40,27 @@ import {
   useDatabaseV1Store,
   useChangeHistoryStore,
 } from "@/store";
-import { useConversationStore } from "@/plugins/ai/store";
+import {
+  DEFAULT_PROJECT_ID,
+  DEFAULT_PROJECT_V1_NAME,
+  QuickActionType,
+  unknownUser,
+  UNKNOWN_ID,
+} from "@/types";
 import { State } from "@/types/proto/v1/common";
+import {
+  hasPermissionInProjectV1,
+  hasWorkspacePermissionV1,
+  idFromSlug,
+  sheetNameFromSlug,
+  isOwnerOfProjectV1,
+  uidFromSlug,
+} from "@/utils";
+import DashboardSidebar from "@/views/DashboardSidebar.vue";
+import Home from "@/views/Home.vue";
+import MultiFactor from "@/views/auth/MultiFactor.vue";
+import Signin from "@/views/auth/Signin.vue";
+import Signup from "@/views/auth/Signup.vue";
 
 const HOME_MODULE = "workspace.home";
 const AUTH_MODULE = "auth";
@@ -159,18 +158,20 @@ const routes: Array<RouteRecordRaw> = [
               quickActionListByRole: () => {
                 const DBA_AND_OWNER_QUICK_ACTION_LIST: QuickActionType[] = [
                   "quickaction.bb.database.schema.update",
-                  "quickaction.bb.database.schema.design",
                   "quickaction.bb.database.data.update",
+                  "quickaction.bb.database.branching",
                   "quickaction.bb.database.create",
                   "quickaction.bb.instance.create",
+                  "quickaction.bb.project.create",
                 ];
                 const DEVELOPER_QUICK_ACTION_LIST: QuickActionType[] = [
                   "quickaction.bb.database.schema.update",
-                  "quickaction.bb.database.schema.design",
                   "quickaction.bb.database.data.update",
+                  "quickaction.bb.database.branching",
                   "quickaction.bb.database.create",
                   "quickaction.bb.issue.grant.request.querier",
                   "quickaction.bb.issue.grant.request.exporter",
+                  "quickaction.bb.project.create",
                 ];
                 if (hasFeature("bb.feature.dba-workflow")) {
                   pull(
@@ -672,8 +673,8 @@ const routes: Array<RouteRecordRaw> = [
                 if (project.state === State.ACTIVE) {
                   const DBA_AND_OWNER_QUICK_ACTION_LIST: QuickActionType[] = [
                     "quickaction.bb.database.schema.update",
-                    "quickaction.bb.database.schema.design",
                     "quickaction.bb.database.data.update",
+                    "quickaction.bb.database.branching",
                     "quickaction.bb.database.create",
                     "quickaction.bb.project.database.transfer",
                     "quickaction.bb.project.database.transfer-out",
@@ -693,8 +694,8 @@ const routes: Array<RouteRecordRaw> = [
                     // to be changed.
                     DEVELOPER_QUICK_ACTION_LIST.push(
                       "quickaction.bb.database.schema.update",
-                      "quickaction.bb.database.schema.design",
                       "quickaction.bb.database.data.update",
+                      "quickaction.bb.database.branching",
                       "quickaction.bb.database.create"
                     );
                   }
@@ -834,14 +835,14 @@ const routes: Array<RouteRecordRaw> = [
               quickActionListByRole: () => {
                 const DBA_AND_OWNER_QUICK_ACTION_LIST: QuickActionType[] = [
                   "quickaction.bb.database.schema.update",
-                  "quickaction.bb.database.schema.design",
                   "quickaction.bb.database.data.update",
+                  "quickaction.bb.database.branching",
                   "quickaction.bb.database.create",
                 ];
                 const DEVELOPER_QUICK_ACTION_LIST: QuickActionType[] = [
                   "quickaction.bb.database.schema.update",
-                  "quickaction.bb.database.schema.design",
                   "quickaction.bb.database.data.update",
+                  "quickaction.bb.database.branching",
                   "quickaction.bb.database.create",
                   "quickaction.bb.issue.grant.request.querier",
                   "quickaction.bb.issue.grant.request.exporter",
@@ -893,23 +894,6 @@ const routes: Array<RouteRecordRaw> = [
                 component: () => import("../views/DatabaseDetail.vue"),
                 props: true,
               },
-              {
-                path: "table/:tableName",
-                name: "workspace.database.table.detail",
-                meta: {
-                  title: (route: RouteLocationNormalized) => {
-                    const schemaName = route.query.schema?.toString() || "";
-                    let tableName = route.params.tableName;
-                    if (schemaName) {
-                      tableName = `"${schemaName}"."${tableName}"`;
-                    }
-                    return `${t("db.tables")} - ${tableName}`;
-                  },
-                  allowBookmark: true,
-                },
-                component: () => import("../views/TableDetail.vue"),
-                props: true,
-              },
             ],
           },
           {
@@ -918,7 +902,7 @@ const routes: Array<RouteRecordRaw> = [
             meta: {
               title: (route) => {
                 const parent = `instances/${route.params.instance}/databases/${route.params.database}`;
-                const uid = extractChangeHistoryUID(
+                const uid = uidFromSlug(
                   route.params.changeHistorySlug as string
                 );
                 const name = `${parent}/changeHistories/${uid}`;
@@ -969,7 +953,8 @@ const routes: Array<RouteRecordRaw> = [
               overrideTitle: true,
             },
             components: {
-              content: () => import("../views/IssueDetail.vue"),
+              content: () =>
+                import("../views/IssueDetailCompatibilityLayer.vue"),
               leftSidebar: DashboardSidebar,
             },
             props: { content: true },
@@ -1010,21 +995,21 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: "",
         name: SQL_EDITOR_HOME_MODULE,
-        meta: { title: () => "SQL Editor" },
+        meta: { title: () => "Bytebase SQL Editor" },
         component: () => import("../views/sql-editor/SQLEditorPage.vue"),
         props: true,
       },
       {
         path: "/sql-editor/:connectionSlug",
         name: "sql-editor.detail",
-        meta: { title: () => "SQL Editor" },
+        meta: { title: () => "Bytebase SQL Editor" },
         component: () => import("../views/sql-editor/SQLEditorPage.vue"),
         props: true,
       },
       {
         path: "/sql-editor/sheet/:sheetSlug",
         name: "sql-editor.share",
-        meta: { title: () => "SQL Editor" },
+        meta: { title: () => "Bytebase SQL Editor" },
         component: () => import("../views/sql-editor/SQLEditorPage.vue"),
         props: true,
       },
@@ -1346,7 +1331,7 @@ router.beforeEach((to, from, next) => {
 
   if (to.name === "workspace.database.history.detail") {
     const parent = `instances/${to.params.instance}/databases/${to.params.database}`;
-    const uid = extractChangeHistoryUID(to.params.changeHistorySlug as string);
+    const uid = uidFromSlug(to.params.changeHistorySlug as string);
     Promise.all([
       useDatabaseV1Store().getOrFetchDatabaseByName(parent),
       useChangeHistoryStore().fetchChangeHistory({

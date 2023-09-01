@@ -71,6 +71,8 @@ var whitelistSettings = []api.SettingName{
 	api.SettingWorkspaceExternalApproval,
 	api.SettingEnterpriseTrial,
 	api.SettingSchemaTemplate,
+	api.SettingDataClassification,
+	api.SettingSemanticCategory,
 }
 
 //go:embed mail_templates/testmail/template.html
@@ -464,6 +466,43 @@ func (s *SettingService) SetSetting(ctx context.Context, request *v1pb.SetSettin
 			return nil, status.Errorf(codes.Internal, "failed to marshal external approval setting, error: %v", err)
 		}
 		storeSettingValue = string(bytes)
+	case api.SettingDataClassification:
+		payload := new(storepb.DataClassificationSetting)
+		if err := convertV1PbToStorePb(request.Setting.Value.GetDataClassificationSettingValue(), payload); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmarshal setting value for %s with error: %v", apiSettingName, err)
+		}
+		// it's a temporary solution to limit only 1 classification config before we support manage it in the UX.
+		if len(payload.Configs) > 1 {
+			return nil, status.Errorf(codes.InvalidArgument, "only support define 1 classification config for now")
+		}
+		bytes, err := protojson.Marshal(payload)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to marshal setting for %s with error: %v", apiSettingName, err)
+		}
+		storeSettingValue = string(bytes)
+	case api.SettingSemanticCategory:
+		storeCategorySetting := new(storepb.SemanticCategorySetting)
+		if err := convertV1PbToStorePb(request.Setting.Value.GetSemanticCategorySettingValue(), storeCategorySetting); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmarshal setting value for %s with error: %v", apiSettingName, err)
+		}
+		idMap := make(map[string]any)
+		for _, category := range storeCategorySetting.Categories {
+			if !isValidUUID(category.Id) {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid category id format: %s", category.Id)
+			}
+			if category.Title == "" {
+				return nil, status.Errorf(codes.InvalidArgument, "category title cannot be empty: %s", category.Id)
+			}
+			if _, ok := idMap[category.Id]; ok {
+				return nil, status.Errorf(codes.InvalidArgument, "duplicate category id: %s", category.Id)
+			}
+			idMap[category.Id] = any(nil)
+		}
+		bytes, err := protojson.Marshal(storeCategorySetting)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to marshal setting for %s with error: %v", apiSettingName, err)
+		}
+		storeSettingValue = string(bytes)
 	default:
 		storeSettingValue = request.Setting.Value.GetStringValue()
 	}
@@ -479,6 +518,26 @@ func (s *SettingService) SetSetting(ctx context.Context, request *v1pb.SetSettin
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert setting message: %v", err)
 	}
+
+	// it's a temporary solution to map the classification to all projects before we support it in the UX.
+	if apiSettingName == api.SettingDataClassification && len(settingMessage.Value.GetDataClassificationSettingValue().Configs) == 1 {
+		classificationID := settingMessage.Value.GetDataClassificationSettingValue().Configs[0].Id
+		projects, err := s.store.ListProjectV2(ctx, &store.FindProjectMessage{ShowDeleted: false})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to list projects with error: %v", err.Error())
+		}
+		for _, project := range projects {
+			patch := &store.UpdateProjectMessage{
+				UpdaterID:                  ctx.Value(common.PrincipalIDContextKey).(int),
+				ResourceID:                 project.ResourceID,
+				DataClassificationConfigID: &classificationID,
+			}
+			if _, err = s.store.UpdateProjectV2(ctx, patch); err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to patch project %s with error: %v", project.Title, err.Error())
+			}
+		}
+	}
+
 	return settingMessage, nil
 }
 
@@ -624,6 +683,32 @@ func (s *SettingService) convertToSettingMessage(ctx context.Context, setting *s
 			Value: &v1pb.Value{
 				Value: &v1pb.Value_SchemaTemplateSettingValue{
 					SchemaTemplateSettingValue: v1Value,
+				},
+			},
+		}, nil
+	case api.SettingDataClassification:
+		v1Value := new(v1pb.DataClassificationSetting)
+		if err := protojson.Unmarshal([]byte(setting.Value), v1Value); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmarshal setting value for %s with error: %v", setting.Name, err)
+		}
+		return &v1pb.Setting{
+			Name: settingName,
+			Value: &v1pb.Value{
+				Value: &v1pb.Value_DataClassificationSettingValue{
+					DataClassificationSettingValue: v1Value,
+				},
+			},
+		}, nil
+	case api.SettingSemanticCategory:
+		v1Value := new(v1pb.SemanticCategorySetting)
+		if err := protojson.Unmarshal([]byte(setting.Value), v1Value); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmarshal setting value for %s with error: %v", setting.Name, err)
+		}
+		return &v1pb.Setting{
+			Name: settingName,
+			Value: &v1pb.Value{
+				Value: &v1pb.Value_SemanticCategorySettingValue{
+					SemanticCategorySettingValue: v1Value,
 				},
 			},
 		}, nil
@@ -859,9 +944,10 @@ func convertToExternalApprovalSettingNode(o *storepb.ExternalApprovalSetting_Nod
 }
 
 func convertToSchemaTemplateSetting(s *storepb.SchemaTemplateSetting) *v1pb.SchemaTemplateSetting {
-	v1Templates := []*v1pb.SchemaTemplateSetting_FieldTemplate{}
+	v1FieldTemplates := []*v1pb.SchemaTemplateSetting_FieldTemplate{}
+	v1ColumnTypes := []*v1pb.SchemaTemplateSetting_ColumnType{}
 	for _, template := range s.FieldTemplates {
-		v1Templates = append(v1Templates, &v1pb.SchemaTemplateSetting_FieldTemplate{
+		v1FieldTemplates = append(v1FieldTemplates, &v1pb.SchemaTemplateSetting_FieldTemplate{
 			Id:       template.Id,
 			Engine:   v1pb.Engine(template.Engine),
 			Category: template.Category,
@@ -874,9 +960,17 @@ func convertToSchemaTemplateSetting(s *storepb.SchemaTemplateSetting) *v1pb.Sche
 			},
 		})
 	}
+	for _, columnType := range s.ColumnTypes {
+		v1ColumnTypes = append(v1ColumnTypes, &v1pb.SchemaTemplateSetting_ColumnType{
+			Engine:  v1pb.Engine(columnType.Engine),
+			Enabled: columnType.Enabled,
+			Types:   columnType.Types,
+		})
+	}
 
 	return &v1pb.SchemaTemplateSetting{
-		FieldTemplates: v1Templates,
+		FieldTemplates: v1FieldTemplates,
+		ColumnTypes:    v1ColumnTypes,
 	}
 }
 

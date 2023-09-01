@@ -53,7 +53,8 @@ type PITRRestoreExecutor struct {
 }
 
 // RunOnce will run the PITR restore task executor once.
-func (exec *PITRRestoreExecutor) RunOnce(ctx context.Context, task *store.TaskMessage) (terminated bool, result *api.TaskRunResultPayload, err error) {
+// TODO: support cancellation.
+func (exec *PITRRestoreExecutor) RunOnce(ctx context.Context, _ context.Context, task *store.TaskMessage) (terminated bool, result *api.TaskRunResultPayload, err error) {
 	log.Info("Run PITR restore task", zap.String("task", task.Name))
 	payload := api.TaskDatabasePITRRestorePayload{}
 	if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
@@ -131,9 +132,6 @@ func (exec *PITRRestoreExecutor) doBackupRestore(ctx context.Context, stores *st
 	if targetDatabase == nil {
 		return nil, errors.Wrapf(err, "target database %q not found in instance %q", *payload.DatabaseName, instance.Title)
 	}
-	if err != nil {
-		return nil, err
-	}
 	log.Debug("Start database restore from backup...",
 		zap.String("source_instance", sourceDatabase.InstanceID),
 		zap.String("source_database", sourceDatabase.DatabaseName),
@@ -177,7 +175,7 @@ func (exec *PITRRestoreExecutor) doBackupRestore(ctx context.Context, stores *st
 	return &api.TaskRunResultPayload{
 		Detail:        fmt.Sprintf("Restored database %q from backup %q", targetDatabase.DatabaseName, backup.Name),
 		MigrationID:   migrationID,
-		ChangeHistory: fmt.Sprintf("instances/%s/databases/%s/migrations/%s", instance.ResourceID, targetDatabase.DatabaseName, migrationID),
+		ChangeHistory: fmt.Sprintf("instances/%s/databases/%s/changeHistories/%s", instance.ResourceID, targetDatabase.DatabaseName, migrationID),
 		Version:       version,
 	}, nil
 }
@@ -512,7 +510,7 @@ func downloadBackupFileFromCloud(ctx context.Context, s3Client *bbs3.Client, bac
 // create many ephemeral databases from backup for testing purpose)
 // Returns migration history id and the version on success.
 func createBranchMigrationHistory(ctx context.Context, stores *store.Store, dbFactory *dbfactory.DBFactory, profile config.Profile, targetInstance *store.InstanceMessage, sourceDatabase, targetDatabase *store.DatabaseMessage, backup *store.BackupMessage, task *store.TaskMessage) (string, string, error) {
-	targetInstanceEnvironment, err := stores.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &targetInstance.EnvironmentID})
+	targetInstanceEnvironment, err := stores.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &targetDatabase.EffectiveEnvironmentID})
 	if err != nil {
 		return "", "", err
 	}
@@ -560,7 +558,7 @@ func createBranchMigrationHistory(ctx context.Context, stores *store.Store, dbFa
 	}
 	defer targetDriver.Close(ctx)
 
-	migrationID, _, err := utils.ExecuteMigrationDefault(ctx, stores, targetDriver, m, "", nil, db.ExecuteOptions{})
+	migrationID, _, err := utils.ExecuteMigrationDefault(ctx, ctx, stores, targetDriver, m, "", nil, db.ExecuteOptions{})
 	if err != nil {
 		return "", "", errors.Wrap(err, "failed to create migration history")
 	}

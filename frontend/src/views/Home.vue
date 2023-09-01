@@ -3,8 +3,8 @@
     <div class="px-4 py-2 flex justify-between items-center">
       <EnvironmentTabFilter
         :include-all="true"
-        :environment="selectedEnvironment?.uid ?? String(UNKNOWN_ID)"
-        @update:environment="changeEnvironmentId"
+        :environment="selectedEnvironment?.name"
+        @update:environment="changeEnvironment"
       />
       <SearchBox
         :value="state.searchText"
@@ -194,11 +194,10 @@
 import { reactive, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
-  activeEnvironment,
-  extractUserUID,
-  isDatabaseRelatedIssueType,
-} from "../utils";
-import { UNKNOWN_ID, Issue, planTypeToString } from "../types";
+  IssueTable,
+  PagedIssueTable,
+  WaitingForMyApprovalIssueTable,
+} from "@/components/Issue/table";
 import { EnvironmentTabFilter, SearchBox } from "@/components/v2";
 import {
   useEnvironmentV1Store,
@@ -208,10 +207,16 @@ import {
   useCurrentUserV1,
 } from "@/store";
 import {
-  IssueTable,
-  PagedIssueTable,
-  WaitingForMyApprovalIssueTable,
-} from "@/components/Issue/table";
+  UNKNOWN_ID,
+  UNKNOWN_ENVIRONMENT_NAME,
+  Issue,
+  planTypeToString,
+} from "../types";
+import {
+  activeEnvironment,
+  extractUserUID,
+  isDatabaseRelatedIssueType,
+} from "../utils";
 
 interface LocalState {
   searchText: string;
@@ -253,7 +258,7 @@ const planImage = computed(() => {
 const selectedEnvironment = computed(() => {
   const { environment } = route.query;
   return environment
-    ? environmentV1Store.getEnvironmentByUID(environment as string)
+    ? environmentV1Store.getEnvironmentByName(environment as string)
     : undefined;
 });
 
@@ -281,8 +286,8 @@ const keywordAndEnvironmentFilter = (issue: Issue) => {
   return true;
 };
 
-const changeEnvironmentId = (environment: string | undefined) => {
-  if (environment && environment !== String(UNKNOWN_ID)) {
+const changeEnvironment = (environment: string | undefined) => {
+  if (environment && environment !== UNKNOWN_ENVIRONMENT_NAME) {
     router.replace({
       name: "workspace.home",
       query: {

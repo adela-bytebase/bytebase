@@ -143,6 +143,24 @@ func (s *ProjectService) UpdateProject(ctx context.Context, request *v1pb.Update
 		case "schema_change":
 			schemaChange := convertToProjectSchemaChangeType(request.Project.SchemaChange)
 			patch.SchemaChangeType = &schemaChange
+		case "data_classification_config_id":
+			setting, err := s.store.GetDataClassificationSetting(ctx)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to get data classification setting")
+			}
+			existConfig := false
+			for _, config := range setting.Configs {
+				if config.Id == request.Project.DataClassificationConfigId {
+					existConfig = true
+					break
+				}
+			}
+			if !existConfig {
+				return nil, status.Errorf(codes.InvalidArgument, "data classification %s not exists", request.Project.DataClassificationConfigId)
+			}
+			patch.DataClassificationConfigID = &request.Project.DataClassificationConfigId
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, `unsupport update_mask "%s"`, path)
 		}
 	}
 
@@ -173,9 +191,11 @@ func (s *ProjectService) DeleteProject(ctx context.Context, request *v1pb.Delete
 	}
 	// We don't move the sheet to default project because BYTEBASE_ARTIFACT sheets belong to the issue and issue project.
 	if request.Force {
-		defaultProject := api.DefaultProjectID
-		if _, err := s.store.BatchUpdateDatabaseProject(ctx, databases, defaultProject, api.SystemBotID); err != nil {
-			return nil, err
+		if len(databases) > 0 {
+			defaultProject := api.DefaultProjectID
+			if _, err := s.store.BatchUpdateDatabaseProject(ctx, databases, defaultProject, api.SystemBotID); err != nil {
+				return nil, err
+			}
 		}
 		// We don't close the issues because they might be open still.
 	} else {
@@ -396,10 +416,7 @@ func (s *ProjectService) UpdateProjectGitOpsInfo(ctx context.Context, request *v
 		ProjectResourceID: &project.ResourceID,
 	})
 	if err != nil {
-		return nil, err
-	}
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
+		return nil, status.Errorf(codes.Internal, "failed to get repository, error %v", err.Error())
 	}
 	if repo == nil {
 		if !request.AllowMissing {
@@ -832,6 +849,110 @@ func (s *ProjectService) UpdateWebhook(ctx context.Context, request *v1pb.Update
 	return convertToProject(project), nil
 }
 
+// RemoveWebhook removes a webhook from a given project.
+func (s *ProjectService) RemoveWebhook(ctx context.Context, request *v1pb.RemoveWebhookRequest) (*v1pb.Project, error) {
+	projectID, webhookID, err := common.GetProjectIDWebhookID(request.Webhook.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	webhookIDInt, err := strconv.Atoi(webhookID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid webhook id %q", webhookID)
+	}
+
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", webhookID)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.NotFound, "project %q has been deleted", projectID)
+	}
+
+	webhook, err := s.store.GetProjectWebhookV2(ctx, &store.FindProjectWebhookMessage{
+		ProjectID: &project.UID,
+		ID:        &webhookIDInt,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if webhook == nil {
+		return nil, status.Errorf(codes.NotFound, "webhook %q not found", request.Webhook.Url)
+	}
+
+	if err := s.store.DeleteProjectWebhookV2(ctx, project.ResourceID, webhook.ID); err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+
+	project, err = s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	return convertToProject(project), nil
+}
+
+// TestWebhook tests a webhook.
+func (s *ProjectService) TestWebhook(ctx context.Context, request *v1pb.TestWebhookRequest) (*v1pb.TestWebhookResponse, error) {
+	setting, err := s.store.GetWorkspaceGeneralSetting(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get workspace setting: %v", err)
+	}
+	if setting.ExternalUrl == "" {
+		return nil, status.Errorf(codes.FailedPrecondition, setupExternalURLError)
+	}
+
+	projectID, err := common.GetProjectID(request.Project)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
+		ResourceID: &projectID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+	if project == nil {
+		return nil, status.Errorf(codes.NotFound, "project %q not found", request.Project)
+	}
+	if project.Deleted {
+		return nil, status.Errorf(codes.NotFound, "project %q has been deleted", request.Project)
+	}
+
+	webhook, err := convertToStoreProjectWebhookMessage(request.Webhook)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	resp := &v1pb.TestWebhookResponse{}
+	err = webhookPlugin.Post(
+		webhook.Type,
+		webhookPlugin.Context{
+			URL:          webhook.URL,
+			Level:        webhookPlugin.WebhookInfo,
+			ActivityType: string(api.ActivityIssueCreate),
+			Title:        fmt.Sprintf("Test webhook %q", webhook.Title),
+			Description:  "This is a test",
+			Link:         fmt.Sprintf("%s/project/%s/webhook/%s", setting.ExternalUrl, fmt.Sprintf("%s-%d", slug.Make(project.Title), project.UID), fmt.Sprintf("%s-%d", slug.Make(webhook.Title), webhook.ID)),
+			CreatorID:    api.SystemBotID,
+			CreatorName:  "Bytebase",
+			CreatorEmail: api.SystemBotEmail,
+			CreatedTs:    time.Now().Unix(),
+			Project:      &webhookPlugin.Project{Name: project.Title},
+		},
+	)
+	if err != nil {
+		resp.Error = err.Error()
+	}
+
+	return resp, nil
+}
+
 func (s *ProjectService) findProjectRepository(ctx context.Context, projectName string) (*store.RepositoryMessage, error) {
 	project, err := s.getProjectMessage(ctx, projectName)
 	if err != nil {
@@ -1054,6 +1175,10 @@ func (s *ProjectService) setupVCSSQLReviewCI(ctx context.Context, repository *st
 		if err := s.setupVCSSQLReviewCIForGitLab(ctx, repository, vcs, branch, sqlReviewEndpoint); err != nil {
 			return nil, err
 		}
+	case vcsPlugin.AzureDevOps:
+		if err := s.setupVCSSQLReviewCIForAzureDevOps(ctx, repository, vcs, branch, sqlReviewEndpoint); err != nil {
+			return nil, err
+		}
 	}
 
 	return vcsPlugin.Get(vcs.Type, vcsPlugin.ProviderConfig{}).CreatePullRequest(
@@ -1266,6 +1391,80 @@ func (s *ProjectService) setupVCSSQLReviewCIForGitLab(
 	})
 }
 
+// setupVCSSQLReviewCIForAzureDevOps will create or update SQL review related files in Azure DevOps to setup SQL review CI.
+func (s *ProjectService) setupVCSSQLReviewCIForAzureDevOps(
+	ctx context.Context,
+	repository *store.RepositoryMessage,
+	vcs *store.ExternalVersionControlMessage,
+	branch *vcsPlugin.BranchInfo,
+	sqlReviewEndpoint string,
+) error {
+	sqlReviewConfig := azure.SetupSQLReviewCI(sqlReviewEndpoint, repository.BranchFilter)
+	fileLastCommitID := ""
+	fileSHA := ""
+
+	setting, err := s.store.GetWorkspaceGeneralSetting(ctx)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to find workspace setting with error: %v", err.Error())
+	}
+	if setting.ExternalUrl == "" {
+		return status.Errorf(codes.FailedPrecondition, "external url is required")
+	}
+
+	fileMeta, err := vcsPlugin.Get(vcs.Type, vcsPlugin.ProviderConfig{}).ReadFileMeta(
+		ctx,
+		common.OauthContext{
+			ClientID:     vcs.ApplicationID,
+			ClientSecret: vcs.Secret,
+			AccessToken:  repository.AccessToken,
+			RefreshToken: repository.RefreshToken,
+			Refresher:    utils.RefreshToken(ctx, s.store, repository.WebURL),
+			RedirectURL:  fmt.Sprintf("%s/oauth/callback", setting.ExternalUrl),
+		},
+		vcs.InstanceURL,
+		repository.ExternalID,
+		azure.SQLReviewPipelineFilePath,
+		vcsPlugin.RefInfo{
+			RefType: vcsPlugin.RefTypeBranch,
+			RefName: branch.Name,
+		},
+	)
+	if err != nil {
+		log.Debug(
+			"Failed to get file meta",
+			zap.String("file", azure.SQLReviewPipelineFilePath),
+			zap.String("last_commit", branch.LastCommitID),
+			zap.Int("code", common.ErrorCode(err).Int()),
+			zap.Error(err),
+		)
+	} else if fileMeta != nil {
+		fileLastCommitID = fileMeta.LastCommitID
+		fileSHA = fileMeta.SHA
+	}
+
+	return vcsPlugin.Get(vcs.Type, vcsPlugin.ProviderConfig{}).OverwriteFile(
+		ctx,
+		common.OauthContext{
+			ClientID:     vcs.ApplicationID,
+			ClientSecret: vcs.Secret,
+			AccessToken:  repository.AccessToken,
+			RefreshToken: repository.RefreshToken,
+			Refresher:    utils.RefreshToken(ctx, s.store, repository.WebURL),
+			RedirectURL:  fmt.Sprintf("%s/oauth/callback", setting.ExternalUrl),
+		},
+		vcs.InstanceURL,
+		repository.ExternalID,
+		azure.SQLReviewPipelineFilePath,
+		vcsPlugin.FileCommitCreate{
+			Branch:        branch.Name,
+			CommitMessage: sqlReviewInVCSPRTitle,
+			Content:       sqlReviewConfig,
+			LastCommitID:  fileLastCommitID,
+			SHA:           fileSHA,
+		},
+	)
+}
+
 // createOrUpdateVCSSQLReviewFileForGitLab will create or update SQL review file for GitLab CI.
 func (s *ProjectService) createOrUpdateVCSSQLReviewFileForGitLab(
 	ctx context.Context,
@@ -1363,112 +1562,6 @@ func (s *ProjectService) createOrUpdateVCSSQLReviewFileForGitLab(
 			Content:       newContent,
 		},
 	)
-}
-
-// RemoveWebhook removes a webhook from a given project.
-func (s *ProjectService) RemoveWebhook(ctx context.Context, request *v1pb.RemoveWebhookRequest) (*v1pb.Project, error) {
-	projectID, webhookID, err := common.GetProjectIDWebhookID(request.Webhook.Name)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
-	}
-	webhookIDInt, err := strconv.Atoi(webhookID)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid webhook id %q", webhookID)
-	}
-
-	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
-		ResourceID: &projectID,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-	if project == nil {
-		return nil, status.Errorf(codes.NotFound, "project %q not found", webhookID)
-	}
-	if project.Deleted {
-		return nil, status.Errorf(codes.NotFound, "project %q has been deleted", projectID)
-	}
-
-	webhook, err := s.store.GetProjectWebhookV2(ctx, &store.FindProjectWebhookMessage{
-		ProjectID: &project.UID,
-		ID:        &webhookIDInt,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-	if webhook == nil {
-		return nil, status.Errorf(codes.NotFound, "webhook %q not found", request.Webhook.Url)
-	}
-
-	if err := s.store.DeleteProjectWebhookV2(ctx, project.ResourceID, webhook.ID); err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-
-	project, err = s.store.GetProjectV2(ctx, &store.FindProjectMessage{
-		ResourceID: &projectID,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-	return convertToProject(project), nil
-}
-
-// TestWebhook tests a webhook.
-func (s *ProjectService) TestWebhook(ctx context.Context, request *v1pb.TestWebhookRequest) (*v1pb.TestWebhookResponse, error) {
-	setting, err := s.store.GetWorkspaceGeneralSetting(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get workspace setting: %v", err)
-	}
-	if setting.ExternalUrl == "" {
-		return nil, status.Errorf(codes.FailedPrecondition, setupExternalURLError)
-	}
-
-	projectID, err := common.GetProjectID(request.Project)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
-	}
-	project, err := s.store.GetProjectV2(ctx, &store.FindProjectMessage{
-		ResourceID: &projectID,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-	if project == nil {
-		return nil, status.Errorf(codes.NotFound, "project %q not found", request.Project)
-	}
-	if project.Deleted {
-		return nil, status.Errorf(codes.NotFound, "project %q has been deleted", request.Project)
-	}
-
-	webhook, err := s.store.GetProjectWebhookV2(ctx, &store.FindProjectWebhookMessage{
-		ProjectID: &project.UID,
-		URL:       &request.Webhook.Url,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
-	}
-	if webhook == nil {
-		return nil, status.Errorf(codes.NotFound, "webhook %q not found", request.Webhook.Url)
-	}
-
-	err = webhookPlugin.Post(
-		webhook.Type,
-		webhookPlugin.Context{
-			URL:          webhook.URL,
-			Level:        webhookPlugin.WebhookInfo,
-			ActivityType: string(api.ActivityIssueCreate),
-			Title:        fmt.Sprintf("Test webhook %q", webhook.Title),
-			Description:  "This is a test",
-			Link:         fmt.Sprintf("%s/project/%s/webhook/%s", setting.ExternalUrl, fmt.Sprintf("%s-%d", slug.Make(project.Title), project.UID), fmt.Sprintf("%s-%d", slug.Make(webhook.Title), webhook.ID)),
-			CreatorID:    api.SystemBotID,
-			CreatorName:  "Bytebase",
-			CreatorEmail: api.SystemBotEmail,
-			CreatedTs:    time.Now().Unix(),
-			Project:      &webhookPlugin.Project{Name: project.Title},
-		},
-	)
-
-	return &v1pb.TestWebhookResponse{Error: err.Error()}, nil
 }
 
 // CreateDatabaseGroup creates a database group.
@@ -1980,41 +2073,6 @@ func (s *ProjectService) GetSchemaGroup(ctx context.Context, request *v1pb.GetSc
 	return s.convertStoreToAPISchemaGroupFull(ctx, schemaGroup, databaseGroup, projectResourceID)
 }
 
-func getMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx context.Context, databaseGroup *store.DatabaseGroupMessage, allDatabases []*store.DatabaseMessage) ([]*store.DatabaseMessage, []*store.DatabaseMessage, error) {
-	prog, err := common.ValidateGroupCELExpr(databaseGroup.Expression.Expression)
-	if err != nil {
-		return nil, nil, err
-	}
-	var matches []*store.DatabaseMessage
-	var unmatches []*store.DatabaseMessage
-
-	// DONOT check bb.feature.database-grouping for instance. The API here is read-only in the frontend, we need to show if the instance is matched but missing required license.
-	// The feature guard will works during issue creation.
-	for _, database := range allDatabases {
-		res, _, err := prog.ContextEval(ctx, map[string]any{
-			"resource": map[string]any{
-				"database_name":    database.DatabaseName,
-				"environment_name": fmt.Sprintf("%s%s", common.EnvironmentNamePrefix, database.EffectiveEnvironmentID),
-				"instance_id":      database.InstanceID,
-			},
-		})
-		if err != nil {
-			return nil, nil, status.Errorf(codes.Internal, err.Error())
-		}
-
-		val, err := res.ConvertToNative(reflect.TypeOf(false))
-		if err != nil {
-			return nil, nil, status.Errorf(codes.Internal, "expect bool result")
-		}
-		if boolVal, ok := val.(bool); ok && boolVal {
-			matches = append(matches, database)
-		} else {
-			unmatches = append(unmatches, database)
-		}
-	}
-	return matches, unmatches, nil
-}
-
 func (s *ProjectService) convertStoreToAPIDatabaseGroupFull(ctx context.Context, databaseGroup *store.DatabaseGroupMessage, projectResourceID string) (*v1pb.DatabaseGroup, error) {
 	databases, err := s.store.ListDatabases(ctx, &store.FindDatabaseMessage{
 		ProjectID: &projectResourceID,
@@ -2023,7 +2081,7 @@ func (s *ProjectService) convertStoreToAPIDatabaseGroupFull(ctx context.Context,
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
-	matches, unmatches, err := getMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx, databaseGroup, databases)
+	matches, unmatches, err := utils.GetMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx, databaseGroup, databases)
 	if err != nil {
 		return nil, err
 	}
@@ -2075,7 +2133,7 @@ func (s *ProjectService) getMatchesAndUnmatchedTables(ctx context.Context, schem
 	if err != nil {
 		return nil, nil, status.Errorf(codes.Internal, err.Error())
 	}
-	matchesDatabases, _, err := getMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx, databaseGroup, allDatabases)
+	matchesDatabases, _, err := utils.GetMatchedAndUnmatchedDatabasesInDatabaseGroup(ctx, databaseGroup, allDatabases)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2177,6 +2235,8 @@ func convertToActivityTypeStrings(types []v1pb.Activity_Type) ([]string, error) 
 			result = append(result, string(api.ActivityPipelineStageStatusUpdate))
 		case v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_STATUS_UPDATE:
 			result = append(result, string(api.ActivityPipelineTaskStatusUpdate))
+		case v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_RUN_STATUS_UPDATE:
+			result = append(result, string(api.ActivityPipelineTaskRunStatusUpdate))
 		case v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_FILE_COMMIT:
 			result = append(result, string(api.ActivityPipelineTaskFileCommit))
 		case v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_STATEMENT_UPDATE:
@@ -2199,8 +2259,6 @@ func convertToActivityTypeStrings(types []v1pb.Activity_Type) ([]string, error) 
 			result = append(result, string(api.ActivityProjectMemberCreate))
 		case v1pb.Activity_TYPE_PROJECT_MEMBER_DELETE:
 			result = append(result, string(api.ActivityProjectMemberDelete))
-		case v1pb.Activity_TYPE_PROJECT_MEMBER_ROLE_UPDATE:
-			result = append(result, string(api.ActivityProjectMemberRoleUpdate))
 		case v1pb.Activity_TYPE_SQL_EDITOR_QUERY:
 			result = append(result, string(api.ActivitySQLEditorQuery))
 		case v1pb.Activity_TYPE_DATABASE_RECOVERY_PITR_DONE:
@@ -2230,6 +2288,8 @@ func convertNotificationTypeStrings(types []string) []v1pb.Activity_Type {
 			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_STAGE_STATUS_UPDATE)
 		case string(api.ActivityPipelineTaskStatusUpdate):
 			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_STATUS_UPDATE)
+		case string(api.ActivityPipelineTaskRunStatusUpdate):
+			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_RUN_STATUS_UPDATE)
 		case string(api.ActivityPipelineTaskFileCommit):
 			result = append(result, v1pb.Activity_TYPE_ISSUE_PIPELINE_TASK_FILE_COMMIT)
 		case string(api.ActivityPipelineTaskStatementUpdate):
@@ -2252,8 +2312,6 @@ func convertNotificationTypeStrings(types []string) []v1pb.Activity_Type {
 			result = append(result, v1pb.Activity_TYPE_PROJECT_MEMBER_CREATE)
 		case string(api.ActivityProjectMemberDelete):
 			result = append(result, v1pb.Activity_TYPE_PROJECT_MEMBER_DELETE)
-		case string(api.ActivityProjectMemberRoleUpdate):
-			result = append(result, v1pb.Activity_TYPE_PROJECT_MEMBER_ROLE_UPDATE)
 		case string(api.ActivitySQLEditorQuery):
 			result = append(result, v1pb.Activity_TYPE_SQL_EDITOR_QUERY)
 		case string(api.ActivityDatabaseRecoveryPITRDone):
@@ -2507,17 +2565,18 @@ func convertToProject(projectMessage *store.ProjectMessage) *v1pb.Project {
 	}
 
 	return &v1pb.Project{
-		Name:           fmt.Sprintf("%s%s", common.ProjectNamePrefix, projectMessage.ResourceID),
-		Uid:            fmt.Sprintf("%d", projectMessage.UID),
-		State:          convertDeletedToState(projectMessage.Deleted),
-		Title:          projectMessage.Title,
-		Key:            projectMessage.Key,
-		Workflow:       workflow,
-		Visibility:     visibility,
-		TenantMode:     tenantMode,
-		DbNameTemplate: projectMessage.DBNameTemplate,
-		SchemaChange:   schemaChange,
-		Webhooks:       projectWebhooks,
+		Name:                       fmt.Sprintf("%s%s", common.ProjectNamePrefix, projectMessage.ResourceID),
+		Uid:                        fmt.Sprintf("%d", projectMessage.UID),
+		State:                      convertDeletedToState(projectMessage.Deleted),
+		Title:                      projectMessage.Title,
+		Key:                        projectMessage.Key,
+		Workflow:                   workflow,
+		Visibility:                 visibility,
+		TenantMode:                 tenantMode,
+		DbNameTemplate:             projectMessage.DBNameTemplate,
+		SchemaChange:               schemaChange,
+		Webhooks:                   projectWebhooks,
+		DataClassificationConfigId: projectMessage.DataClassificationConfigID,
 	}
 }
 

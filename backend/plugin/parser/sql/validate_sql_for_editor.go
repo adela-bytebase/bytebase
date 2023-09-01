@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	pgquery "github.com/pganalyze/pg_query_go/v2"
+	pgquery "github.com/pganalyze/pg_query_go/v4"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -21,7 +21,7 @@ import (
 // We also support CTE with SELECT statements, but not with DML statements.
 func ValidateSQLForEditor(engine EngineType, statement string) bool {
 	switch engine {
-	case Postgres, Redshift:
+	case Postgres, Redshift, RisingWave:
 		return postgresValidateSQLForEditor(statement)
 	case MySQL, TiDB, MariaDB, OceanBase:
 		return mysqlValidateSQLForEditor(statement)
@@ -164,7 +164,7 @@ func checkStatementWithoutQuotedTextAndComment(statement string) bool {
 
 func removeQuotedTextAndComment(engine EngineType, statement string) (string, error) {
 	switch engine {
-	case Postgres:
+	case Postgres, RisingWave:
 		return "", errors.Errorf("unsupported engine type: %s", engine)
 	case MySQL, TiDB, MariaDB, OceanBase:
 		return mysqlRemoveQuotedTextAndComment(statement)

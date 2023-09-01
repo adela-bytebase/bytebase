@@ -1,13 +1,15 @@
-import { computed, defineComponent } from "vue";
 import { cloneDeep, head } from "lodash-es";
+import { computed, defineComponent } from "vue";
+import { useRoute } from "vue-router";
 import {
   useSheetV1Store,
   useProjectV1Store,
   useTaskStore,
-  useSheetStatementByUid,
+  useSheetStatementByUID,
   useDatabaseV1Store,
   useCurrentUserV1,
 } from "@/store";
+import { getProjectPathByLegacyProject } from "@/store/modules/v1/common";
 import {
   Issue,
   IssueCreate,
@@ -20,6 +22,17 @@ import {
   MigrationDetail,
 } from "@/types";
 import {
+  Sheet_Visibility,
+  Sheet_Source,
+  Sheet_Type,
+} from "@/types/proto/v1/sheet_service";
+import {
+  extractSheetUID,
+  extractUserUID,
+  hasWorkspacePermissionV1,
+  sheetIdOfTask,
+} from "@/utils";
+import {
   errorAssertion,
   flattenTaskList,
   isTaskEditable,
@@ -27,19 +40,6 @@ import {
   useCommonLogic,
 } from "./common";
 import { provideIssueLogic, useIssueLogic } from "./index";
-import {
-  extractUserUID,
-  getBacktracePayloadWithIssue,
-  hasWorkspacePermissionV1,
-  sheetIdOfTask,
-} from "@/utils";
-import { getProjectPathByLegacyProject } from "@/store/modules/v1/common";
-import {
-  Sheet_Visibility,
-  Sheet_Source,
-  Sheet_Type,
-} from "@/types/proto/v1/sheet_service";
-import { useRoute } from "vue-router";
 
 export default defineComponent({
   name: "TenantModeProvider",
@@ -99,8 +99,8 @@ export default defineComponent({
         const payload = task.payload as TaskDatabaseSchemaUpdatePayload;
         const selectedTaskSheetId = sheetIdOfTask(selectedTask.value as Task);
         return (
-          useSheetStatementByUid(
-            selectedTaskSheetId || payload.sheetId || UNKNOWN_ID
+          useSheetStatementByUID(
+            String(selectedTaskSheetId || payload.sheetId || UNKNOWN_ID)
           ).value || ""
         );
       }
@@ -135,12 +135,9 @@ export default defineComponent({
             visibility: Sheet_Visibility.VISIBILITY_PROJECT,
             source: Sheet_Source.SOURCE_BYTEBASE_ARTIFACT,
             type: Sheet_Type.TYPE_SQL,
-            payload: JSON.stringify(
-              getBacktracePayloadWithIssue(issue.value as Issue)
-            ),
           }
         );
-        updateSheetId(sheetV1Store.getSheetUid(sheet.name));
+        updateSheetId(Number(extractSheetUID(sheet.name)));
       }
     };
 
@@ -230,7 +227,7 @@ export default defineComponent({
           payload: "{}",
         });
         detail.statement = "";
-        detail.sheetId = sheetV1Store.getSheetUid(sheet.name);
+        detail.sheetId = Number(extractSheetUID(sheet.name));
       }
       for (const detailItem of context.detailList) {
         detailItem.statement = "";

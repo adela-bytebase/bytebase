@@ -81,6 +81,7 @@ func (s *LicenseService) LoadSubscription(ctx context.Context) enterpriseAPI.Sub
 
 	license := s.loadLicense(ctx)
 	if license == nil {
+		s.store.RefreshSwap(false)
 		return enterpriseAPI.Subscription{
 			Plan: api.FREE,
 			// -1 means not expire, just for free plan
@@ -99,6 +100,9 @@ func (s *LicenseService) LoadSubscription(ctx context.Context) enterpriseAPI.Sub
 		Trialing:      license.Trialing,
 		OrgID:         license.OrgID(),
 		OrgName:       license.OrgName,
+	}
+	if !license.Trialing && license.Plan != api.FREE {
+		s.store.RefreshSwap(true)
 	}
 	return *s.cachedSubscription
 }
@@ -151,12 +155,19 @@ func (s *LicenseService) GetEffectivePlan() api.PlanType {
 }
 
 // GetPlanLimitValue gets the limit value for the plan.
-func (s *LicenseService) GetPlanLimitValue(name enterpriseAPI.PlanLimit) int64 {
+func (s *LicenseService) GetPlanLimitValue(ctx context.Context, name enterpriseAPI.PlanLimit) int64 {
 	v, ok := enterpriseAPI.PlanLimitValues[name]
 	if !ok {
 		return 0
 	}
-	limit := v[s.GetEffectivePlan()]
+
+	subscription := s.LoadSubscription(ctx)
+
+	limit := v[subscription.Plan]
+	if subscription.Trialing {
+		limit = v[api.FREE]
+	}
+
 	if limit == -1 {
 		return math.MaxInt64
 	}
@@ -273,6 +284,10 @@ func (s *LicenseService) findTrialingLicense(ctx context.Context) (*enterpriseAP
 		var data enterpriseAPI.License
 		if err := json.Unmarshal([]byte(setting.Value), &data); err != nil {
 			return nil, errors.Wrapf(err, "failed to parse trial license")
+		}
+		data.InstanceCount = enterpriseAPI.InstanceLimitForTrial
+		if time.Now().AddDate(0, 0, -enterpriseAPI.TrialDaysLimit).Unix() >= setting.CreatedTs {
+			return nil, nil
 		}
 		return &data, nil
 	}

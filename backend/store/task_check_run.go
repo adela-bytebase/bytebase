@@ -159,9 +159,6 @@ func (s *Store) PatchTaskCheckRunStatus(ctx context.Context, patch *TaskCheckRun
 	); err != nil {
 		return err
 	}
-	if err != nil {
-		return err
-	}
 
 	return tx.Commit()
 }
@@ -210,7 +207,7 @@ func (*Store) findTaskCheckRunImpl(ctx context.Context, tx *Tx, find *TaskCheckR
 			list = append(list, fmt.Sprintf("$%d", len(args)+1))
 			args = append(args, status)
 		}
-		where = append(where, fmt.Sprintf("status in (%s)", strings.Join(list, ",")))
+		where = append(where, fmt.Sprintf("task_check_run.status in (%s)", strings.Join(list, ",")))
 	}
 
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`

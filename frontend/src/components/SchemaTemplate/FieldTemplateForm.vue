@@ -1,5 +1,5 @@
 <template>
-  <DrawerContent :title="$t('schema-template.field-template')">
+  <DrawerContent :title="$t('schema-template.field-template.self')">
     <div class="space-y-6 divide-y divide-block-border">
       <div class="space-y-6">
         <!-- category -->
@@ -98,27 +98,41 @@
             <div
               class="relative flex flex-row justify-between items-center mt-1"
             >
-              <input
-                v-model="state.column!.type"
-                required
-                name="column-type"
-                type="text"
+              <BBSelect
+                v-if="schemaTemplateColumnTypes.length > 0"
+                :selected-item="state.column!.type"
+                :item-list="schemaTemplateColumnTypes"
+                :show-prefix-item="false"
                 placeholder="column type"
-                class="textfield w-full"
-                :disabled="!allowEdit"
-              />
-              <NDropdown
-                trigger="click"
-                :options="dataTypeOptions"
-                :disabled="!allowEdit"
-                @select="(dataType: string) => (state.column!.type = dataType)"
+                @select-item="(item: string) => state.column!.type = item"
               >
-                <button class="absolute right-5">
-                  <heroicons-solid:chevron-up-down
-                    class="w-4 h-auto text-gray-400"
-                  />
-                </button>
-              </NDropdown>
+                <template #menuItem="{ item }">
+                  {{ item }}
+                </template>
+              </BBSelect>
+              <template v-else>
+                <input
+                  v-model="state.column!.type"
+                  required
+                  name="column-type"
+                  type="text"
+                  placeholder="column type"
+                  class="textfield w-full"
+                  :disabled="!allowEdit"
+                />
+                <NDropdown
+                  trigger="click"
+                  :options="dataTypeOptions"
+                  :disabled="!allowEdit"
+                  @select="(dataType: string) => (state.column!.type = dataType)"
+                >
+                  <button class="absolute right-5">
+                    <heroicons-solid:chevron-up-down
+                      class="w-4 h-auto text-gray-400"
+                    />
+                  </button>
+                </NDropdown>
+              </template>
             </div>
           </div>
 
@@ -189,17 +203,17 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive } from "vue";
 import { isEqual } from "lodash-es";
+import { computed, reactive } from "vue";
 import { DrawerContent } from "@/components/v2";
+import { useSchemaEditorStore, useSettingV1Store } from "@/store";
+import { Engine } from "@/types/proto/v1/common";
+import { SchemaTemplateSetting_FieldTemplate } from "@/types/proto/v1/setting_service";
 import {
   getDataTypeSuggestionList,
   engineNameV1,
   useWorkspacePermissionV1,
 } from "@/utils";
-import { Engine } from "@/types/proto/v1/common";
-import { useSchemaEditorStore } from "@/store";
-import { SchemaTemplateSetting_FieldTemplate } from "@/types/proto/v1/setting_service";
 import { engineList, getDefaultValue } from "./utils";
 
 const props = defineProps<{
@@ -219,6 +233,7 @@ const state = reactive<LocalState>({
   category: props.template.category,
   column: Object.assign({}, props.template.column),
 });
+const settingStore = useSettingV1Store();
 const store = useSchemaEditorStore();
 const allowEdit = computed(() => {
   return (
@@ -250,6 +265,20 @@ const categoryOptions = computed(() => {
     });
   }
   return options;
+});
+
+const schemaTemplateColumnTypes = computed(() => {
+  const setting = settingStore.getSettingByName("bb.workspace.schema-template");
+  const columnTypes = setting?.value?.schemaTemplateSettingValue?.columnTypes;
+  if (columnTypes && columnTypes.length > 0) {
+    const columnType = columnTypes.find(
+      (columnType) => columnType.engine === state.engine
+    );
+    if (columnType && columnType.enabled) {
+      return columnType.types;
+    }
+  }
+  return [];
 });
 
 const changeEngine = (engine: Engine) => {

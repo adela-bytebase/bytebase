@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"crypto/sha1"
 	"fmt"
 	"sort"
 	"strconv"
@@ -24,6 +25,13 @@ import (
 	"github.com/bytebase/bytebase/backend/store"
 	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
+)
+
+var (
+	protojsonUnmarshaler = protojson.UnmarshalOptions{
+		AllowPartial:   true,
+		DiscardUnknown: true,
+	}
 )
 
 // SchemaDesignService implements SchemaDesignServiceServer interface.
@@ -156,39 +164,6 @@ func (s *SchemaDesignService) CreateSchemaDesign(ctx context.Context, request *v
 		return nil, status.Errorf(codes.NotFound, "database %q not found", databaseName)
 	}
 
-	schemaDesignSheetPayload := &storepb.SheetPayload{
-		Type: storepb.SheetPayload_SCHEMA_DESIGN,
-		SchemaDesign: &storepb.SheetPayload_SchemaDesign{
-			Engine: storepb.Engine(schemaDesign.Engine),
-		},
-	}
-	if schemaDesign.SchemaVersion != "" {
-		instanceID, _, changeHistoryIDStr, err := common.GetInstanceDatabaseIDChangeHistory(schemaDesign.SchemaVersion)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, err.Error())
-		}
-		instance, err := s.store.GetInstanceV2(ctx, &store.FindInstanceMessage{
-			ResourceID: &instanceID,
-		})
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, err.Error())
-		}
-		changeHistory, err := s.store.GetInstanceChangeHistory(ctx, &store.FindInstanceChangeHistoryMessage{
-			ID:         &changeHistoryIDStr,
-			InstanceID: &instance.UID,
-		})
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, err.Error())
-		}
-		if changeHistory == nil {
-			return nil, status.Errorf(codes.NotFound, "schema version %s not found", changeHistoryIDStr)
-		}
-		schemaDesignSheetPayload.SchemaDesign.BaselineChangeHistoryId = changeHistory.UID
-	}
-	payloadBytes, err := protojson.Marshal(schemaDesignSheetPayload)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to marshal schema design sheet payload: %v", err))
-	}
 	schema, err := getDesignSchema(schemaDesign.Engine, schemaDesign.BaselineSchema, schemaDesign.SchemaMetadata)
 	if err != nil {
 		return nil, err
@@ -196,6 +171,62 @@ func (s *SchemaDesignService) CreateSchemaDesign(ctx context.Context, request *v
 	// Try to transform the schema string to database metadata to make sure it's valid.
 	if _, err := transformSchemaStringToDatabaseMetadata(schemaDesign.Engine, schema); err != nil {
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
+	}
+
+	_, baselineSheetID, err := common.GetProjectResourceIDSheetID(schemaDesign.BaselineSheetName)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	schemaDesignType := storepb.SheetPayload_SchemaDesign_Type(schemaDesign.Type)
+	schemaDesignSheetPayload := &storepb.SheetPayload{
+		Type: storepb.SheetPayload_SCHEMA_DESIGN,
+		SchemaDesign: &storepb.SheetPayload_SchemaDesign{
+			Type:       schemaDesignType,
+			Engine:     storepb.Engine(schemaDesign.Engine),
+			Protection: convertProtectionToStore(schemaDesign.Protection),
+		},
+	}
+	if schemaDesignType == storepb.SheetPayload_SchemaDesign_MAIN_BRANCH {
+		schemaDesignSheetPayload.SchemaDesign.BaselineSheetId = baselineSheetID
+	} else if schemaDesignType == storepb.SheetPayload_SchemaDesign_PERSONAL_DRAFT {
+		// Create a new sheet to save the baseline full schema of the personal draft schema design.
+		sheetUID, err := strconv.Atoi(baselineSheetID)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid sheet id %s, must be positive integer", baselineSheetID))
+		}
+		baselineSheet, err := s.getSheet(ctx, &store.FindSheetMessage{
+			UID: &sheetUID,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to get sheet: %v", err))
+		}
+		baselineSheetCreate := &store.SheetMessage{
+			Name:        schemaDesign.Title,
+			ProjectUID:  project.UID,
+			DatabaseUID: &database.UID,
+			Statement:   baselineSheet.Statement,
+			Visibility:  store.ProjectSheet,
+			Source:      store.SheetFromBytebaseArtifact,
+			Type:        store.SheetForSQL,
+			CreatorID:   currentPrincipalID,
+			UpdaterID:   currentPrincipalID,
+		}
+		sheet, err := s.store.CreateSheet(ctx, baselineSheetCreate)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to create sheet: %v", err))
+		}
+		schemaDesignSheetPayload.SchemaDesign.BaselineSheetId = strconv.Itoa(sheet.UID)
+		// baselineSheetID is a reference to the baseline schema design.
+		schemaDesignSheetPayload.SchemaDesign.BaselineSchemaDesignId = baselineSheetID
+	}
+	if schemaDesign.BaselineChangeHistoryId != nil {
+		schemaDesignSheetPayload.SchemaDesign.BaselineChangeHistoryId = *schemaDesign.BaselineChangeHistoryId
+	}
+
+	payloadBytes, err := protojson.Marshal(schemaDesignSheetPayload)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to marshal schema design sheet payload: %v", err))
 	}
 
 	sheetCreate := &store.SheetMessage{
@@ -223,6 +254,7 @@ func (s *SchemaDesignService) CreateSchemaDesign(ctx context.Context, request *v
 
 // UpdateSchemaDesign updates an existing schema design.
 func (s *SchemaDesignService) UpdateSchemaDesign(ctx context.Context, request *v1pb.UpdateSchemaDesignRequest) (*v1pb.SchemaDesign, error) {
+	// TODO(steven): Only allow personal draft schema design to be updated.
 	currentPrincipalID := ctx.Value(common.PrincipalIDContextKey).(int)
 	_, sheetID, err := common.GetProjectResourceIDAndSchemaDesignSheetID(request.SchemaDesign.Name)
 	if err != nil {
@@ -232,11 +264,15 @@ func (s *SchemaDesignService) UpdateSchemaDesign(ctx context.Context, request *v
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid sheet id %s, must be positive integer", sheetID))
 	}
-	if request.UpdateMask == nil {
+	if request.UpdateMask == nil || len(request.UpdateMask.Paths) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "update_mask is required")
 	}
-	if len(request.UpdateMask.Paths) == 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "update_mask is required")
+
+	sheet, err := s.getSheet(ctx, &store.FindSheetMessage{
+		UID: &sheetUID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to get sheet: %v", err))
 	}
 
 	sheetUpdate := &store.PatchSheetMessage{
@@ -248,18 +284,44 @@ func (s *SchemaDesignService) UpdateSchemaDesign(ctx context.Context, request *v
 		sheetUpdate.Name = &schemaDesign.Title
 	}
 	if slices.Contains(request.UpdateMask.Paths, "schema") {
+		sheetUpdate.Statement = &schemaDesign.Schema
+	}
+	if slices.Contains(request.UpdateMask.Paths, "metadata") {
 		sanitizeSchemaDesignSchemaMetadata(schemaDesign)
 		schema, err := getDesignSchema(schemaDesign.Engine, schemaDesign.BaselineSchema, schemaDesign.SchemaMetadata)
 		if err != nil {
 			return nil, err
 		}
-		// Try to transform the schema string to database metadata to make sure it's valid.
-		if _, err := transformSchemaStringToDatabaseMetadata(schemaDesign.Engine, schema); err != nil {
-			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
-		}
 		sheetUpdate.Statement = &schema
 	}
-	sheet, err := s.store.PatchSheet(ctx, sheetUpdate)
+	// Update baseline schema design id for personal draft schema design.
+	if slices.Contains(request.UpdateMask.Paths, "baseline_sheet_name") {
+		_, sheetID, err := common.GetProjectResourceIDSheetID(schemaDesign.BaselineSheetName)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, err.Error())
+		}
+		sheetPayload := &storepb.SheetPayload{}
+		if err := protojsonUnmarshaler.Unmarshal([]byte(sheet.Payload), sheetPayload); err != nil {
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to unmarshal sheet payload: %v", err))
+		}
+		sheetPayload.SchemaDesign.BaselineSheetId = sheetID
+		payloadBytes, err := protojson.Marshal(sheetPayload)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to marshal schema design sheet payload: %v", err))
+		}
+		payload := string(payloadBytes)
+		sheetUpdate.Payload = &payload
+	}
+
+	// If the schema is updated, we need to make sure the schema string is valid.
+	if sheetUpdate.Statement != nil {
+		// Try to transform the schema string to database metadata to make sure it's valid.
+		if _, err := transformSchemaStringToDatabaseMetadata(schemaDesign.Engine, *sheetUpdate.Statement); err != nil {
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
+		}
+	}
+
+	sheet, err = s.store.PatchSheet(ctx, sheetUpdate)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to update sheet: %v", err))
 	}
@@ -268,6 +330,82 @@ func (s *SchemaDesignService) UpdateSchemaDesign(ctx context.Context, request *v
 		return nil, err
 	}
 	return schemaDesign, nil
+}
+
+// MergeSchemaDesign merges a personal draft schema design to the target schema design.
+func (s *SchemaDesignService) MergeSchemaDesign(ctx context.Context, request *v1pb.MergeSchemaDesignRequest) (*v1pb.SchemaDesign, error) {
+	_, sheetID, err := common.GetProjectResourceIDAndSchemaDesignSheetID(request.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	sheetUID, err := strconv.Atoi(sheetID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	schemaDesignSheetType := storepb.SheetPayload_SCHEMA_DESIGN.String()
+	sheet, err := s.getSheet(ctx, &store.FindSheetMessage{
+		UID:         &sheetUID,
+		PayloadType: &schemaDesignSheetType,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to get sheet: %v", err))
+	}
+	schemaDesign, err := s.convertSheetToSchemaDesign(ctx, sheet)
+	if err != nil {
+		return nil, err
+	}
+	if schemaDesign.Type != v1pb.SchemaDesign_PERSONAL_DRAFT {
+		return nil, status.Errorf(codes.InvalidArgument, "only personal draft schema design can be merged")
+	}
+
+	_, targetSheetID, err := common.GetProjectResourceIDAndSchemaDesignSheetID(request.TargetName)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+	targetSheetUID, err := strconv.Atoi(targetSheetID)
+	if err != nil || targetSheetUID <= 0 {
+		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid sheet id %s, must be positive integer", targetSheetID))
+	}
+	targetSheet, err := s.getSheet(ctx, &store.FindSheetMessage{
+		UID:         &targetSheetUID,
+		PayloadType: &schemaDesignSheetType,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to get target sheet: %v", err))
+	}
+	targetSchemaDesign, err := s.convertSheetToSchemaDesign(ctx, targetSheet)
+	if err != nil {
+		return nil, err
+	}
+	// Only allow merging to main branch schema design.
+	// Maybe we can support merging to other personal draft schema design in the future.
+	if targetSchemaDesign.Type != v1pb.SchemaDesign_MAIN_BRANCH {
+		return nil, status.Errorf(codes.InvalidArgument, "only main branch schema design can be merged to")
+	}
+
+	baselineEtag := GenerateEtag([]byte(schemaDesign.BaselineSchema))
+	// Restrict merging only when the target schema design is not updated.
+	// Maybe we can support auto-merging in the future.
+	if baselineEtag != targetSchemaDesign.Etag {
+		return nil, status.Errorf(codes.FailedPrecondition, "schema design has been updated")
+	}
+
+	currentPrincipalID := ctx.Value(common.PrincipalIDContextKey).(int)
+	sheetUpdate := &store.PatchSheetMessage{
+		UID:       targetSheetUID,
+		UpdaterID: currentPrincipalID,
+		Statement: &schemaDesign.Schema,
+	}
+	// Update main branch schema design.
+	targetSheet, err = s.store.PatchSheet(ctx, sheetUpdate)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to update main branch schema design: %v", err))
+	}
+	targetSchemaDesign, err = s.convertSheetToSchemaDesign(ctx, targetSheet)
+	if err != nil {
+		return nil, err
+	}
+	return targetSchemaDesign, nil
 }
 
 // ParseSchemaString parses a schema string to database metadata.
@@ -294,6 +432,28 @@ func (s *SchemaDesignService) DeleteSchemaDesign(ctx context.Context, request *v
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid sheet id %s, must be positive integer", sheetID))
 	}
+	sheet, err := s.getSheet(ctx, &store.FindSheetMessage{
+		UID: &sheetUID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to get sheet: %v", err))
+	}
+	sheetPayload := &storepb.SheetPayload{}
+	if err := protojsonUnmarshaler.Unmarshal([]byte(sheet.Payload), sheetPayload); err != nil {
+		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to unmarshal sheet payload: %v", err))
+	}
+	// Find and delete the baseline sheet if it exists.
+	if sheetPayload.SchemaDesign != nil && sheetPayload.SchemaDesign.BaselineSheetId != "" {
+		baselineSheetUID, err := strconv.Atoi(sheetPayload.SchemaDesign.BaselineSheetId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid sheet id %s, must be positive integer", sheetID))
+		}
+		err = s.store.DeleteSheet(ctx, baselineSheetUID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to delete baseline sheet: %v", err))
+		}
+	}
+
 	err = s.store.DeleteSheet(ctx, sheetUID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to delete sheet: %v", err))
@@ -324,7 +484,7 @@ func (s *SchemaDesignService) getSheet(ctx context.Context, find *store.FindShee
 
 func (s *SchemaDesignService) convertSheetToSchemaDesign(ctx context.Context, sheet *store.SheetMessage) (*v1pb.SchemaDesign, error) {
 	sheetPayload := &storepb.SheetPayload{}
-	err := protojson.Unmarshal([]byte(sheet.Payload), sheetPayload)
+	err := protojsonUnmarshaler.Unmarshal([]byte(sheet.Payload), sheetPayload)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to unmarshal sheet payload: %v", err))
 	}
@@ -341,7 +501,6 @@ func (s *SchemaDesignService) convertSheetToSchemaDesign(ctx context.Context, sh
 	if project == nil {
 		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("cannot find the project: %d", sheet.ProjectUID))
 	}
-	name := fmt.Sprintf("%s%s/%s%v", common.ProjectNamePrefix, project.ResourceID, common.SchemaDesignPrefix, sheet.UID)
 
 	database, err := s.store.GetDatabaseV2(ctx, &store.FindDatabaseMessage{
 		UID: sheet.DatabaseUID,
@@ -375,40 +534,98 @@ func (s *SchemaDesignService) convertSheetToSchemaDesign(ctx context.Context, sh
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
 	}
 
-	baselineSchema := ""
-	schemaVersion := ""
-	if sheetPayload.SchemaDesign.BaselineChangeHistoryId != "" {
-		changeHistory, err := s.store.GetInstanceChangeHistory(ctx, &store.FindInstanceChangeHistoryMessage{
-			ID: &sheetPayload.SchemaDesign.BaselineChangeHistoryId,
+	baselineSchema, baselineSheetName := "", ""
+	schemaDesignType := v1pb.SchemaDesign_Type(sheetPayload.SchemaDesign.Type)
+	// For backward compatibility, we default to MAIN_BRANCH if the type is not specified.
+	if schemaDesignType == v1pb.SchemaDesign_TYPE_UNSPECIFIED {
+		schemaDesignType = v1pb.SchemaDesign_MAIN_BRANCH
+	}
+	if sheetPayload.SchemaDesign.BaselineSheetId != "" {
+		sheetUID, err := strconv.Atoi(sheetPayload.SchemaDesign.BaselineSheetId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("invalid sheet id %s, must be positive integer", sheetPayload.SchemaDesign.BaselineSheetId))
+		}
+		baselineSheet, err := s.getSheet(ctx, &store.FindSheetMessage{
+			UID: &sheetUID,
 		})
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to find change history: %v", err))
+			return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to get sheet: %v", err))
 		}
-		if changeHistory != nil {
-			baselineSchema = changeHistory.Schema
-			schemaVersion = changeHistory.UID
+		baselineSchema = baselineSheet.Statement
+	}
+
+	if schemaDesignType == v1pb.SchemaDesign_MAIN_BRANCH {
+		if sheetPayload.SchemaDesign.BaselineSheetId != "" {
+			baselineSheetName = fmt.Sprintf("%s%s/%s%v", common.ProjectNamePrefix, project.ResourceID, common.SheetIDPrefix, sheetPayload.SchemaDesign.BaselineSheetId)
 		}
+	} else {
+		if sheetPayload.SchemaDesign.BaselineSchemaDesignId != "" {
+			baselineSheetName = fmt.Sprintf("%s%s/%s%v", common.ProjectNamePrefix, project.ResourceID, common.SchemaDesignPrefix, sheetPayload.SchemaDesign.BaselineSchemaDesignId)
+		}
+	}
+
+	// If the baseline schema is not found or empty, we use the current schema as the baseline schema.
+	if baselineSchema == "" {
+		baselineSchema = schema
 	}
 	baselineSchemaMetadata, err := transformSchemaStringToDatabaseMetadata(engine, baselineSchema)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to transform schema string to database metadata: %v", err))
 	}
 
-	return &v1pb.SchemaDesign{
+	name := fmt.Sprintf("%s%s/%s%v", common.ProjectNamePrefix, project.ResourceID, common.SchemaDesignPrefix, sheet.UID)
+	schemaDesign := &v1pb.SchemaDesign{
 		Name:                   name,
 		Title:                  sheet.Name,
 		Schema:                 schema,
 		SchemaMetadata:         schemaMetadata,
 		BaselineSchema:         baselineSchema,
 		BaselineSchemaMetadata: baselineSchemaMetadata,
+		BaselineSheetName:      baselineSheetName,
 		Engine:                 engine,
 		BaselineDatabase:       fmt.Sprintf("%s%s/%s%s", common.InstanceNamePrefix, database.InstanceID, common.DatabaseIDPrefix, database.DatabaseName),
-		SchemaVersion:          schemaVersion,
+		Type:                   schemaDesignType,
+		Etag:                   GenerateEtag([]byte(schema)),
+		Protection:             convertProtectionFromStore(sheetPayload.SchemaDesign.Protection),
 		Creator:                fmt.Sprintf("users/%s", creator.Email),
 		Updater:                fmt.Sprintf("users/%s", updater.Email),
 		CreateTime:             timestamppb.New(sheet.CreatedTime),
 		UpdateTime:             timestamppb.New(sheet.UpdatedTime),
-	}, nil
+	}
+
+	baselineChangeHistoryID := sheetPayload.SchemaDesign.BaselineChangeHistoryId
+	if baselineChangeHistoryID != "" {
+		schemaDesign.BaselineChangeHistoryId = &baselineChangeHistoryID
+	}
+
+	return schemaDesign, nil
+}
+
+func convertProtectionToStore(protection *v1pb.SchemaDesign_Protection) *storepb.SheetPayload_SchemaDesign_Protection {
+	if protection == nil {
+		return &storepb.SheetPayload_SchemaDesign_Protection{}
+	}
+
+	return &storepb.SheetPayload_SchemaDesign_Protection{
+		AllowForcePushes: protection.AllowForcePushes,
+	}
+}
+
+func convertProtectionFromStore(protection *storepb.SheetPayload_SchemaDesign_Protection) *v1pb.SchemaDesign_Protection {
+	if protection == nil {
+		return &v1pb.SchemaDesign_Protection{}
+	}
+
+	return &v1pb.SchemaDesign_Protection{
+		AllowForcePushes: protection.AllowForcePushes,
+	}
+}
+
+// GenerateEtag generates etag for the given body.
+func GenerateEtag(body []byte) string {
+	hash := sha1.Sum(body)
+	etag := fmt.Sprintf("%x", hash)
+	return etag
 }
 
 func transformSchemaStringToDatabaseMetadata(engine v1pb.Engine, schema string) (*v1pb.DatabaseMetadata, error) {
@@ -508,13 +725,17 @@ func convertToDatabaseState(database *v1pb.DatabaseMetadata) *databaseState {
 }
 
 func (s *databaseState) convertToDatabaseMetadata() *v1pb.DatabaseMetadata {
-	schemas := []*v1pb.SchemaMetadata{}
+	schemaStates := []*schemaState{}
 	for _, schema := range s.schemas {
+		schemaStates = append(schemaStates, schema)
+	}
+	sort.Slice(schemaStates, func(i, j int) bool {
+		return schemaStates[i].id < schemaStates[j].id
+	})
+	schemas := []*v1pb.SchemaMetadata{}
+	for _, schema := range schemaStates {
 		schemas = append(schemas, schema.convertToSchemaMetadata())
 	}
-	sort.Slice(schemas, func(i, j int) bool {
-		return schemas[i].Name < schemas[j].Name
-	})
 	return &v1pb.DatabaseMetadata{
 		Name:    s.name,
 		Schemas: schemas,
@@ -524,6 +745,7 @@ func (s *databaseState) convertToDatabaseMetadata() *v1pb.DatabaseMetadata {
 }
 
 type schemaState struct {
+	id     int
 	name   string
 	tables map[string]*tableState
 }
@@ -537,20 +759,24 @@ func newSchemaState() *schemaState {
 func convertToSchemaState(schema *v1pb.SchemaMetadata) *schemaState {
 	state := newSchemaState()
 	state.name = schema.Name
-	for _, table := range schema.Tables {
-		state.tables[table.Name] = convertToTableState(table)
+	for i, table := range schema.Tables {
+		state.tables[table.Name] = convertToTableState(i, table)
 	}
 	return state
 }
 
 func (s *schemaState) convertToSchemaMetadata() *v1pb.SchemaMetadata {
-	tables := []*v1pb.TableMetadata{}
+	tableStates := []*tableState{}
 	for _, table := range s.tables {
+		tableStates = append(tableStates, table)
+	}
+	sort.Slice(tableStates, func(i, j int) bool {
+		return tableStates[i].id < tableStates[j].id
+	})
+	tables := []*v1pb.TableMetadata{}
+	for _, table := range tableStates {
 		tables = append(tables, table.convertToTableMetadata())
 	}
-	sort.Slice(tables, func(i, j int) bool {
-		return tables[i].Name < tables[j].Name
-	})
 	return &v1pb.SchemaMetadata{
 		Name:   s.name,
 		Tables: tables,
@@ -563,6 +789,7 @@ func (s *schemaState) convertToSchemaMetadata() *v1pb.SchemaMetadata {
 }
 
 type tableState struct {
+	id          int
 	name        string
 	columns     map[string]*columnState
 	indexes     map[string]*indexState
@@ -578,7 +805,7 @@ func (t *tableState) toString(buf *strings.Builder) error {
 		columns = append(columns, column)
 	}
 	sort.Slice(columns, func(i, j int) bool {
-		return columns[i].name < columns[j].name
+		return columns[i].id < columns[j].id
 	})
 	for i, column := range columns {
 		if i > 0 {
@@ -596,7 +823,7 @@ func (t *tableState) toString(buf *strings.Builder) error {
 		indexes = append(indexes, index)
 	}
 	sort.Slice(indexes, func(i, j int) bool {
-		return indexes[i].name < indexes[j].name
+		return indexes[i].id < indexes[j].id
 	})
 
 	for i, index := range indexes {
@@ -615,7 +842,7 @@ func (t *tableState) toString(buf *strings.Builder) error {
 		foreignKeys = append(foreignKeys, fk)
 	}
 	sort.Slice(foreignKeys, func(i, j int) bool {
-		return foreignKeys[i].name < foreignKeys[j].name
+		return foreignKeys[i].id < foreignKeys[j].id
 	})
 
 	for i, fk := range foreignKeys {
@@ -635,8 +862,9 @@ func (t *tableState) toString(buf *strings.Builder) error {
 	return nil
 }
 
-func newTableState(name string) *tableState {
+func newTableState(id int, name string) *tableState {
 	return &tableState{
+		id:          id,
 		name:        name,
 		columns:     make(map[string]*columnState),
 		indexes:     make(map[string]*indexState),
@@ -644,44 +872,56 @@ func newTableState(name string) *tableState {
 	}
 }
 
-func convertToTableState(table *v1pb.TableMetadata) *tableState {
-	state := newTableState(table.Name)
-	for _, column := range table.Columns {
-		state.columns[column.Name] = convertToColumnState(column)
+func convertToTableState(id int, table *v1pb.TableMetadata) *tableState {
+	state := newTableState(id, table.Name)
+	for i, column := range table.Columns {
+		state.columns[column.Name] = convertToColumnState(i, column)
 	}
-	for _, index := range table.Indexes {
-		state.indexes[index.Name] = convertToIndexState(index)
+	for i, index := range table.Indexes {
+		state.indexes[index.Name] = convertToIndexState(i, index)
 	}
-	for _, fk := range table.ForeignKeys {
-		state.foreignKeys[fk.Name] = convertToForeignKeyState(fk)
+	for i, fk := range table.ForeignKeys {
+		state.foreignKeys[fk.Name] = convertToForeignKeyState(i, fk)
 	}
 	return state
 }
 
 func (t *tableState) convertToTableMetadata() *v1pb.TableMetadata {
-	columns := []*v1pb.ColumnMetadata{}
+	columnStates := []*columnState{}
 	for _, column := range t.columns {
+		columnStates = append(columnStates, column)
+	}
+	sort.Slice(columnStates, func(i, j int) bool {
+		return columnStates[i].id < columnStates[j].id
+	})
+	columns := []*v1pb.ColumnMetadata{}
+	for _, column := range columnStates {
 		columns = append(columns, column.convertToColumnMetadata())
 	}
-	sort.Slice(columns, func(i, j int) bool {
-		return columns[i].Name < columns[j].Name
-	})
 
-	indexes := []*v1pb.IndexMetadata{}
+	indexStates := []*indexState{}
 	for _, index := range t.indexes {
+		indexStates = append(indexStates, index)
+	}
+	sort.Slice(indexStates, func(i, j int) bool {
+		return indexStates[i].id < indexStates[j].id
+	})
+	indexes := []*v1pb.IndexMetadata{}
+	for _, index := range indexStates {
 		indexes = append(indexes, index.convertToIndexMetadata())
 	}
-	sort.Slice(indexes, func(i, j int) bool {
-		return indexes[i].Name < indexes[j].Name
-	})
 
-	fks := []*v1pb.ForeignKeyMetadata{}
+	fkStates := []*foreignKeyState{}
 	for _, fk := range t.foreignKeys {
+		fkStates = append(fkStates, fk)
+	}
+	sort.Slice(fkStates, func(i, j int) bool {
+		return fkStates[i].id < fkStates[j].id
+	})
+	fks := []*v1pb.ForeignKeyMetadata{}
+	for _, fk := range fkStates {
 		fks = append(fks, fk.convertToForeignKeyMetadata())
 	}
-	sort.Slice(fks, func(i, j int) bool {
-		return fks[i].Name < fks[j].Name
-	})
 
 	return &v1pb.TableMetadata{
 		Name:        t.name,
@@ -692,6 +932,7 @@ func (t *tableState) convertToTableMetadata() *v1pb.TableMetadata {
 }
 
 type foreignKeyState struct {
+	id                int
 	name              string
 	columns           []string
 	referencedTable   string
@@ -707,8 +948,9 @@ func (f *foreignKeyState) convertToForeignKeyMetadata() *v1pb.ForeignKeyMetadata
 	}
 }
 
-func convertToForeignKeyState(foreignKey *v1pb.ForeignKeyMetadata) *foreignKeyState {
+func convertToForeignKeyState(id int, foreignKey *v1pb.ForeignKeyMetadata) *foreignKeyState {
 	return &foreignKeyState{
+		id:                id,
 		name:              foreignKey.Name,
 		columns:           foreignKey.Columns,
 		referencedTable:   foreignKey.ReferencedTable,
@@ -774,6 +1016,7 @@ func (f *foreignKeyState) toString(buf *strings.Builder) error {
 }
 
 type indexState struct {
+	id      int
 	name    string
 	keys    []string
 	primary bool
@@ -791,8 +1034,9 @@ func (i *indexState) convertToIndexMetadata() *v1pb.IndexMetadata {
 	}
 }
 
-func convertToIndexState(index *v1pb.IndexMetadata) *indexState {
+func convertToIndexState(id int, index *v1pb.IndexMetadata) *indexState {
 	return &indexState{
+		id:      id,
 		name:    index.Name,
 		keys:    index.Expressions,
 		primary: index.Primary,
@@ -824,6 +1068,7 @@ func (i *indexState) toString(buf *strings.Builder) error {
 }
 
 type columnState struct {
+	id           int
 	name         string
 	tp           string
 	defaultValue *string
@@ -870,8 +1115,9 @@ func (c *columnState) convertToColumnMetadata() *v1pb.ColumnMetadata {
 	return result
 }
 
-func convertToColumnState(column *v1pb.ColumnMetadata) *columnState {
+func convertToColumnState(id int, column *v1pb.ColumnMetadata) *columnState {
 	result := &columnState{
+		id:       id,
 		name:     column.Name,
 		tp:       column.Type,
 		nullable: column.Nullable,
@@ -904,7 +1150,7 @@ func (t *mysqlTransformer) EnterCreateTable(ctx *mysql.CreateTableContext) {
 		return
 	}
 
-	schema.tables[tableName] = newTableState(tableName)
+	schema.tables[tableName] = newTableState(len(schema.tables), tableName)
 	t.currentTable = tableName
 }
 
@@ -923,7 +1169,9 @@ func (t *mysqlTransformer) EnterTableConstraintDef(ctx *mysql.TableConstraintDef
 		switch strings.ToUpper(ctx.GetType_().GetText()) {
 		case "PRIMARY":
 			list := extractKeyListVariants(ctx.KeyListVariants())
-			t.state.schemas[""].tables[t.currentTable].indexes["PRIMARY"] = &indexState{
+			table := t.state.schemas[""].tables[t.currentTable]
+			table.indexes["PRIMARY"] = &indexState{
+				id:      len(table.indexes),
 				name:    "PRIMARY",
 				keys:    list,
 				primary: true,
@@ -944,6 +1192,7 @@ func (t *mysqlTransformer) EnterTableConstraintDef(ctx *mysql.TableConstraintDef
 			}
 			referencedTable, referencedColumns := extractReference(ctx.References())
 			fk := &foreignKeyState{
+				id:                len(table.foreignKeys),
 				name:              name,
 				columns:           keys,
 				referencedTable:   referencedTable,
@@ -1018,6 +1267,7 @@ func (t *mysqlTransformer) EnterColumnDefinition(ctx *mysql.ColumnDefinitionCont
 		return
 	}
 	columnState := &columnState{
+		id:           len(table.columns),
 		name:         columnName,
 		tp:           dataType,
 		defaultValue: nil,
@@ -1054,7 +1304,11 @@ func (t *mysqlTransformer) EnterColumnDefinition(ctx *mysql.ColumnDefinitionCont
 func getDesignSchema(engine v1pb.Engine, baselineSchema string, to *v1pb.DatabaseMetadata) (string, error) {
 	switch engine {
 	case v1pb.Engine_MYSQL:
-		return getMySQLDesignSchema(baselineSchema, to)
+		result, err := getMySQLDesignSchema(baselineSchema, to)
+		if err != nil {
+			return "", status.Errorf(codes.Internal, "failed to generate design schema: %v", err)
+		}
+		return result, nil
 	default:
 		return "", status.Errorf(codes.InvalidArgument, fmt.Sprintf("unsupported engine: %v", engine))
 	}
@@ -1068,25 +1322,49 @@ func getMySQLDesignSchema(baselineSchema string, to *v1pb.DatabaseMetadata) (str
 	}
 
 	listener := &mysqlDesignSchemaGenerator{
-		to: toState,
+		lastTokenIndex: 0,
+		to:             toState,
 	}
 
 	for _, stmt := range list {
+		listener.lastTokenIndex = 0
 		antlr.ParseTreeWalkerDefault.Walk(listener, stmt.Tree)
+		if listener.err != nil {
+			break
+		}
+
+		if _, err := listener.result.WriteString(
+			stmt.Tokens.GetTextFromInterval(antlr.Interval{
+				Start: listener.lastTokenIndex,
+				Stop:  stmt.Tokens.Size() - 1,
+			}),
+		); err != nil {
+			return "", err
+		}
 	}
 	if listener.err != nil {
 		return "", listener.err
 	}
 
+	firstTable := true
+
+	// Follow the order of the input schemas.
 	for _, schema := range to.Schemas {
 		schemaState, ok := toState.schemas[schema.Name]
 		if !ok {
 			continue
 		}
+		// Follow the order of the input tables.
 		for _, table := range schema.Tables {
 			table, ok := schemaState.tables[table.Name]
 			if !ok {
 				continue
+			}
+			if firstTable {
+				firstTable = false
+				if _, err := listener.result.WriteString("\n\n"); err != nil {
+					return "", err
+				}
 			}
 			if err := table.toString(&listener.result); err != nil {
 				return "", err
@@ -1107,6 +1385,8 @@ type mysqlDesignSchemaGenerator struct {
 	columnDefine        strings.Builder
 	tableConstraints    strings.Builder
 	err                 error
+
+	lastTokenIndex int
 }
 
 // EnterCreateTable is called when production createTable is entered.
@@ -1127,6 +1407,17 @@ func (g *mysqlDesignSchemaGenerator) EnterCreateTable(ctx *mysql.CreateTableCont
 
 	table, ok := schema.tables[tableName]
 	if !ok {
+		g.lastTokenIndex = ctx.GetParser().GetTokenStream().Size() - 1
+		return
+	}
+
+	if _, err := g.result.WriteString(
+		ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
+			Start: g.lastTokenIndex,
+			Stop:  ctx.GetStart().GetTokenIndex() - 1,
+		}),
+	); err != nil {
+		g.err = err
 		return
 	}
 
@@ -1136,10 +1427,6 @@ func (g *mysqlDesignSchemaGenerator) EnterCreateTable(ctx *mysql.CreateTableCont
 	g.tableConstraints.Reset()
 
 	delete(schema.tables, tableName)
-	if _, err := g.result.WriteString("CREATE "); err != nil {
-		g.err = err
-		return
-	}
 	if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 		Start: ctx.GetStart().GetTokenIndex(),
 		Stop:  ctx.TableElementList().GetStart().GetTokenIndex() - 1,
@@ -1160,7 +1447,7 @@ func (g *mysqlDesignSchemaGenerator) ExitCreateTable(ctx *mysql.CreateTableConte
 		columnList = append(columnList, column)
 	}
 	sort.Slice(columnList, func(i, j int) bool {
-		return columnList[i].name < columnList[j].name
+		return columnList[i].id < columnList[j].id
 	})
 	for _, column := range columnList {
 		if g.firstElementInTable {
@@ -1196,7 +1483,7 @@ func (g *mysqlDesignSchemaGenerator) ExitCreateTable(ctx *mysql.CreateTableConte
 		fks = append(fks, fk)
 	}
 	sort.Slice(fks, func(i, j int) bool {
-		return fks[i].name < fks[j].name
+		return fks[i].id < fks[j].id
 	})
 	for _, fk := range fks {
 		if g.firstElementInTable {
@@ -1225,19 +1512,17 @@ func (g *mysqlDesignSchemaGenerator) ExitCreateTable(ctx *mysql.CreateTableConte
 
 	if _, err := g.result.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 		Start: ctx.TableElementList().GetStop().GetTokenIndex() + 1,
-		Stop:  ctx.GetStop().GetTokenIndex(),
+		// Write all tokens until the end of the statement.
+		// Because we listen one statement at a time, we can safely use the last token index.
+		Stop: ctx.GetParser().GetTokenStream().Size() - 1,
 	})); err != nil {
-		g.err = err
-		return
-	}
-
-	if _, err := g.result.WriteString(";\n"); err != nil {
 		g.err = err
 		return
 	}
 
 	g.currentTable = nil
 	g.firstElementInTable = false
+	g.lastTokenIndex = ctx.GetParser().GetTokenStream().Size() - 1
 }
 
 type columnAttr struct {
@@ -1457,7 +1742,7 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 	// compare column type
 	typeCtx := ctx.FieldDefinition().DataType()
 	columnType := ctx.GetParser().GetTokenStream().GetTextFromRuleContext(typeCtx)
-	if columnType != column.tp {
+	if !strings.EqualFold(columnType, column.tp) {
 		if _, err := g.columnDefine.WriteString(ctx.GetParser().GetTokenStream().GetTextFromInterval(antlr.Interval{
 			Start: ctx.GetStart().GetTokenIndex(),
 			Stop:  typeCtx.GetStart().GetTokenIndex() - 1,
@@ -1465,7 +1750,8 @@ func (g *mysqlDesignSchemaGenerator) EnterColumnDefinition(ctx *mysql.ColumnDefi
 			g.err = err
 			return
 		}
-		if _, err := g.columnDefine.WriteString(column.tp); err != nil {
+		// write lower case column type for MySQL
+		if _, err := g.columnDefine.WriteString(strings.ToLower(column.tp)); err != nil {
 			g.err = err
 			return
 		}

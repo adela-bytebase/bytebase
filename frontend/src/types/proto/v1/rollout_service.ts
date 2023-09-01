@@ -4,6 +4,7 @@ import type { CallContext, CallOptions } from "nice-grpc-common";
 import * as _m0 from "protobufjs/minimal";
 import { FieldMask } from "../google/protobuf/field_mask";
 import { Timestamp } from "../google/protobuf/timestamp";
+import { ChangedResources } from "./database_service";
 
 export const protobufPackage = "bytebase.v1";
 
@@ -134,6 +135,11 @@ export interface Plan_CreateDatabaseConfig {
    * Format: instances/{instance}/databases/{database}/backups/{backup-name}
    */
   backup: string;
+  /**
+   * The environment resource.
+   * Format: environments/prod where prod is the environment resource ID.
+   */
+  environment: string;
   /** labels of the database. */
   labels: { [key: string]: string };
 }
@@ -147,6 +153,7 @@ export interface Plan_ChangeDatabaseConfig {
   /**
    * The resource name of the target.
    * Format: instances/{instance-id}/databases/{database-name}.
+   * Format: projects/{project}/databaseGroups/{databaseGroup}
    */
   target: string;
   /**
@@ -322,6 +329,7 @@ export interface BatchRunTasksRequest {
    * Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task}
    */
   tasks: string[];
+  reason: string;
 }
 
 export interface BatchRunTasksResponse {
@@ -338,6 +346,7 @@ export interface BatchSkipTasksRequest {
    * Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task}
    */
   tasks: string[];
+  reason: string;
 }
 
 export interface BatchSkipTasksResponse {
@@ -347,6 +356,7 @@ export interface BatchCancelTaskRunsRequest {
   /**
    * The name of the parent of the taskRuns.
    * Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task}
+   * Use `projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/-` to cancel task runs under the same stage.
    */
   parent: string;
   /**
@@ -354,6 +364,7 @@ export interface BatchCancelTaskRunsRequest {
    * Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task}/taskRuns/{taskRun}
    */
   taskRuns: string[];
+  reason: string;
 }
 
 export interface BatchCancelTaskRunsResponse {
@@ -373,6 +384,7 @@ export interface PlanCheckRun {
   results: PlanCheckRun_Result[];
   /** error is set if the Status is FAILED. */
   error: string;
+  createTime?: Date | undefined;
 }
 
 export enum PlanCheckRun_Type {
@@ -556,12 +568,16 @@ export function planCheckRun_Result_StatusToJSON(object: PlanCheckRun_Result_Sta
 }
 
 export interface PlanCheckRun_Result_SqlSummaryReport {
-  statementType: string;
+  code: number;
+  /** statement_types are the types of statements that are found in the sql. */
+  statementTypes: string[];
   affectedRows: number;
+  changedResources?: ChangedResources | undefined;
 }
 
 export interface PlanCheckRun_Result_SqlReviewReport {
   line: number;
+  column: number;
   detail: string;
   /** Code from sql review. */
   code: number;
@@ -669,11 +685,9 @@ export interface Task {
    * Could be empty if the rollout of the task does not have an associating plan.
    */
   specId: string;
-  /**
-   * Status is the status of the task.
-   * TODO(p0ny): migrate old task status and use this field as a summary of the task runs.
-   */
+  /** Status is the status of the task. */
   status: Task_Status;
+  skippedReason: string;
   type: Task_Type;
   /** Format: projects/{project}/rollouts/{rollout}/stages/{stage}/tasks/{task} */
   blockedByTasks: string[];
@@ -692,7 +706,7 @@ export interface Task {
 
 export enum Task_Status {
   STATUS_UNSPECIFIED = 0,
-  PENDING_APPROVAL = 1,
+  NOT_STARTED = 1,
   PENDING = 2,
   RUNNING = 3,
   DONE = 4,
@@ -708,8 +722,8 @@ export function task_StatusFromJSON(object: any): Task_Status {
     case "STATUS_UNSPECIFIED":
       return Task_Status.STATUS_UNSPECIFIED;
     case 1:
-    case "PENDING_APPROVAL":
-      return Task_Status.PENDING_APPROVAL;
+    case "NOT_STARTED":
+      return Task_Status.NOT_STARTED;
     case 2:
     case "PENDING":
       return Task_Status.PENDING;
@@ -739,8 +753,8 @@ export function task_StatusToJSON(object: Task_Status): string {
   switch (object) {
     case Task_Status.STATUS_UNSPECIFIED:
       return "STATUS_UNSPECIFIED";
-    case Task_Status.PENDING_APPROVAL:
-      return "PENDING_APPROVAL";
+    case Task_Status.NOT_STARTED:
+      return "NOT_STARTED";
     case Task_Status.PENDING:
       return "PENDING";
     case Task_Status.RUNNING:
@@ -876,6 +890,7 @@ export interface Task_DatabaseCreate {
   sheet: string;
   characterSet: string;
   collation: string;
+  environment: string;
   labels: { [key: string]: string };
 }
 
@@ -1030,7 +1045,6 @@ export enum TaskRun_Status {
   DONE = 3,
   FAILED = 4,
   CANCELED = 5,
-  SKIPPED = 6,
   UNRECOGNIZED = -1,
 }
 
@@ -1054,9 +1068,6 @@ export function taskRun_StatusFromJSON(object: any): TaskRun_Status {
     case 5:
     case "CANCELED":
       return TaskRun_Status.CANCELED;
-    case 6:
-    case "SKIPPED":
-      return TaskRun_Status.SKIPPED;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -1078,8 +1089,6 @@ export function taskRun_StatusToJSON(object: TaskRun_Status): string {
       return "FAILED";
     case TaskRun_Status.CANCELED:
       return "CANCELED";
-    case TaskRun_Status.SKIPPED:
-      return "SKIPPED";
     case TaskRun_Status.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -1777,6 +1786,7 @@ function createBasePlan_CreateDatabaseConfig(): Plan_CreateDatabaseConfig {
     cluster: "",
     owner: "",
     backup: "",
+    environment: "",
     labels: {},
   };
 }
@@ -1807,8 +1817,11 @@ export const Plan_CreateDatabaseConfig = {
     if (message.backup !== "") {
       writer.uint32(66).string(message.backup);
     }
+    if (message.environment !== "") {
+      writer.uint32(74).string(message.environment);
+    }
     Object.entries(message.labels).forEach(([key, value]) => {
-      Plan_CreateDatabaseConfig_LabelsEntry.encode({ key: key as any, value }, writer.uint32(74).fork()).ldelim();
+      Plan_CreateDatabaseConfig_LabelsEntry.encode({ key: key as any, value }, writer.uint32(82).fork()).ldelim();
     });
     return writer;
   },
@@ -1881,9 +1894,16 @@ export const Plan_CreateDatabaseConfig = {
             break;
           }
 
-          const entry9 = Plan_CreateDatabaseConfig_LabelsEntry.decode(reader, reader.uint32());
-          if (entry9.value !== undefined) {
-            message.labels[entry9.key] = entry9.value;
+          message.environment = reader.string();
+          continue;
+        case 10:
+          if (tag !== 82) {
+            break;
+          }
+
+          const entry10 = Plan_CreateDatabaseConfig_LabelsEntry.decode(reader, reader.uint32());
+          if (entry10.value !== undefined) {
+            message.labels[entry10.key] = entry10.value;
           }
           continue;
       }
@@ -1905,6 +1925,7 @@ export const Plan_CreateDatabaseConfig = {
       cluster: isSet(object.cluster) ? String(object.cluster) : "",
       owner: isSet(object.owner) ? String(object.owner) : "",
       backup: isSet(object.backup) ? String(object.backup) : "",
+      environment: isSet(object.environment) ? String(object.environment) : "",
       labels: isObject(object.labels)
         ? Object.entries(object.labels).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
@@ -1924,6 +1945,7 @@ export const Plan_CreateDatabaseConfig = {
     message.cluster !== undefined && (obj.cluster = message.cluster);
     message.owner !== undefined && (obj.owner = message.owner);
     message.backup !== undefined && (obj.backup = message.backup);
+    message.environment !== undefined && (obj.environment = message.environment);
     obj.labels = {};
     if (message.labels) {
       Object.entries(message.labels).forEach(([k, v]) => {
@@ -1947,6 +1969,7 @@ export const Plan_CreateDatabaseConfig = {
     message.cluster = object.cluster ?? "";
     message.owner = object.owner ?? "";
     message.backup = object.backup ?? "";
+    message.environment = object.environment ?? "";
     message.labels = Object.entries(object.labels ?? {}).reduce<{ [key: string]: string }>((acc, [key, value]) => {
       if (value !== undefined) {
         acc[key] = String(value);
@@ -2590,7 +2613,7 @@ export const RunPlanChecksResponse = {
 };
 
 function createBaseBatchRunTasksRequest(): BatchRunTasksRequest {
-  return { parent: "", tasks: [] };
+  return { parent: "", tasks: [], reason: "" };
 }
 
 export const BatchRunTasksRequest = {
@@ -2600,6 +2623,9 @@ export const BatchRunTasksRequest = {
     }
     for (const v of message.tasks) {
       writer.uint32(18).string(v!);
+    }
+    if (message.reason !== "") {
+      writer.uint32(26).string(message.reason);
     }
     return writer;
   },
@@ -2625,6 +2651,13 @@ export const BatchRunTasksRequest = {
 
           message.tasks.push(reader.string());
           continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2638,6 +2671,7 @@ export const BatchRunTasksRequest = {
     return {
       parent: isSet(object.parent) ? String(object.parent) : "",
       tasks: Array.isArray(object?.tasks) ? object.tasks.map((e: any) => String(e)) : [],
+      reason: isSet(object.reason) ? String(object.reason) : "",
     };
   },
 
@@ -2649,6 +2683,7 @@ export const BatchRunTasksRequest = {
     } else {
       obj.tasks = [];
     }
+    message.reason !== undefined && (obj.reason = message.reason);
     return obj;
   },
 
@@ -2660,6 +2695,7 @@ export const BatchRunTasksRequest = {
     const message = createBaseBatchRunTasksRequest();
     message.parent = object.parent ?? "";
     message.tasks = object.tasks?.map((e) => e) || [];
+    message.reason = object.reason ?? "";
     return message;
   },
 };
@@ -2709,7 +2745,7 @@ export const BatchRunTasksResponse = {
 };
 
 function createBaseBatchSkipTasksRequest(): BatchSkipTasksRequest {
-  return { parent: "", tasks: [] };
+  return { parent: "", tasks: [], reason: "" };
 }
 
 export const BatchSkipTasksRequest = {
@@ -2719,6 +2755,9 @@ export const BatchSkipTasksRequest = {
     }
     for (const v of message.tasks) {
       writer.uint32(18).string(v!);
+    }
+    if (message.reason !== "") {
+      writer.uint32(26).string(message.reason);
     }
     return writer;
   },
@@ -2744,6 +2783,13 @@ export const BatchSkipTasksRequest = {
 
           message.tasks.push(reader.string());
           continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2757,6 +2803,7 @@ export const BatchSkipTasksRequest = {
     return {
       parent: isSet(object.parent) ? String(object.parent) : "",
       tasks: Array.isArray(object?.tasks) ? object.tasks.map((e: any) => String(e)) : [],
+      reason: isSet(object.reason) ? String(object.reason) : "",
     };
   },
 
@@ -2768,6 +2815,7 @@ export const BatchSkipTasksRequest = {
     } else {
       obj.tasks = [];
     }
+    message.reason !== undefined && (obj.reason = message.reason);
     return obj;
   },
 
@@ -2779,6 +2827,7 @@ export const BatchSkipTasksRequest = {
     const message = createBaseBatchSkipTasksRequest();
     message.parent = object.parent ?? "";
     message.tasks = object.tasks?.map((e) => e) || [];
+    message.reason = object.reason ?? "";
     return message;
   },
 };
@@ -2828,7 +2877,7 @@ export const BatchSkipTasksResponse = {
 };
 
 function createBaseBatchCancelTaskRunsRequest(): BatchCancelTaskRunsRequest {
-  return { parent: "", taskRuns: [] };
+  return { parent: "", taskRuns: [], reason: "" };
 }
 
 export const BatchCancelTaskRunsRequest = {
@@ -2838,6 +2887,9 @@ export const BatchCancelTaskRunsRequest = {
     }
     for (const v of message.taskRuns) {
       writer.uint32(18).string(v!);
+    }
+    if (message.reason !== "") {
+      writer.uint32(26).string(message.reason);
     }
     return writer;
   },
@@ -2863,6 +2915,13 @@ export const BatchCancelTaskRunsRequest = {
 
           message.taskRuns.push(reader.string());
           continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2876,6 +2935,7 @@ export const BatchCancelTaskRunsRequest = {
     return {
       parent: isSet(object.parent) ? String(object.parent) : "",
       taskRuns: Array.isArray(object?.taskRuns) ? object.taskRuns.map((e: any) => String(e)) : [],
+      reason: isSet(object.reason) ? String(object.reason) : "",
     };
   },
 
@@ -2887,6 +2947,7 @@ export const BatchCancelTaskRunsRequest = {
     } else {
       obj.taskRuns = [];
     }
+    message.reason !== undefined && (obj.reason = message.reason);
     return obj;
   },
 
@@ -2898,6 +2959,7 @@ export const BatchCancelTaskRunsRequest = {
     const message = createBaseBatchCancelTaskRunsRequest();
     message.parent = object.parent ?? "";
     message.taskRuns = object.taskRuns?.map((e) => e) || [];
+    message.reason = object.reason ?? "";
     return message;
   },
 };
@@ -2947,7 +3009,17 @@ export const BatchCancelTaskRunsResponse = {
 };
 
 function createBasePlanCheckRun(): PlanCheckRun {
-  return { name: "", uid: "", type: 0, status: 0, target: "", sheet: "", results: [], error: "" };
+  return {
+    name: "",
+    uid: "",
+    type: 0,
+    status: 0,
+    target: "",
+    sheet: "",
+    results: [],
+    error: "",
+    createTime: undefined,
+  };
 }
 
 export const PlanCheckRun = {
@@ -2975,6 +3047,9 @@ export const PlanCheckRun = {
     }
     if (message.error !== "") {
       writer.uint32(66).string(message.error);
+    }
+    if (message.createTime !== undefined) {
+      Timestamp.encode(toTimestamp(message.createTime), writer.uint32(74).fork()).ldelim();
     }
     return writer;
   },
@@ -3042,6 +3117,13 @@ export const PlanCheckRun = {
 
           message.error = reader.string();
           continue;
+        case 9:
+          if (tag !== 74) {
+            break;
+          }
+
+          message.createTime = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3061,6 +3143,7 @@ export const PlanCheckRun = {
       sheet: isSet(object.sheet) ? String(object.sheet) : "",
       results: Array.isArray(object?.results) ? object.results.map((e: any) => PlanCheckRun_Result.fromJSON(e)) : [],
       error: isSet(object.error) ? String(object.error) : "",
+      createTime: isSet(object.createTime) ? fromJsonTimestamp(object.createTime) : undefined,
     };
   },
 
@@ -3078,6 +3161,7 @@ export const PlanCheckRun = {
       obj.results = [];
     }
     message.error !== undefined && (obj.error = message.error);
+    message.createTime !== undefined && (obj.createTime = message.createTime.toISOString());
     return obj;
   },
 
@@ -3095,6 +3179,7 @@ export const PlanCheckRun = {
     message.sheet = object.sheet ?? "";
     message.results = object.results?.map((e) => PlanCheckRun_Result.fromPartial(e)) || [];
     message.error = object.error ?? "";
+    message.createTime = object.createTime ?? undefined;
     return message;
   },
 };
@@ -3235,16 +3320,22 @@ export const PlanCheckRun_Result = {
 };
 
 function createBasePlanCheckRun_Result_SqlSummaryReport(): PlanCheckRun_Result_SqlSummaryReport {
-  return { statementType: "", affectedRows: 0 };
+  return { code: 0, statementTypes: [], affectedRows: 0, changedResources: undefined };
 }
 
 export const PlanCheckRun_Result_SqlSummaryReport = {
   encode(message: PlanCheckRun_Result_SqlSummaryReport, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.statementType !== "") {
-      writer.uint32(10).string(message.statementType);
+    if (message.code !== 0) {
+      writer.uint32(8).int64(message.code);
+    }
+    for (const v of message.statementTypes) {
+      writer.uint32(18).string(v!);
     }
     if (message.affectedRows !== 0) {
-      writer.uint32(16).int64(message.affectedRows);
+      writer.uint32(24).int64(message.affectedRows);
+    }
+    if (message.changedResources !== undefined) {
+      ChangedResources.encode(message.changedResources, writer.uint32(34).fork()).ldelim();
     }
     return writer;
   },
@@ -3257,18 +3348,32 @@ export const PlanCheckRun_Result_SqlSummaryReport = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          if (tag !== 10) {
+          if (tag !== 8) {
             break;
           }
 
-          message.statementType = reader.string();
+          message.code = longToNumber(reader.int64() as Long);
           continue;
         case 2:
-          if (tag !== 16) {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.statementTypes.push(reader.string());
+          continue;
+        case 3:
+          if (tag !== 24) {
             break;
           }
 
           message.affectedRows = longToNumber(reader.int64() as Long);
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.changedResources = ChangedResources.decode(reader, reader.uint32());
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -3281,15 +3386,24 @@ export const PlanCheckRun_Result_SqlSummaryReport = {
 
   fromJSON(object: any): PlanCheckRun_Result_SqlSummaryReport {
     return {
-      statementType: isSet(object.statementType) ? String(object.statementType) : "",
+      code: isSet(object.code) ? Number(object.code) : 0,
+      statementTypes: Array.isArray(object?.statementTypes) ? object.statementTypes.map((e: any) => String(e)) : [],
       affectedRows: isSet(object.affectedRows) ? Number(object.affectedRows) : 0,
+      changedResources: isSet(object.changedResources) ? ChangedResources.fromJSON(object.changedResources) : undefined,
     };
   },
 
   toJSON(message: PlanCheckRun_Result_SqlSummaryReport): unknown {
     const obj: any = {};
-    message.statementType !== undefined && (obj.statementType = message.statementType);
+    message.code !== undefined && (obj.code = Math.round(message.code));
+    if (message.statementTypes) {
+      obj.statementTypes = message.statementTypes.map((e) => e);
+    } else {
+      obj.statementTypes = [];
+    }
     message.affectedRows !== undefined && (obj.affectedRows = Math.round(message.affectedRows));
+    message.changedResources !== undefined &&
+      (obj.changedResources = message.changedResources ? ChangedResources.toJSON(message.changedResources) : undefined);
     return obj;
   },
 
@@ -3299,14 +3413,18 @@ export const PlanCheckRun_Result_SqlSummaryReport = {
 
   fromPartial(object: DeepPartial<PlanCheckRun_Result_SqlSummaryReport>): PlanCheckRun_Result_SqlSummaryReport {
     const message = createBasePlanCheckRun_Result_SqlSummaryReport();
-    message.statementType = object.statementType ?? "";
+    message.code = object.code ?? 0;
+    message.statementTypes = object.statementTypes?.map((e) => e) || [];
     message.affectedRows = object.affectedRows ?? 0;
+    message.changedResources = (object.changedResources !== undefined && object.changedResources !== null)
+      ? ChangedResources.fromPartial(object.changedResources)
+      : undefined;
     return message;
   },
 };
 
 function createBasePlanCheckRun_Result_SqlReviewReport(): PlanCheckRun_Result_SqlReviewReport {
-  return { line: 0, detail: "", code: 0 };
+  return { line: 0, column: 0, detail: "", code: 0 };
 }
 
 export const PlanCheckRun_Result_SqlReviewReport = {
@@ -3314,11 +3432,14 @@ export const PlanCheckRun_Result_SqlReviewReport = {
     if (message.line !== 0) {
       writer.uint32(8).int64(message.line);
     }
+    if (message.column !== 0) {
+      writer.uint32(16).int64(message.column);
+    }
     if (message.detail !== "") {
-      writer.uint32(18).string(message.detail);
+      writer.uint32(26).string(message.detail);
     }
     if (message.code !== 0) {
-      writer.uint32(24).int64(message.code);
+      writer.uint32(32).int64(message.code);
     }
     return writer;
   },
@@ -3338,14 +3459,21 @@ export const PlanCheckRun_Result_SqlReviewReport = {
           message.line = longToNumber(reader.int64() as Long);
           continue;
         case 2:
-          if (tag !== 18) {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.column = longToNumber(reader.int64() as Long);
+          continue;
+        case 3:
+          if (tag !== 26) {
             break;
           }
 
           message.detail = reader.string();
           continue;
-        case 3:
-          if (tag !== 24) {
+        case 4:
+          if (tag !== 32) {
             break;
           }
 
@@ -3363,6 +3491,7 @@ export const PlanCheckRun_Result_SqlReviewReport = {
   fromJSON(object: any): PlanCheckRun_Result_SqlReviewReport {
     return {
       line: isSet(object.line) ? Number(object.line) : 0,
+      column: isSet(object.column) ? Number(object.column) : 0,
       detail: isSet(object.detail) ? String(object.detail) : "",
       code: isSet(object.code) ? Number(object.code) : 0,
     };
@@ -3371,6 +3500,7 @@ export const PlanCheckRun_Result_SqlReviewReport = {
   toJSON(message: PlanCheckRun_Result_SqlReviewReport): unknown {
     const obj: any = {};
     message.line !== undefined && (obj.line = Math.round(message.line));
+    message.column !== undefined && (obj.column = Math.round(message.column));
     message.detail !== undefined && (obj.detail = message.detail);
     message.code !== undefined && (obj.code = Math.round(message.code));
     return obj;
@@ -3383,6 +3513,7 @@ export const PlanCheckRun_Result_SqlReviewReport = {
   fromPartial(object: DeepPartial<PlanCheckRun_Result_SqlReviewReport>): PlanCheckRun_Result_SqlReviewReport {
     const message = createBasePlanCheckRun_Result_SqlReviewReport();
     message.line = object.line ?? 0;
+    message.column = object.column ?? 0;
     message.detail = object.detail ?? "";
     message.code = object.code ?? 0;
     return message;
@@ -3981,6 +4112,7 @@ function createBaseTask(): Task {
     title: "",
     specId: "",
     status: 0,
+    skippedReason: "",
     type: 0,
     blockedByTasks: [],
     target: "",
@@ -4005,37 +4137,40 @@ export const Task = {
       writer.uint32(26).string(message.title);
     }
     if (message.specId !== "") {
-      writer.uint32(98).string(message.specId);
+      writer.uint32(34).string(message.specId);
     }
     if (message.status !== 0) {
-      writer.uint32(104).int32(message.status);
+      writer.uint32(40).int32(message.status);
+    }
+    if (message.skippedReason !== "") {
+      writer.uint32(122).string(message.skippedReason);
     }
     if (message.type !== 0) {
-      writer.uint32(32).int32(message.type);
+      writer.uint32(48).int32(message.type);
     }
     for (const v of message.blockedByTasks) {
-      writer.uint32(42).string(v!);
+      writer.uint32(58).string(v!);
     }
     if (message.target !== "") {
-      writer.uint32(50).string(message.target);
+      writer.uint32(66).string(message.target);
     }
     if (message.databaseCreate !== undefined) {
-      Task_DatabaseCreate.encode(message.databaseCreate, writer.uint32(58).fork()).ldelim();
+      Task_DatabaseCreate.encode(message.databaseCreate, writer.uint32(74).fork()).ldelim();
     }
     if (message.databaseSchemaBaseline !== undefined) {
-      Task_DatabaseSchemaBaseline.encode(message.databaseSchemaBaseline, writer.uint32(66).fork()).ldelim();
+      Task_DatabaseSchemaBaseline.encode(message.databaseSchemaBaseline, writer.uint32(82).fork()).ldelim();
     }
     if (message.databaseSchemaUpdate !== undefined) {
-      Task_DatabaseSchemaUpdate.encode(message.databaseSchemaUpdate, writer.uint32(74).fork()).ldelim();
+      Task_DatabaseSchemaUpdate.encode(message.databaseSchemaUpdate, writer.uint32(90).fork()).ldelim();
     }
     if (message.databaseDataUpdate !== undefined) {
-      Task_DatabaseDataUpdate.encode(message.databaseDataUpdate, writer.uint32(82).fork()).ldelim();
+      Task_DatabaseDataUpdate.encode(message.databaseDataUpdate, writer.uint32(98).fork()).ldelim();
     }
     if (message.databaseBackup !== undefined) {
-      Task_DatabaseBackup.encode(message.databaseBackup, writer.uint32(114).fork()).ldelim();
+      Task_DatabaseBackup.encode(message.databaseBackup, writer.uint32(106).fork()).ldelim();
     }
     if (message.databaseRestoreRestore !== undefined) {
-      Task_DatabaseRestoreRestore.encode(message.databaseRestoreRestore, writer.uint32(90).fork()).ldelim();
+      Task_DatabaseRestoreRestore.encode(message.databaseRestoreRestore, writer.uint32(114).fork()).ldelim();
     }
     return writer;
   },
@@ -4068,78 +4203,85 @@ export const Task = {
 
           message.title = reader.string();
           continue;
-        case 12:
-          if (tag !== 98) {
+        case 4:
+          if (tag !== 34) {
             break;
           }
 
           message.specId = reader.string();
           continue;
-        case 13:
-          if (tag !== 104) {
+        case 5:
+          if (tag !== 40) {
             break;
           }
 
           message.status = reader.int32() as any;
           continue;
-        case 4:
-          if (tag !== 32) {
+        case 15:
+          if (tag !== 122) {
+            break;
+          }
+
+          message.skippedReason = reader.string();
+          continue;
+        case 6:
+          if (tag !== 48) {
             break;
           }
 
           message.type = reader.int32() as any;
-          continue;
-        case 5:
-          if (tag !== 42) {
-            break;
-          }
-
-          message.blockedByTasks.push(reader.string());
-          continue;
-        case 6:
-          if (tag !== 50) {
-            break;
-          }
-
-          message.target = reader.string();
           continue;
         case 7:
           if (tag !== 58) {
             break;
           }
 
-          message.databaseCreate = Task_DatabaseCreate.decode(reader, reader.uint32());
+          message.blockedByTasks.push(reader.string());
           continue;
         case 8:
           if (tag !== 66) {
             break;
           }
 
-          message.databaseSchemaBaseline = Task_DatabaseSchemaBaseline.decode(reader, reader.uint32());
+          message.target = reader.string();
           continue;
         case 9:
           if (tag !== 74) {
             break;
           }
 
-          message.databaseSchemaUpdate = Task_DatabaseSchemaUpdate.decode(reader, reader.uint32());
+          message.databaseCreate = Task_DatabaseCreate.decode(reader, reader.uint32());
           continue;
         case 10:
           if (tag !== 82) {
             break;
           }
 
+          message.databaseSchemaBaseline = Task_DatabaseSchemaBaseline.decode(reader, reader.uint32());
+          continue;
+        case 11:
+          if (tag !== 90) {
+            break;
+          }
+
+          message.databaseSchemaUpdate = Task_DatabaseSchemaUpdate.decode(reader, reader.uint32());
+          continue;
+        case 12:
+          if (tag !== 98) {
+            break;
+          }
+
           message.databaseDataUpdate = Task_DatabaseDataUpdate.decode(reader, reader.uint32());
           continue;
-        case 14:
-          if (tag !== 114) {
+        case 13:
+          if (tag !== 106) {
             break;
           }
 
           message.databaseBackup = Task_DatabaseBackup.decode(reader, reader.uint32());
           continue;
-        case 11:
-          if (tag !== 90) {
+        case 14:
+          if (tag !== 114) {
             break;
           }
 
@@ -4161,6 +4303,7 @@ export const Task = {
       title: isSet(object.title) ? String(object.title) : "",
       specId: isSet(object.specId) ? String(object.specId) : "",
       status: isSet(object.status) ? task_StatusFromJSON(object.status) : 0,
+      skippedReason: isSet(object.skippedReason) ? String(object.skippedReason) : "",
       type: isSet(object.type) ? task_TypeFromJSON(object.type) : 0,
       blockedByTasks: Array.isArray(object?.blockedByTasks) ? object.blockedByTasks.map((e: any) => String(e)) : [],
       target: isSet(object.target) ? String(object.target) : "",
@@ -4188,6 +4331,7 @@ export const Task = {
     message.title !== undefined && (obj.title = message.title);
     message.specId !== undefined && (obj.specId = message.specId);
     message.status !== undefined && (obj.status = task_StatusToJSON(message.status));
+    message.skippedReason !== undefined && (obj.skippedReason = message.skippedReason);
     message.type !== undefined && (obj.type = task_TypeToJSON(message.type));
     if (message.blockedByTasks) {
       obj.blockedByTasks = message.blockedByTasks.map((e) => e);
@@ -4225,6 +4369,7 @@ export const Task = {
     message.title = object.title ?? "";
     message.specId = object.specId ?? "";
     message.status = object.status ?? 0;
+    message.skippedReason = object.skippedReason ?? "";
     message.type = object.type ?? 0;
     message.blockedByTasks = object.blockedByTasks?.map((e) => e) || [];
     message.target = object.target ?? "";
@@ -4253,7 +4398,16 @@ export const Task = {
 };
 
 function createBaseTask_DatabaseCreate(): Task_DatabaseCreate {
-  return { project: "", database: "", table: "", sheet: "", characterSet: "", collation: "", labels: {} };
+  return {
+    project: "",
+    database: "",
+    table: "",
+    sheet: "",
+    characterSet: "",
+    collation: "",
+    environment: "",
+    labels: {},
+  };
 }
 
 export const Task_DatabaseCreate = {
@@ -4276,8 +4430,11 @@ export const Task_DatabaseCreate = {
     if (message.collation !== "") {
       writer.uint32(50).string(message.collation);
     }
+    if (message.environment !== "") {
+      writer.uint32(58).string(message.environment);
+    }
     Object.entries(message.labels).forEach(([key, value]) => {
-      Task_DatabaseCreate_LabelsEntry.encode({ key: key as any, value }, writer.uint32(58).fork()).ldelim();
+      Task_DatabaseCreate_LabelsEntry.encode({ key: key as any, value }, writer.uint32(66).fork()).ldelim();
     });
     return writer;
   },
@@ -4336,9 +4493,16 @@ export const Task_DatabaseCreate = {
             break;
           }
 
-          const entry7 = Task_DatabaseCreate_LabelsEntry.decode(reader, reader.uint32());
-          if (entry7.value !== undefined) {
-            message.labels[entry7.key] = entry7.value;
+          message.environment = reader.string();
+          continue;
+        case 8:
+          if (tag !== 66) {
+            break;
+          }
+
+          const entry8 = Task_DatabaseCreate_LabelsEntry.decode(reader, reader.uint32());
+          if (entry8.value !== undefined) {
+            message.labels[entry8.key] = entry8.value;
           }
           continue;
       }
@@ -4358,6 +4522,7 @@ export const Task_DatabaseCreate = {
       sheet: isSet(object.sheet) ? String(object.sheet) : "",
       characterSet: isSet(object.characterSet) ? String(object.characterSet) : "",
       collation: isSet(object.collation) ? String(object.collation) : "",
+      environment: isSet(object.environment) ? String(object.environment) : "",
       labels: isObject(object.labels)
         ? Object.entries(object.labels).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
@@ -4375,6 +4540,7 @@ export const Task_DatabaseCreate = {
     message.sheet !== undefined && (obj.sheet = message.sheet);
     message.characterSet !== undefined && (obj.characterSet = message.characterSet);
     message.collation !== undefined && (obj.collation = message.collation);
+    message.environment !== undefined && (obj.environment = message.environment);
     obj.labels = {};
     if (message.labels) {
       Object.entries(message.labels).forEach(([k, v]) => {
@@ -4396,6 +4562,7 @@ export const Task_DatabaseCreate = {
     message.sheet = object.sheet ?? "";
     message.characterSet = object.characterSet ?? "";
     message.collation = object.collation ?? "";
+    message.environment = object.environment ?? "";
     message.labels = Object.entries(object.labels ?? {}).reduce<{ [key: string]: string }>((acc, [key, value]) => {
       if (value !== undefined) {
         acc[key] = String(value);

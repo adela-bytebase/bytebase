@@ -14,12 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/durationpb"
-
-	"github.com/pkg/errors"
 
 	"github.com/bytebase/bytebase/backend/common/log"
 	"github.com/bytebase/bytebase/backend/plugin/db"
@@ -28,9 +27,7 @@ import (
 	v1pb "github.com/bytebase/bytebase/proto/generated-go/v1"
 )
 
-var (
-	_ db.Driver = (*Driver)(nil)
-)
+var _ db.Driver = (*Driver)(nil)
 
 func init() {
 	db.Register(db.MongoDB, newDriver)
@@ -91,7 +88,7 @@ func (*Driver) GetDB() *sql.DB {
 }
 
 // Execute executes a statement, always returns 0 as the number of rows affected because we execute the statement by mongosh, it's hard to catch the row effected number.
-func (driver *Driver) Execute(_ context.Context, statement string, _ bool, _ db.ExecuteOptions) (int64, error) {
+func (driver *Driver) Execute(ctx context.Context, statement string, _ bool, _ db.ExecuteOptions) (int64, error) {
 	connectionURI := getMongoDBConnectionURI(driver.connCfg)
 	// For MongoDB, we execute the statement in mongosh, which is a shell for MongoDB.
 	// There are some ways to execute the statement in mongosh:
@@ -122,8 +119,7 @@ func (driver *Driver) Execute(_ context.Context, statement string, _ bool, _ db.
 		"--file",
 		tempFile.Name(),
 	}
-	// We don't use the CommandContext here because the statement may take a long time to execute.
-	mongoshCmd := exec.Command(mongoutil.GetMongoshPath(driver.dbBinDir), mongoshArgs...)
+	mongoshCmd := exec.CommandContext(ctx, mongoutil.GetMongoshPath(driver.dbBinDir), mongoshArgs...)
 	var errContent bytes.Buffer
 	mongoshCmd.Stderr = &errContent
 	if err := mongoshCmd.Run(); err != nil {
@@ -174,7 +170,7 @@ func getMongoDBConnectionURI(connConfig db.ConnectionConfig) string {
 }
 
 // QueryConn queries a SQL statement in a given connection.
-func (driver *Driver) QueryConn(ctx context.Context, _ *sql.Conn, statement string, _ *db.QueryContext) ([]*v1pb.QueryResult, error) {
+func (driver *Driver) QueryConn(ctx context.Context, _ *sql.Conn, statement string, queryContext *db.QueryContext) ([]*v1pb.QueryResult, error) {
 	simpleStatement := false
 	if _, err := parser.ParseMongo(statement); err == nil {
 		simpleStatement = true
@@ -187,7 +183,11 @@ func (driver *Driver) QueryConn(ctx context.Context, _ *sql.Conn, statement stri
 
 	evalArg := statement
 	if simpleStatement {
-		evalArg = fmt.Sprintf("a = %s; if (typeof a.toArray === 'function') {EJSON.stringify(a.toArray())} else {EJSON.stringify(a)}", strings.TrimRight(statement, " \t\n\r\f;"))
+		limit := ""
+		if queryContext.Limit > 0 {
+			limit = fmt.Sprintf(".slice(0, %d)", queryContext.Limit)
+		}
+		evalArg = fmt.Sprintf("a = %s; if (typeof a.toArray === 'function') {print(EJSON.stringify(a.toArray()%s))} else {print(EJSON.stringify(a))}", strings.TrimRight(statement, " \t\n\r\f;"), limit)
 	}
 	mongoshArgs := []string{
 		connectionURI,
@@ -244,18 +244,46 @@ func getSimpleStatementResult(data []byte) (*v1pb.QueryResult, error) {
 	}
 
 	result := &v1pb.QueryResult{
-		ColumnNames:     []string{"result"},
-		ColumnTypeNames: []string{"TEXT"},
+		ColumnNames:     []string{"_id", "result"},
+		ColumnTypeNames: []string{"TEXT", "TEXT"},
 	}
 	for _, v := range rows {
+		id := ""
+		m, ok := v.(map[string]any)
+		if ok {
+			// Flatten "_id" object.
+			idObj, ok := m["_id"]
+			if ok {
+				objIDObj, ok := idObj.(map[string]any)
+				if ok {
+					idStr, ok := objIDObj["$oid"].(string)
+					if ok {
+						id = idStr
+					}
+				}
+				if id == "" {
+					r, err := json.MarshalIndent(idObj, "", "	")
+					if err != nil {
+						return nil, err
+					}
+					id = string(r)
+				}
+			}
+
+			// Remove "_id" from result.
+			delete(m, "_id")
+			v = m
+		}
+
 		r, err := json.MarshalIndent(v, "", "	")
 		if err != nil {
 			return nil, err
 		}
 		result.Rows = append(result.Rows, &v1pb.QueryRow{
-			Values: []*v1pb.RowValue{{
-				Kind: &v1pb.RowValue_StringValue{StringValue: string(r)},
-			}},
+			Values: []*v1pb.RowValue{
+				{Kind: &v1pb.RowValue_StringValue{StringValue: id}},
+				{Kind: &v1pb.RowValue_StringValue{StringValue: string(r)}},
+			},
 		})
 	}
 	return result, nil

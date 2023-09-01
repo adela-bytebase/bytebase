@@ -1,10 +1,10 @@
-import { computed } from "vue";
 import { cloneDeep, isNaN, isNumber } from "lodash-es";
-import { useRoute } from "vue-router";
 import { v4 as uuidv4 } from "uuid";
-import { t } from "@/plugins/i18n";
-
+import { computed } from "vue";
+import { useRoute } from "vue-router";
 import formatSQL from "@/components/MonacoEditor/sqlFormatter";
+import { t } from "@/plugins/i18n";
+import { maybeApplyRollbackParams } from "@/plugins/issue/logic/initialize/standard";
 import {
   useCurrentUserV1,
   useDatabaseV1Store,
@@ -32,23 +32,22 @@ import {
   languageOfEngineV1,
   dialectOfEngineV1,
 } from "@/types";
-import { IssueLogic, useIssueLogic } from "./index";
-import {
-  defer,
-  extractUserUID,
-  getBacktracePayloadWithIssue,
-  hasWorkspacePermissionV1,
-  isDev,
-  isTaskTriggeredByVCS,
-  taskCheckRunSummary,
-} from "@/utils";
-import { maybeApplyRollbackParams } from "@/plugins/issue/logic/initialize/standard";
+import { IssuePayload } from "@/types/proto/store/issue";
 import {
   Sheet_Visibility,
   Sheet_Source,
   Sheet_Type,
 } from "@/types/proto/v1/sheet_service";
-import { IssuePayload } from "@/types/proto/store/issue";
+import {
+  defer,
+  extractSheetUID,
+  extractUserUID,
+  hasWorkspacePermissionV1,
+  isDev,
+  isTaskTriggeredByVCS,
+  taskCheckRunSummary,
+} from "@/utils";
+import { IssueLogic, useIssueLogic } from "./index";
 
 export const useCommonLogic = () => {
   const {
@@ -244,13 +243,10 @@ export const useCommonLogic = () => {
         visibility: Sheet_Visibility.VISIBILITY_PROJECT,
         source: Sheet_Source.SOURCE_BYTEBASE_ARTIFACT,
         type: Sheet_Type.TYPE_SQL,
-        payload: JSON.stringify(
-          getBacktracePayloadWithIssue(issue.value as Issue)
-        ),
       });
 
       const patchRequestList = patchingTaskList.map((task) => {
-        patchTask(task.id, { sheetId: sheetV1Store.getSheetUid(sheet.name) });
+        patchTask(task.id, { sheetId: Number(extractSheetUID(sheet.name)) });
       });
       await Promise.allSettled(patchRequestList);
     }
@@ -294,7 +290,7 @@ export const useCommonLogic = () => {
           type: Sheet_Type.TYPE_SQL,
           payload: "{}",
         });
-        migrationDetail.sheetId = sheetV1Store.getSheetUid(sheet.name);
+        migrationDetail.sheetId = Number(extractSheetUID(sheet.name));
       } else if (taskCreate.sheetId !== UNKNOWN_ID) {
         const sheetName = `${db.project}/sheets/${taskCreate.sheetId}`;
         const sheet = await sheetV1Store.getOrFetchSheetByName(sheetName);

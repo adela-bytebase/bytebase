@@ -21,7 +21,6 @@ type MySQLParseResult struct {
 
 // ParseMySQL parses the given SQL statement and returns the AST.
 func ParseMySQL(statement string) ([]*MySQLParseResult, error) {
-	statement = strings.TrimRight(statement, " \r\n\t\f;") + "\n;"
 	var err error
 	statement, err = DealWithDelimiter(statement)
 	if err != nil {
@@ -341,6 +340,30 @@ func parseSingleStatement(statement string) (antlr.Tree, *antlr.CommonTokenStrea
 	return tree, stream, nil
 }
 
+func mysqlAddSemicolonIfNeeded(sql string) string {
+	lexer := parser.NewMySQLLexer(antlr.NewInputStream(sql))
+	stream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
+	stream.Fill()
+	tokens := stream.GetAllTokens()
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if tokens[i].GetChannel() != antlr.TokenDefaultChannel || tokens[i].GetTokenType() == parser.MySQLParserEOF {
+			continue
+		}
+
+		// The last default channel token is a semicolon.
+		if tokens[i].GetTokenType() == parser.MySQLParserSEMICOLON_SYMBOL {
+			return sql
+		}
+
+		var result []string
+		result = append(result, stream.GetTextFromInterval(antlr.NewInterval(0, tokens[i].GetTokenIndex())))
+		result = append(result, ";")
+		result = append(result, stream.GetTextFromInterval(antlr.NewInterval(tokens[i].GetTokenIndex()+1, tokens[len(tokens)-1].GetTokenIndex())))
+		return strings.Join(result, "")
+	}
+	return sql
+}
+
 func parseInputStream(input *antlr.InputStream) ([]*MySQLParseResult, error) {
 	var result []*MySQLParseResult
 	lexer := parser.NewMySQLLexer(input)
@@ -349,6 +372,10 @@ func parseInputStream(input *antlr.InputStream) ([]*MySQLParseResult, error) {
 	list, err := splitMySQLStatement(stream)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(list) > 0 {
+		list[len(list)-1].Text = mysqlAddSemicolonIfNeeded(list[len(list)-1].Text)
 	}
 
 	for _, s := range list {
@@ -375,7 +402,7 @@ func MySQLValidateForEditor(tree antlr.Tree) error {
 
 	antlr.ParseTreeWalkerDefault.Walk(l, tree)
 	if !l.validate {
-		return errors.New("Malformed sql execute request, only support SELECT sql statement")
+		return errors.New("only support SELECT sql statement")
 	}
 	return nil
 }
@@ -411,6 +438,111 @@ func (l *mysqlValidateForEditorListener) EnterUtilityStatement(ctx *parser.Utili
 func (l *mysqlValidateForEditorListener) EnterExplainableStatement(ctx *parser.ExplainableStatementContext) {
 	if ctx.DeleteStatement() != nil || ctx.UpdateStatement() != nil || ctx.InsertStatement() != nil || ctx.ReplaceStatement() != nil {
 		l.validate = false
+	}
+}
+
+func extractMySQLChangedResources(currentDatabase string, statement string) ([]SchemaResource, error) {
+	treeList, err := ParseMySQL(statement)
+	if err != nil {
+		return nil, err
+	}
+
+	l := &mysqlChangedResourceExtractListener{
+		currentDatabase: currentDatabase,
+		resourceMap:     make(map[string]SchemaResource),
+	}
+
+	var result []SchemaResource
+	for _, tree := range treeList {
+		if tree.Tree == nil {
+			continue
+		}
+		antlr.ParseTreeWalkerDefault.Walk(l, tree.Tree)
+	}
+
+	for _, resource := range l.resourceMap {
+		result = append(result, resource)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].String() < result[j].String()
+	})
+	return result, nil
+}
+
+type mysqlChangedResourceExtractListener struct {
+	*parser.BaseMySQLParserListener
+
+	currentDatabase string
+	resourceMap     map[string]SchemaResource
+}
+
+// EnterCreateTable is called when production createTable is entered.
+func (l *mysqlChangedResourceExtractListener) EnterCreateTable(ctx *parser.CreateTableContext) {
+	resource := SchemaResource{
+		Database: l.currentDatabase,
+	}
+	db, table := NormalizeMySQLTableName(ctx.TableName())
+	if db != "" {
+		resource.Database = db
+	}
+	resource.Table = table
+	l.resourceMap[resource.String()] = resource
+}
+
+// EnterDropTable is called when production dropTable is entered.
+func (l *mysqlChangedResourceExtractListener) EnterDropTable(ctx *parser.DropTableContext) {
+	for _, table := range ctx.TableRefList().AllTableRef() {
+		resource := SchemaResource{
+			Database: l.currentDatabase,
+		}
+		db, table := NormalizeMySQLTableRef(table)
+		if db != "" {
+			resource.Database = db
+		}
+		resource.Table = table
+		l.resourceMap[resource.String()] = resource
+	}
+}
+
+// EnterAlterTable is called when production alterTable is entered.
+func (l *mysqlChangedResourceExtractListener) EnterAlterTable(ctx *parser.AlterTableContext) {
+	resource := SchemaResource{
+		Database: l.currentDatabase,
+	}
+	db, table := NormalizeMySQLTableRef(ctx.TableRef())
+	if db != "" {
+		resource.Database = db
+	}
+	resource.Table = table
+	l.resourceMap[resource.String()] = resource
+}
+
+// EnterRenameTableStatement is called when production renameTableStatement is entered.
+func (l *mysqlChangedResourceExtractListener) EnterRenameTableStatement(ctx *parser.RenameTableStatementContext) {
+	for _, pair := range ctx.AllRenamePair() {
+		{
+			resource := SchemaResource{
+				Database: l.currentDatabase,
+			}
+			db, table := NormalizeMySQLTableRef(pair.TableRef())
+			if db != "" {
+				resource.Database = db
+			}
+			resource.Table = table
+			l.resourceMap[resource.String()] = resource
+		}
+		{
+			resource := SchemaResource{
+				Database: l.currentDatabase,
+			}
+			db, table := NormalizeMySQLTableName(pair.TableName())
+			if db != "" {
+				resource.Database = db
+			}
+			resource.Table = table
+			l.resourceMap[resource.String()] = resource
+		}
 	}
 }
 

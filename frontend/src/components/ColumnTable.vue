@@ -7,7 +7,7 @@
     :right-bordered="true"
     v-bind="$attrs"
   >
-    <template #body="{ rowData: column }">
+    <template #body="{ rowData: column }: { rowData: ColumnMetadata }">
       <BBTableCell
         v-if="showSensitiveColumn"
         :left-padding="4"
@@ -35,8 +35,17 @@
           />
         </div>
       </BBTableCell>
-      <BBTableCell class="w-16" :left-padding="showSensitiveColumn ? 2 : 4">
+      <BBTableCell class="w-14" :left-padding="showSensitiveColumn ? 2 : 4">
         {{ column.name }}
+      </BBTableCell>
+      <BBTableCell v-if="showClassificationColumn" class="w-10">
+        {{ getColumnClassification(column.classification)?.title }}
+        <span
+          v-if="getColumnSensitiveLevel(column.classification)?.sensitive"
+          class="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-red-100 text-red-800"
+        >
+          {{ $t("database.sensitive") }}
+        </span>
       </BBTableCell>
       <BBTableCell class="w-8">
         {{ column.type }}
@@ -81,18 +90,15 @@
 import { cloneDeep } from "lodash-es";
 import { computed, PropType, reactive } from "vue";
 import { useI18n } from "vue-i18n";
-import { Column, ComposedDatabase } from "@/types";
-import { ColumnMetadata, TableMetadata } from "@/types/proto/store/database";
-import { useCurrentUserV1, useSubscriptionV1Store } from "@/store";
-import { hasWorkspacePermissionV1 } from "@/utils";
 import { BBTableColumn } from "@/bbkit/types";
+import { useCurrentUserV1, useSubscriptionV1Store } from "@/store";
 import { usePolicyV1Store } from "@/store/modules/v1/policy";
-import {
-  PolicyType,
-  SensitiveData,
-  SensitiveDataMaskType,
-} from "@/types/proto/v1/org_policy_service";
-import { Engine } from "@/types/proto/v1/common";
+import { ComposedDatabase } from "@/types";
+import { ColumnMetadata, TableMetadata } from "@/types/proto/store/database";
+import { Engine, MaskingLevel } from "@/types/proto/v1/common";
+import { PolicyType, MaskData } from "@/types/proto/v1/org_policy_service";
+import { DataClassificationSetting_DataClassificationConfig } from "@/types/proto/v1/setting_service";
+import { hasWorkspacePermissionV1 } from "@/utils";
 
 type LocalState = {
   showFeatureModal: boolean;
@@ -115,9 +121,16 @@ const props = defineProps({
     required: true,
     type: Object as PropType<ColumnMetadata[]>,
   },
-  sensitiveDataList: {
+  maskDataList: {
     required: true,
-    type: Array as PropType<SensitiveData[]>,
+    type: Array as PropType<MaskData[]>,
+  },
+  classificationConfig: {
+    required: false,
+    default: undefined,
+    type: Object as PropType<
+      DataClassificationSetting_DataClassificationConfig | undefined
+    >,
   },
 });
 
@@ -148,8 +161,14 @@ const showSensitiveColumn = computed(() => {
       engine.value === Engine.POSTGRES ||
       engine.value === Engine.REDSHIFT ||
       engine.value === Engine.ORACLE ||
-      engine.value === Engine.SNOWFLAKE)
+      engine.value === Engine.SNOWFLAKE ||
+      engine.value === Engine.MSSQL ||
+      engine.value === Engine.RISINGWAVE)
   );
+});
+
+const showClassificationColumn = computed(() => {
+  return engine.value === Engine.MYSQL || engine.value === Engine.POSTGRES;
 });
 
 const currentUserV1 = useCurrentUserV1();
@@ -200,6 +219,11 @@ const NORMAL_COLUMN_LIST = computed(() => {
       nowrap: true,
     });
   }
+  if (showClassificationColumn.value) {
+    columnList.splice(showSensitiveColumn.value ? 2 : 1, 0, {
+      title: t("database.classification.self"),
+    });
+  }
   return columnList;
 });
 const POSTGRES_COLUMN_LIST = computed(() => {
@@ -228,6 +252,11 @@ const POSTGRES_COLUMN_LIST = computed(() => {
       title: t("database.sensitive"),
       center: true,
       nowrap: true,
+    });
+  }
+  if (showClassificationColumn.value) {
+    columnList.splice(showSensitiveColumn.value ? 2 : 1, 0, {
+      title: t("database.classification.self"),
     });
   }
   return columnList;
@@ -262,9 +291,9 @@ const columnNameList = computed(() => {
   }
 });
 
-const isSensitiveColumn = (column: Column) => {
+const isSensitiveColumn = (column: ColumnMetadata) => {
   return (
-    props.sensitiveDataList.findIndex((sensitiveData) => {
+    props.maskDataList.findIndex((sensitiveData) => {
       return (
         sensitiveData.table === props.table.name &&
         sensitiveData.column === column.name
@@ -273,7 +302,11 @@ const isSensitiveColumn = (column: Column) => {
   );
 };
 
-const toggleSensitiveColumn = (column: Column, on: boolean, e: Event) => {
+const toggleSensitiveColumn = (
+  column: ColumnMetadata,
+  on: boolean,
+  e: Event
+) => {
   if (!hasSensitiveDataFeature.value || instanceMissingLicense.value) {
     state.showFeatureModal = true;
 
@@ -284,34 +317,52 @@ const toggleSensitiveColumn = (column: Column, on: boolean, e: Event) => {
     return;
   }
 
-  const index = props.sensitiveDataList.findIndex((sensitiveData) => {
+  const index = props.maskDataList.findIndex((sensitiveData) => {
     return (
       sensitiveData.table === props.table.name &&
       sensitiveData.column === column.name
     );
   });
-  const sensitiveDataList = cloneDeep(props.sensitiveDataList);
+  const maskDataList = cloneDeep(props.maskDataList);
   if (on && index < 0) {
     // Turn on sensitive
-    sensitiveDataList.push({
+    maskDataList.push({
       schema: props.schema,
       table: props.table.name,
       column: column.name,
-      maskType: SensitiveDataMaskType.DEFAULT,
+      semanticCategoryId: "",
+      maskingLevel: MaskingLevel.FULL,
     });
   } else if (!on && index >= 0) {
-    sensitiveDataList.splice(index, 1);
+    maskDataList.splice(index, 1);
   }
 
   usePolicyV1Store().upsertPolicy({
     parentPath: props.database.name,
     policy: {
-      type: PolicyType.SENSITIVE_DATA,
-      sensitiveDataPolicy: {
-        sensitiveData: sensitiveDataList,
+      type: PolicyType.MASKING,
+      maskingPolicy: {
+        maskData: maskDataList,
       },
     },
     updateMask: ["payload"],
   });
+};
+
+const getColumnClassification = (classificationId: string) => {
+  if (!classificationId || !props.classificationConfig) {
+    return;
+  }
+  return props.classificationConfig.classification[classificationId];
+};
+
+const getColumnSensitiveLevel = (classificationId: string) => {
+  const classification = getColumnClassification(classificationId);
+  if (!classification) {
+    return;
+  }
+  return (props.classificationConfig?.levels ?? []).find(
+    (level) => level.id === classification.levelId
+  );
 };
 </script>

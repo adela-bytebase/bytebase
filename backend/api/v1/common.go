@@ -33,8 +33,10 @@ const (
 
 var (
 	resourceIDMatcher = regexp.MustCompile("^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$")
-	deletePatch       = true
-	undeletePatch     = false
+	// https://datatracker.ietf.org/doc/html/rfc4122#section-4.1
+	uuidMatcher   = regexp.MustCompile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+	deletePatch   = true
+	undeletePatch = false
 )
 
 func isNumber(v string) (int, bool) {
@@ -331,6 +333,8 @@ func convertToEngine(engine db.Type) v1pb.Engine {
 		return v1pb.Engine_MARIADB
 	case db.OceanBase:
 		return v1pb.Engine_OCEANBASE
+	case db.RisingWave:
+		return v1pb.Engine_RISINGWAVE
 	case db.DM:
 		return v1pb.Engine_DM
 	}
@@ -369,6 +373,8 @@ func convertEngine(engine v1pb.Engine) db.Type {
 		return db.OceanBase
 	case v1pb.Engine_DM:
 		return db.DM
+	case v1pb.Engine_RISINGWAVE:
+		return db.RisingWave
 	}
 	return db.UnknownType
 }
@@ -397,4 +403,10 @@ func unmarshalPageToken(s string, pageToken *storepb.PageToken) error {
 		return errors.Wrapf(err, "failed to unmarshal page token")
 	}
 	return nil
+}
+
+// isValidUUID validates that the id is the valid UUID format.
+// https://datatracker.ietf.org/doc/html/rfc4122#section-4.1
+func isValidUUID(id string) bool {
+	return uuidMatcher.MatchString(id)
 }

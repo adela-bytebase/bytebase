@@ -12,15 +12,14 @@
 </template>
 
 <script lang="ts" setup>
+import { last } from "lodash-es";
 import { computed } from "vue";
-
-import { TabMode } from "@/types";
 import { useCurrentUserV1, useTabStore, useWebTerminalStore } from "@/store";
+import { TabMode } from "@/types";
 import {
-  getDefaultTabNameFromConnection,
+  getSuggestedTabNameFromConnection,
   hasWorkspacePermissionV1,
 } from "@/utils";
-import { last } from "lodash-es";
 
 const emit = defineEmits<{
   (e: "enter"): void;
@@ -55,7 +54,7 @@ const enterAdminMode = () => {
   const target = {
     connection: current.connection,
     mode: TabMode.Admin,
-    name: getDefaultTabNameFromConnection(current.connection),
+    name: getSuggestedTabNameFromConnection(current.connection),
   };
   tabStore.selectOrAddSimilarTab(target, /* beside */ true);
   tabStore.updateCurrentTab({

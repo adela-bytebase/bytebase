@@ -20,6 +20,7 @@ import (
 	"github.com/bytebase/bytebase/backend/runner/schemasync"
 	"github.com/bytebase/bytebase/backend/store"
 	"github.com/bytebase/bytebase/backend/utils"
+	storepb "github.com/bytebase/bytebase/proto/generated-go/store"
 )
 
 // NewDatabaseCreateExecutor creates a database create task executor.
@@ -47,7 +48,7 @@ var cannotCreateDatabase = map[db.Type]bool{
 }
 
 // RunOnce will run the database create task executor once.
-func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.TaskMessage) (terminated bool, result *api.TaskRunResultPayload, err error) {
+func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, driverCtx context.Context, task *store.TaskMessage) (terminated bool, result *api.TaskRunResultPayload, err error) {
 	payload := &api.TaskDatabaseCreatePayload{}
 	if err := json.Unmarshal([]byte(task.Payload), payload); err != nil {
 		return true, nil, errors.Wrap(err, "invalid create database payload")
@@ -76,11 +77,6 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 
 	if cannotCreateDatabase[instance.Engine] {
 		return true, nil, errors.Errorf("Creating database is not supported")
-	}
-
-	environment, err := exec.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &instance.EnvironmentID})
-	if err != nil {
-		return true, nil, err
 	}
 
 	project, err := exec.store.GetProjectV2(ctx, &store.FindProjectMessage{UID: &payload.ProjectID})
@@ -114,9 +110,12 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 		ProjectID:            project.ResourceID,
 		InstanceID:           instance.ResourceID,
 		DatabaseName:         payload.DatabaseName,
+		EnvironmentID:        payload.EnvironmentID,
 		SyncState:            api.NotFound,
 		SuccessfulSyncTimeTs: time.Now().Unix(),
-		Labels:               labels,
+		Metadata: &storepb.DatabaseMetadata{
+			Labels: labels,
+		},
 	})
 	if err != nil {
 		return true, nil, err
@@ -143,12 +142,20 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 		}
 	}
 	defer defaultDBDriver.Close(ctx)
-	if _, err := defaultDBDriver.Execute(ctx, statement, true /* createDatabase */, db.ExecuteOptions{}); err != nil {
+	if _, err := defaultDBDriver.Execute(driverCtx, statement, true /* createDatabase */, db.ExecuteOptions{}); err != nil {
 		return true, nil, err
 	}
 
+	environmentID := instance.EnvironmentID
+	if payload.EnvironmentID != "" {
+		environmentID = payload.EnvironmentID
+	}
+	environment, err := exec.store.GetEnvironmentV2(ctx, &store.FindEnvironmentMessage{ResourceID: &environmentID})
+	if err != nil {
+		return true, nil, err
+	}
 	// We will use schema from existing tenant databases for creating a database in a tenant mode project if possible.
-	peerSchemaVersion, peerSchema, err := exec.createInitialSchema(ctx, environment, instance, project, task, database)
+	peerSchemaVersion, peerSchema, err := exec.createInitialSchema(ctx, driverCtx, environment, instance, project, task, database)
 	if err != nil {
 		return true, nil, err
 	}
@@ -211,7 +218,7 @@ func (exec *DatabaseCreateExecutor) RunOnce(ctx context.Context, task *store.Tas
 	}, nil
 }
 
-func (exec *DatabaseCreateExecutor) createInitialSchema(ctx context.Context, environment *store.EnvironmentMessage, instance *store.InstanceMessage, project *store.ProjectMessage, task *store.TaskMessage, database *store.DatabaseMessage) (string, string, error) {
+func (exec *DatabaseCreateExecutor) createInitialSchema(ctx context.Context, driverCtx context.Context, environment *store.EnvironmentMessage, instance *store.InstanceMessage, project *store.ProjectMessage, task *store.TaskMessage, database *store.DatabaseMessage) (string, string, error) {
 	if project.TenantMode != api.TenantModeTenant {
 		return "", "", nil
 	}
@@ -276,7 +283,7 @@ func (exec *DatabaseCreateExecutor) createInitialSchema(ctx context.Context, env
 		mi.IssueIDInt = &issue.UID
 	}
 
-	if _, _, err := utils.ExecuteMigrationDefault(ctx, exec.store, driver, mi, schema, nil, db.ExecuteOptions{}); err != nil {
+	if _, _, err := utils.ExecuteMigrationDefault(ctx, driverCtx, exec.store, driver, mi, schema, nil, db.ExecuteOptions{}); err != nil {
 		return "", "", err
 	}
 	return schemaVersion, schema, nil
@@ -288,7 +295,7 @@ func getConnectionStatement(dbType db.Type, databaseName string) (string, error)
 		return fmt.Sprintf("USE `%s`;\n", databaseName), nil
 	case db.MSSQL:
 		return fmt.Sprintf(`USE "%s";\n`, databaseName), nil
-	case db.Postgres:
+	case db.Postgres, db.RisingWave:
 		return fmt.Sprintf("\\connect \"%s\";\n", databaseName), nil
 	case db.ClickHouse:
 		return fmt.Sprintf("USE `%s`;\n", databaseName), nil
